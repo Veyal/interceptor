@@ -206,6 +206,9 @@ textarea.raw{width:100%;height:200px;resize:vertical;background:var(--bg);color:
       <div class="spacer"></div>
       <span class="count" title="Right-click any row to filter by host, method, status or scheme, or to copy its URL / cURL">↳ right-click a row to filter</span>
       <span class="count"><b id="rowCount">0</b> flows</span>
+      <a class="btn" id="exportHar" href="/api/export/har" download title="Export history as a HAR file">Export</a>
+      <button class="btn" id="importHarBtn" title="Import a HAR file">Import</button>
+      <input type="file" id="importHarFile" accept=".har,application/json,application/har+json" style="display:none">
       <button class="btn" id="refreshBtn">Refresh</button>
     </div>
     <div id="chips"></div>
@@ -566,6 +569,14 @@ $('#fMethod').onchange=e=>setFilter('method',e.target.value);
 $('#fStatus').onchange=e=>setFilter('status',e.target.value);
 $('#fSearch').oninput=e=>{state.filters.search=e.target.value;renderChips();scheduleReload();};
 $('#refreshBtn').onclick=loadFlows;
+$('#exportHar').onclick=()=>{$('#exportHar').href='/api/export/har'+(state.inScopeOnly?'?inScope=1':'');};
+$('#importHarBtn').onclick=()=>$('#importHarFile').click();
+$('#importHarFile').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  try{const text=await f.text();const r=await api('/api/import/har',{method:'POST',headers:{'content-type':'application/json'},body:text});
+    toast('imported '+r.imported+' flows');loadFlows();}catch(err){toast('import: '+err.message);}
+  e.target.value='';
+};
 $('#scopeToggle').onclick=()=>{state.inScopeOnly=!state.inScopeOnly;$('#scopeToggle').classList.toggle('accent',state.inScopeOnly);$('#scopeToggle').textContent=(state.inScopeOnly?'◉':'◎')+' in scope';loadFlows();};
 
 /* ---- target scope ---- */

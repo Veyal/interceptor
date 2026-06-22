@@ -7,6 +7,11 @@ each "release" is an iteration of the Conduit design (`Conduit.dc.html`).
 ## [Unreleased]
 
 ### Added
+- **HAR export & import** — `internal/harx` converts flows to/from HAR 1.2 (round-trip tested).
+  Control: `GET /api/export/har` (optionally `?inScope=1`; excludes Intruder noise) streams the
+  history as a downloadable `.har`; `POST /api/import/har` ingests a HAR, recording each entry as a
+  flow tagged `FlagImported` (bodies stored, viewable/replayable). The Proxy toolbar gains **Export**
+  and **Import** — interop with browsers, Postman, and other tools (free; some competitors gate this).
 - **Target scope** (PRD-0001) — `internal/scope`: ordered include/exclude rules over host
   (`*.acme.com` wildcard), path prefix, scheme, and port; "any include matches and no exclude
   matches" semantics (exclude wins; no rules = everything in scope). Scope focuses the tool without

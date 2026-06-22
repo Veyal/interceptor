@@ -52,6 +52,7 @@ const (
 	FlagWebSocket                      // a protocol-upgrade (WebSocket) handshake, tunneled transparently
 	FlagRepeater                       // a request sent from the Repeater module
 	FlagIntruder                       // a request sent from the Intruder module
+	FlagImported                       // a flow imported from a HAR file (not proxied)
 )
 
 // flowColumns is the canonical SELECT column order; scanFlow consumes it.
