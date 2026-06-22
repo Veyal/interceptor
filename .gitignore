@@ -1,0 +1,9 @@
+# OS / editor cruft
+.DS_Store
+*.swp
+
+# Original source archive — the extracted files are the tracked source
+Design specification_ HTTP client UI.zip
+
+# Personal, per-user Claude Code overrides
+.claude/settings.local.json

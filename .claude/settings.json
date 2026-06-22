@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/changelog-reminder.sh\"",
+            "timeout": 10,
+            "statusMessage": "Checking CHANGELOG.md is up to date"
+          }
+        ]
+      }
+    ]
+  }
+}
