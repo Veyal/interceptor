@@ -378,6 +378,7 @@ func (h *Hub) toggleIntercept(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewDecoder(r.Body).Decode(&in)
 	h.eng.SetEnabled(in.Enabled)
+	_ = h.st.SetSetting("intercept.enabled", boolToFlag(in.Enabled))
 	writeJSON(w, http.StatusOK, h.interceptState())
 }
 
@@ -528,4 +529,11 @@ func orVal(s, def string) string {
 		return def
 	}
 	return s
+}
+
+func boolToFlag(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
 }

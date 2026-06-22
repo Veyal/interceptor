@@ -1,22 +1,32 @@
-// Command interceptor runs the Interceptor HTTP proxy.
+// Command interceptor runs the Interceptor intercepting proxy: an HTTP/HTTPS
+// forward proxy plus a localhost control plane that serves the web UI.
 package main
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/Veyal/interceptor/internal/capture"
+	"github.com/Veyal/interceptor/internal/control"
+	"github.com/Veyal/interceptor/internal/intercept"
 	"github.com/Veyal/interceptor/internal/proxy"
 	"github.com/Veyal/interceptor/internal/store"
+	"github.com/Veyal/interceptor/internal/tlsca"
 )
+
+const controlAddr = "127.0.0.1:9966"
 
 func main() {
 	if err := run(); err != nil {
@@ -37,31 +47,147 @@ func run() error {
 	}
 	defer st.Close()
 
-	addr := "127.0.0.1:8080"
-	if v, ok, _ := st.GetSetting("proxy.addr"); ok && v != "" {
-		addr = v
-	}
-
-	ln, err := net.Listen("tcp", addr)
+	ca, err := tlsca.LoadOrCreate(filepath.Join(dir, "ca"))
 	if err != nil {
-		return err
+		return fmt.Errorf("certificate authority: %w", err)
 	}
 
-	srv := &http.Server{Handler: proxy.New(st, capture.New(st), nil, nil, nil)}
-	log.Printf("Interceptor proxy listening on http://%s (data: %s)", addr, dir)
+	eng := intercept.New()
+	if v, ok, _ := st.GetSetting("intercept.enabled"); ok && v == "1" {
+		eng.SetEnabled(true)
+	}
 
+	// Wiring cycle: the proxy needs the hub (events), the hub needs the proxy
+	// manager (rebind), the manager needs the proxy handler. Create the manager
+	// first, then the hub, then the proxy handler, then attach it to the manager.
+	pm := &proxyManager{}
+	hub := control.New(st, eng, ca, pm)
+	pm.handler = proxy.New(st, capture.New(st), ca, eng, hub)
+
+	proxyAddr := "127.0.0.1:8080"
+	if v, ok, _ := st.GetSetting("proxy.addr"); ok && v != "" {
+		proxyAddr = v
+	}
+	if err := pm.Start(proxyAddr); err != nil {
+		return fmt.Errorf("proxy listen on %s: %w", proxyAddr, err)
+	}
+
+	ctrlLn, err := net.Listen("tcp", controlAddr)
+	if err != nil {
+		return fmt.Errorf("control listen on %s: %w", controlAddr, err)
+	}
+	ctrlSrv := &http.Server{Handler: hub.Handler()}
 	go func() {
-		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("serve: %v", err)
+		if err := ctrlSrv.Serve(ctrlLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("control serve: %v", err)
 		}
 	}()
+
+	uiURL := "http://" + controlAddr
+	log.Printf("Interceptor: proxy on %s · UI on %s · data %s", pm.Addr(), uiURL, dir)
+	openBrowser(uiURL)
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
 
+	log.Println("shutting down…")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	log.Println("shutting down...")
-	return srv.Shutdown(ctx)
+	_ = ctrlSrv.Shutdown(ctx)
+	pm.Shutdown(ctx)
+	return nil
+}
+
+// proxyManager owns the proxy listener and supports runtime rebinding: it opens
+// the new listener before tearing down the old one, so a failed rebind leaves
+// the running proxy untouched. It implements control.Rebinder.
+type proxyManager struct {
+	handler http.Handler
+
+	mu   sync.Mutex
+	addr string
+	srv  *http.Server
+}
+
+func (m *proxyManager) serve(ln net.Listener) *http.Server {
+	srv := &http.Server{Handler: m.handler}
+	go func() {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("proxy serve: %v", err)
+		}
+	}()
+	return srv
+}
+
+// Start brings up the initial proxy listener.
+func (m *proxyManager) Start(addr string) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.addr, m.srv = addr, m.serve(ln)
+	m.mu.Unlock()
+	return nil
+}
+
+// Rebind opens a listener on addr and, only if that succeeds, swaps it in and
+// gracefully drains the old one. Returns the bind error otherwise (old kept).
+func (m *proxyManager) Rebind(addr string) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	newSrv := m.serve(ln)
+	m.mu.Lock()
+	old := m.srv
+	m.addr, m.srv = addr, newSrv
+	m.mu.Unlock()
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = old.Shutdown(ctx)
+	}()
+	log.Printf("proxy rebound to %s", addr)
+	return nil
+}
+
+// Addr reports the current proxy bind address.
+func (m *proxyManager) Addr() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.addr
+}
+
+// Shutdown gracefully stops the current proxy listener.
+func (m *proxyManager) Shutdown(ctx context.Context) {
+	m.mu.Lock()
+	srv := m.srv
+	m.mu.Unlock()
+	if srv != nil {
+		_ = srv.Shutdown(ctx)
+	}
+}
+
+// openBrowser best-effort opens url in the default browser. Set
+// INTERCEPTOR_NO_BROWSER to suppress (e.g. headless / server use).
+func openBrowser(url string) {
+	if os.Getenv("INTERCEPTOR_NO_BROWSER") != "" {
+		return
+	}
+	var cmd string
+	var args []string
+	switch runtime.GOOS {
+	case "darwin":
+		cmd, args = "open", []string{url}
+	case "windows":
+		cmd, args = "rundll32", []string{"url.dll,FileProtocolHandler", url}
+	default:
+		cmd, args = "xdg-open", []string{url}
+	}
+	if path, err := exec.LookPath(cmd); err == nil {
+		_ = exec.Command(path, args...).Start()
+	}
 }
