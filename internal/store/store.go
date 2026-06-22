@@ -151,6 +151,28 @@ func scanFlow(row scanner) (*Flow, error) {
 	return &f, nil
 }
 
+// QueryFlows returns up to limit flows, newest first.
+func (s *Store) QueryFlows(limit int) ([]*Flow, error) {
+	rows, err := s.db.Query(
+		`SELECT id, ts, method, scheme, host, port, path, http_version, status,
+		        req_headers, res_headers, req_body_hash, res_body_hash,
+		        req_len, res_len, mime, duration_ms, client_addr, error
+		 FROM flows ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Flow
+	for rows.Next() {
+		f, err := scanFlow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 // SetSetting upserts a key/value setting.
 func (s *Store) SetSetting(key, value string) error {
 	_, err := s.db.Exec(
