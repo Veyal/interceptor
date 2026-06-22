@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -154,15 +155,15 @@ func TestSetRulesRejectsBadRegex(t *testing.T) {
 func TestNotifierFires(t *testing.T) {
 	e := New()
 	e.SetEnabled(true)
-	var n int
-	e.SetNotifier(func() { n++ })
+	var n atomic.Int32
+	e.SetNotifier(func() { n.Add(1) }) // notifier may fire concurrently; must be thread-safe
 	req := newReq(t, "GET", "https://example.com/p", "")
 	go func() { e.Hold(&store.Flow{}, req, nil) }()
 	waitQueue(t, e, 1)
 	_ = e.Forward(e.Queue()[0].ID, nil)
 	time.Sleep(20 * time.Millisecond)
-	if n < 2 {
-		t.Fatalf("expected notifier to fire on hold and resolve, got %d", n)
+	if n.Load() < 2 {
+		t.Fatalf("expected notifier to fire on hold and resolve, got %d", n.Load())
 	}
 }
 

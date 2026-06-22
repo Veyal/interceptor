@@ -47,7 +47,7 @@ func run() error {
 		return err
 	}
 
-	srv := &http.Server{Handler: proxy.New(st, capture.New(st))}
+	srv := &http.Server{Handler: proxy.New(st, capture.New(st), nil, nil, nil)}
 	log.Printf("Interceptor proxy listening on http://%s (data: %s)", addr, dir)
 
 	go func() {
