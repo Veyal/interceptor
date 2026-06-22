@@ -7,3 +7,6 @@ Design specification_ HTTP client UI.zip
 
 # Personal, per-user Claude Code overrides
 .claude/settings.local.json
+
+# Compiled binary
+/interceptor
