@@ -105,8 +105,9 @@ func (s *Store) QueryFlowsFilter(f FlowFilter) ([]*Flow, error) {
 		args = append(args, f.Host)
 	}
 	if f.Search != "" {
-		where = append(where, "instr(lower(path), lower(?)) > 0")
-		args = append(args, f.Search)
+		// Match the term against method, host, or path (cheap metadata search).
+		where = append(where, "(instr(lower(path), lower(?)) > 0 OR instr(lower(host), lower(?)) > 0 OR instr(lower(method), lower(?)) > 0)")
+		args = append(args, f.Search, f.Search, f.Search)
 	}
 	if f.StatusClass >= 1 && f.StatusClass <= 5 {
 		lo := f.StatusClass * 100

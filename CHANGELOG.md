@@ -21,6 +21,8 @@ each "release" is an iteration of the Conduit design (`Conduit.dc.html`).
   editor; MCP tools `list_scope` / `add_scope_rule` (now 18 tools). Verified live.
 
 ### Changed
+- **History search** now matches **method, host, or path** (was path-only) — the toolbar search box
+  broadened accordingly. (`QueryFlowsFilter.Search`, tested.)
 - **Onboarding** — the empty Proxy history is now a "get started" card: the proxy address to point a
   client at, a one-click CA download for HTTPS, a right-click hint, and a **Connect via MCP** button
   that jumps to the setup — reducing the biggest first-run friction for the human half of the pair.

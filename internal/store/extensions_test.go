@@ -103,9 +103,15 @@ func TestQueryFlowsFilter(t *testing.T) {
 	if got, _ := s.QueryFlowsFilter(FlowFilter{Limit: 10, Scheme: "http"}); len(got) != 1 || got[0].Host != "cdn.other.com" {
 		t.Fatalf("scheme filter: %+v", got)
 	}
-	// Path search.
+	// Search matches path, host, or method.
 	if got, _ := s.QueryFlowsFilter(FlowFilter{Limit: 10, Search: "/users"}); len(got) != 2 {
-		t.Fatalf("search filter: expected 2, got %d", len(got))
+		t.Fatalf("search(path): expected 2, got %d", len(got))
+	}
+	if got, _ := s.QueryFlowsFilter(FlowFilter{Limit: 10, Search: "cdn.other"}); len(got) != 1 {
+		t.Fatalf("search(host): expected 1, got %d", len(got))
+	}
+	if got, _ := s.QueryFlowsFilter(FlowFilter{Limit: 10, Search: "POST"}); len(got) != 1 {
+		t.Fatalf("search(method): expected 1, got %d", len(got))
 	}
 	// Newest-first ordering + pagination via BeforeID.
 	all, _ := s.QueryFlowsFilter(FlowFilter{Limit: 2})
