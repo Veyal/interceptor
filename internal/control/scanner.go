@@ -17,6 +17,9 @@ func (h *Hub) scannerRun(w http.ResponseWriter, r *http.Request) {
 	}
 	var all []store.Issue
 	for _, f := range flows {
+		if !h.sc.InScope(f) { // focus the scanner on in-scope traffic only
+			continue
+		}
 		all = append(all, scanner.Analyze(f, h.bodyBytes(f.ReqBodyHash), h.bodyBytes(f.ResBodyHash))...)
 	}
 	if err := h.st.SaveIssues(all); err != nil {

@@ -18,6 +18,7 @@ import (
 	"github.com/Veyal/interceptor/internal/capture"
 	"github.com/Veyal/interceptor/internal/intercept"
 	"github.com/Veyal/interceptor/internal/intruder"
+	"github.com/Veyal/interceptor/internal/scope"
 	"github.com/Veyal/interceptor/internal/sender"
 	"github.com/Veyal/interceptor/internal/store"
 	"github.com/Veyal/interceptor/internal/tlsca"
@@ -41,6 +42,7 @@ type Hub struct {
 	rebind Rebinder
 	snd    *sender.Sender
 	intr   *intruder.Engine
+	sc     *scope.Engine
 	mux    *http.ServeMux
 
 	mu      sync.Mutex
@@ -49,18 +51,23 @@ type Hub struct {
 
 // New builds a Hub. eng, ca, and rebind may be nil. If eng is non-nil, the
 // hub registers itself as the intercept change notifier.
-func New(st *store.Store, eng *intercept.Engine, ca *tlsca.CA, rebind Rebinder) *Hub {
+func New(st *store.Store, eng *intercept.Engine, ca *tlsca.CA, rebind Rebinder, sc *scope.Engine) *Hub {
+	if sc == nil {
+		sc = scope.New()
+	}
 	h := &Hub{
 		st:      st,
 		eng:     eng,
 		ca:      ca,
 		rebind:  rebind,
+		sc:      sc,
 		snd:     sender.New(st, capture.New(st)),
 		mux:     http.NewServeMux(),
 		clients: map[chan string]struct{}{},
 	}
 	h.intr = intruder.New(h.snd)
 	h.intr.SetNotifier(func() { h.broadcast(map[string]any{"type": "intruder.update"}) })
+	h.refreshScope()
 	h.routes()
 	if eng != nil {
 		eng.SetNotifier(h.broadcastIntercept)
@@ -101,6 +108,10 @@ func (h *Hub) routes() {
 	h.mux.HandleFunc("DELETE /api/keys/{id}", h.deleteKey)
 	h.mux.HandleFunc("GET /api/reference", h.apiReference)
 	h.mux.HandleFunc("GET /api/mcp", h.apiMCP)
+	h.mux.HandleFunc("GET /api/scope", h.listScope)
+	h.mux.HandleFunc("POST /api/scope", h.createScope)
+	h.mux.HandleFunc("PUT /api/scope/{id}", h.updateScope)
+	h.mux.HandleFunc("DELETE /api/scope/{id}", h.deleteScope)
 	h.mux.HandleFunc("GET /api/events", h.handleEvents)
 	h.mux.HandleFunc("/", h.serveUI)
 }
@@ -191,8 +202,12 @@ func (h *Hub) listFlows(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	inScopeOnly := q.Get("inScope") == "1"
 	out := make([]flowJSON, 0, len(flows))
 	for _, fl := range flows {
+		if inScopeOnly && !h.sc.InScope(fl) {
+			continue
+		}
 		out = append(out, toFlowJSON(fl))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"flows": out})

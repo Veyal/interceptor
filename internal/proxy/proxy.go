@@ -29,6 +29,12 @@ type Events interface {
 	FlowCaptured(*store.Flow)
 }
 
+// ScopeChecker reports whether a flow is in the engagement's target scope.
+// When set, only in-scope requests are held by the intercept gate.
+type ScopeChecker interface {
+	InScope(*store.Flow) bool
+}
+
 // Server is the intercepting forward-proxy HTTP handler.
 type Server struct {
 	st     *store.Store
@@ -36,6 +42,7 @@ type Server struct {
 	ca     *tlsca.CA         // nil → HTTPS CONNECT returns 501
 	eng    *intercept.Engine // nil → no intercept/rules
 	events Events            // nil → no live notifications
+	Scope  ScopeChecker      // nil → everything in scope
 	tr     *http.Transport
 }
 
@@ -353,8 +360,8 @@ func (s *Server) gateAndForward(flow *store.Flow, r *http.Request) (*http.Respon
 	out.URL.Host = hostPort(flow.Host, flow.Port, flow.Scheme)
 	removeHopHeaders(out.Header)
 
-	// Intercept gate (Burp-style hold).
-	if s.eng != nil && s.eng.Enabled() {
+	// Intercept gate (Burp-style hold) — only for in-scope requests.
+	if s.eng != nil && s.eng.Enabled() && (s.Scope == nil || s.Scope.InScope(flow)) {
 		raw := dumpRequest(out)
 		flow.Flags |= store.FlagIntercepted
 		d := s.eng.Hold(flow, out, raw)

@@ -115,6 +115,17 @@ CREATE TABLE IF NOT EXISTS api_keys (
   hash TEXT NOT NULL,
   created INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS scope_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ord INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  action TEXT NOT NULL,
+  host TEXT NOT NULL DEFAULT '',
+  path TEXT NOT NULL DEFAULT '',
+  scheme TEXT NOT NULL DEFAULT '',
+  port INTEGER NOT NULL DEFAULT 0
+);
 `
 
 // Open creates (or opens) the database and body store under dir.

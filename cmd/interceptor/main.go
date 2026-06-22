@@ -23,6 +23,7 @@ import (
 	"github.com/Veyal/interceptor/internal/intercept"
 	"github.com/Veyal/interceptor/internal/mcp"
 	"github.com/Veyal/interceptor/internal/proxy"
+	"github.com/Veyal/interceptor/internal/scope"
 	"github.com/Veyal/interceptor/internal/store"
 	"github.com/Veyal/interceptor/internal/tlsca"
 )
@@ -74,9 +75,12 @@ func run() error {
 	// Wiring cycle: the proxy needs the hub (events), the hub needs the proxy
 	// manager (rebind), the manager needs the proxy handler. Create the manager
 	// first, then the hub, then the proxy handler, then attach it to the manager.
+	sc := scope.New() // one shared target-scope matcher: control owns CRUD, the proxy gate reads it
 	pm := &proxyManager{}
-	hub := control.New(st, eng, ca, pm)
-	pm.handler = proxy.New(st, capture.New(st), ca, eng, hub)
+	hub := control.New(st, eng, ca, pm, sc)
+	prx := proxy.New(st, capture.New(st), ca, eng, hub)
+	prx.Scope = sc
+	pm.handler = prx
 
 	proxyAddr := "127.0.0.1:8080"
 	if v, ok, _ := st.GetSetting("proxy.addr"); ok && v != "" {

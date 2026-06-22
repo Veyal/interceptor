@@ -6,6 +6,15 @@ each "release" is an iteration of the Conduit design (`Conduit.dc.html`).
 
 ## [Unreleased]
 
+### Added
+- **Target scope** (PRD-0001) — `internal/scope`: ordered include/exclude rules over host
+  (`*.acme.com` wildcard), path prefix, scheme, and port; "any include matches and no exclude
+  matches" semantics (exclude wins; no rules = everything in scope). Scope focuses the tool without
+  affecting capture: a **◎ in scope** toggle filters the history (`GET /api/flows?inScope=1`), the
+  **intercept gate** only holds in-scope requests, and the **scanner** only analyzes in-scope flows.
+  Control: `GET/POST/PUT/DELETE /api/scope` + SSE `scope.update`; **Settings → Target scope** rule
+  editor; MCP tools `list_scope` / `add_scope_rule` (now 18 tools). Verified live.
+
 ### Changed
 - **Onboarding** — the empty Proxy history is now a "get started" card: the proxy address to point a
   client at, a one-click CA download for HTTPS, a right-click hint, and a **Connect via MCP** button

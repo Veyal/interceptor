@@ -25,7 +25,7 @@ func newHub(t *testing.T) (*Hub, *store.Store, *intercept.Engine) {
 	}
 	t.Cleanup(func() { s.Close() })
 	eng := intercept.New()
-	h := New(s, eng, nil, nil)
+	h := New(s, eng, nil, nil, nil)
 	return h, s, eng
 }
 
@@ -230,6 +230,48 @@ func TestScannerRunFindsIssues(t *testing.T) {
 	if !foundHSTS || !foundCORS {
 		t.Fatalf("missing expected findings: hsts=%v cors=%v (%v)", foundHSTS, foundCORS, out.Issues)
 	}
+}
+
+func TestScopeFiltersHistoryAndScanner(t *testing.T) {
+	h, s, _ := newHub(t)
+	s.InsertFlow(&store.Flow{TS: time.UnixMilli(1), Method: "GET", Scheme: "https", Host: "app.acme.com", Path: "/", Status: 200})
+	s.InsertFlow(&store.Flow{TS: time.UnixMilli(2), Method: "GET", Scheme: "https", Host: "cdn.other.com", Path: "/", Status: 200})
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	// No scope yet → everything in scope.
+	if n := flowCount(t, ts.URL+"/api/flows?inScope=1"); n != 2 {
+		t.Fatalf("no scope: expected 2 in-scope, got %d", n)
+	}
+
+	// Add an include rule for *.acme.com.
+	resp, err := http.Post(ts.URL+"/api/scope", "application/json",
+		strings.NewReader(`{"action":"include","host":"*.acme.com","enabled":true}`))
+	if err != nil {
+		t.Fatalf("create scope: %v", err)
+	}
+	resp.Body.Close()
+
+	if n := flowCount(t, ts.URL+"/api/flows?inScope=1"); n != 1 {
+		t.Fatalf("with scope: expected 1 in-scope (acme), got %d", n)
+	}
+	if n := flowCount(t, ts.URL+"/api/flows"); n != 2 {
+		t.Fatalf("unfiltered history should still show all 2, got %d", n)
+	}
+}
+
+func flowCount(t *testing.T, url string) int {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Flows []map[string]any `json:"flows"`
+	}
+	json.NewDecoder(resp.Body).Decode(&out)
+	return len(out.Flows)
 }
 
 func TestSSEReceivesFlowNew(t *testing.T) {

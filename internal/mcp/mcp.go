@@ -410,6 +410,25 @@ func (s *Server) registerTools() {
 			return truncate(out, 12000), err
 		})
 
+	s.add("list_scope", "List target-scope rules (which hosts/paths are in scope).", obj(map[string]any{}),
+		func(a map[string]any) (string, error) { return s.apiGet("/api/scope") })
+
+	s.add("add_scope_rule",
+		"Add a target-scope rule. action: include | exclude. host supports a leading wildcard (e.g. *.acme.com); path is a prefix. Scope focuses the history, intercept, and scanner.",
+		obj(map[string]any{
+			"action":  p("string", "include | exclude"),
+			"host":    p("string", "host pattern, e.g. *.acme.com"),
+			"path":    p("string", "path prefix (optional)"),
+			"scheme":  p("string", "http | https (optional)"),
+			"enabled": p("boolean", "default true"),
+		}, "action"),
+		func(a map[string]any) (string, error) {
+			return s.api(http.MethodPost, "/api/scope", map[string]any{
+				"action": argStr(a, "action"), "host": argStr(a, "host"), "path": argStr(a, "path"),
+				"scheme": argStr(a, "scheme"), "enabled": argBool(a, "enabled", true),
+			})
+		})
+
 	s.add("get_settings", "Get proxy/intercept settings (proxy bind address, intercept on/off).", obj(map[string]any{}),
 		func(a map[string]any) (string, error) { return s.apiGet("/api/settings") })
 

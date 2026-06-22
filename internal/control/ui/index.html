@@ -202,6 +202,7 @@ textarea.raw{width:100%;height:200px;resize:vertical;background:var(--bg);color:
       </div>
       <select id="fMethod" class="btn"><option value="">method</option><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option></select>
       <select id="fStatus" class="btn"><option value="">status</option><option value="2">2xx</option><option value="3">3xx</option><option value="4">4xx</option><option value="5">5xx</option></select>
+      <button class="btn" id="scopeToggle" title="Show only in-scope flows (define scope in Settings → Target scope)">◎ in scope</button>
       <div class="spacer"></div>
       <span class="count" title="Right-click any row to filter by host, method, status or scheme, or to copy its URL / cURL">↳ right-click a row to filter</span>
       <span class="count"><b id="rowCount">0</b> flows</span>
@@ -390,6 +391,20 @@ changeme</textarea>
         </div>
       </div>
       <div class="section">
+        <h3>TARGET SCOPE</h3>
+        <p class="hint" style="margin-bottom:10px">With <b>include</b> rules, only matching traffic is in scope; <b>exclude</b> always wins; no rules = everything in scope. Scope focuses the <b>◎ in scope</b> history toggle, the intercept gate, and the scanner. Host supports a leading wildcard, e.g. <b style="color:var(--accent)">*.acme.com</b>; path is a prefix.</p>
+        <table class="rules-tbl">
+          <thead><tr><th style="width:34px">On</th><th style="width:96px">Action</th><th>Host</th><th style="width:130px">Path</th><th style="width:84px">Scheme</th><th style="width:60px"></th></tr></thead>
+          <tbody id="scopeBody"></tbody>
+        </table>
+        <div class="row" style="gap:8px;margin-top:10px">
+          <select id="newScopeAction" class="btn"><option value="include">include</option><option value="exclude">exclude</option></select>
+          <input id="newScopeHost" class="btn" style="flex:1;background:var(--bg3)" placeholder="host e.g. *.acme.com">
+          <input id="newScopePath" class="btn" style="width:130px;background:var(--bg3)" placeholder="path prefix (opt)">
+          <button class="btn accent" id="addScopeBtn">+ Add</button>
+        </div>
+      </div>
+      <div class="section">
         <h3>TLS CERTIFICATE AUTHORITY</h3>
         <p class="hint" style="margin-bottom:12px">Install &amp; trust this CA on the client to intercept HTTPS. Per-host leaf certificates are minted on demand.</p>
         <a class="btn accent" href="/api/ca.crt" download style="text-decoration:none;display:inline-block">Download CA certificate</a>
@@ -411,7 +426,7 @@ const $$=s=>Array.from(document.querySelectorAll(s));
 const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
 const state={flows:[],selId:null,detail:null,intercept:{enabled:false,queue:[]},selHeld:null,
-  rules:[],view:{req:'raw',res:'raw'},sort:{key:'id',dir:-1},proxyAddr:'127.0.0.1:8080',
+  rules:[],scope:[],inScopeOnly:false,view:{req:'raw',res:'raw'},sort:{key:'id',dir:-1},proxyAddr:'127.0.0.1:8080',
   filters:{scheme:'',search:'',method:'',status:'',host:''}};
 
 function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove('show'),2200);}
@@ -487,6 +502,7 @@ async function loadFlows(){
   if(f.method)q.set('method',f.method);
   if(f.status)q.set('status',f.status);
   if(f.host)q.set('host',f.host);
+  if(state.inScopeOnly)q.set('inScope','1');
   q.set('limit','500');
   try{const d=await api('/api/flows?'+q.toString());state.flows=d.flows||[];renderRows();}catch(e){toast('flows: '+e.message);}
 }
@@ -550,6 +566,36 @@ $('#fMethod').onchange=e=>setFilter('method',e.target.value);
 $('#fStatus').onchange=e=>setFilter('status',e.target.value);
 $('#fSearch').oninput=e=>{state.filters.search=e.target.value;renderChips();scheduleReload();};
 $('#refreshBtn').onclick=loadFlows;
+$('#scopeToggle').onclick=()=>{state.inScopeOnly=!state.inScopeOnly;$('#scopeToggle').classList.toggle('accent',state.inScopeOnly);$('#scopeToggle').textContent=(state.inScopeOnly?'◉':'◎')+' in scope';loadFlows();};
+
+/* ---- target scope ---- */
+async function loadScope(){try{const d=await api('/api/scope');state.scope=d.rules||[];renderScope();}catch(e){}}
+function renderScope(){
+  const body=$('#scopeBody');if(!body)return;
+  if(!state.scope.length){body.innerHTML='<tr><td colspan="6" class="hint" style="padding:10px 8px">No scope rules — everything is in scope.</td></tr>';return;}
+  body.innerHTML=state.scope.map(r=>`<tr data-id="${r.id}">
+    <td><input type="checkbox" ${r.enabled?'checked':''} data-k="enabled"></td>
+    <td><select data-k="action"><option value="include" ${r.action==='include'?'selected':''}>include</option><option value="exclude" ${r.action==='exclude'?'selected':''}>exclude</option></select></td>
+    <td><input type="text" data-k="host" value="${esc(r.host)}" placeholder="*.acme.com"></td>
+    <td><input type="text" data-k="path" value="${esc(r.path)}" placeholder="/"></td>
+    <td><input type="text" data-k="scheme" value="${esc(r.scheme)}" placeholder="any"></td>
+    <td><button class="btn danger" data-del="${r.id}">Delete</button></td></tr>`).join('');
+  body.querySelectorAll('tr').forEach(tr=>{const id=Number(tr.dataset.id);
+    tr.querySelectorAll('[data-k]').forEach(inp=>inp.addEventListener('change',()=>updateScope(id,tr)));});
+  body.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>deleteScope(Number(b.dataset.del)));
+}
+async function updateScope(id,tr){
+  const get=k=>tr.querySelector(`[data-k="${k}"]`);
+  const upd={id,action:get('action').value,host:get('host').value.trim(),path:get('path').value.trim(),scheme:get('scheme').value.trim(),enabled:get('enabled').checked,port:0};
+  try{await api('/api/scope/'+id,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(upd)});toast('scope saved');}catch(e){toast(e.message);loadScope();}
+}
+async function deleteScope(id){try{await api('/api/scope/'+id,{method:'DELETE'});loadScope();}catch(e){toast(e.message);}}
+$('#addScopeBtn').onclick=async()=>{
+  const rule={action:$('#newScopeAction').value,host:$('#newScopeHost').value.trim(),path:$('#newScopePath').value.trim(),scheme:'',enabled:true,port:0};
+  if(!rule.host&&!rule.path){toast('host or path required');return;}
+  try{await api('/api/scope',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(rule)});
+    $('#newScopeHost').value='';$('#newScopePath').value='';loadScope();toast('scope rule added');}catch(e){toast(e.message);}
+};
 
 /* ---- filters: chips + apply/clear, kept in sync with the toolbar controls ---- */
 function syncControls(){
@@ -900,6 +946,7 @@ function connectEvents(){
     else if(m.type==='intruder.update')scheduleIntr();
     else if(m.type==='scanner.update')loadIssues();
     else if(m.type==='ws.frame'){if(m.flowId===state.selId)renderWSFrames(state.selId);}
+    else if(m.type==='scope.update'){loadScope();if(state.inScopeOnly)loadFlows();}
     else if(m.type==='settings.update')loadSettings();
   };
   es.onerror=()=>{/* browser auto-reconnects */};
@@ -907,7 +954,7 @@ function connectEvents(){
 
 /* ---- boot ---- */
 async function refreshIntercept(){try{state.intercept=await api('/api/intercept');renderIntercept();}catch(e){}}
-renderChips();loadSettings();loadFlows();loadRules();refreshIntercept();loadRepHistory();loadIssues();loadApiKeys();loadReference();loadMCP();connectEvents();
+renderChips();loadSettings();loadFlows();loadRules();loadScope();refreshIntercept();loadRepHistory();loadIssues();loadApiKeys();loadReference();loadMCP();connectEvents();
 </script>
 </body>
 </html>
