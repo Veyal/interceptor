@@ -3,6 +3,7 @@ package proxy
 
 import (
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -116,27 +117,43 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	copyHeader(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 
-	resTee, resFinalize, err := s.cap.TeeBody(resp.Body)
-	if err != nil {
-		s.fail(w, flow, "capture resp: "+err.Error())
-		return
-	}
-	io.Copy(w, resTee)
-	resHash, resLen, _ := resFinalize()
-
 	flow.Status = resp.StatusCode
 	flow.ResHeaders = resp.Header.Clone()
-	flow.ResBodyHash, flow.ResLen = resHash, resLen
 	flow.Mime = resp.Header.Get("Content-Type")
+
+	resTee, resFinalize, err := s.cap.TeeBody(resp.Body)
+	if err != nil {
+		// Response headers are already on the wire, so we cannot change the
+		// status; record the flow with the error and stop. Calling http.Error
+		// here would double-write the header.
+		flow.Error = "capture resp: " + err.Error()
+		flow.DurationMs = time.Since(start).Milliseconds()
+		s.insertFlow(flow)
+		return
+	}
+	if _, err := io.Copy(w, resTee); err != nil {
+		flow.Error = "stream resp: " + err.Error()
+	}
+	resHash, resLen, _ := resFinalize()
+
+	flow.ResBodyHash, flow.ResLen = resHash, resLen
 	flow.DurationMs = time.Since(start).Milliseconds()
-	s.st.InsertFlow(flow)
+	s.insertFlow(flow)
 }
 
-// fail records an errored flow and writes a 502 to the client.
+// fail records an errored flow and writes a 502 to the client. It is only used
+// before any response header has been written.
 func (s *Server) fail(w http.ResponseWriter, flow *store.Flow, msg string) {
 	flow.Status = http.StatusBadGateway
 	flow.Error = msg
 	flow.DurationMs = time.Since(flow.TS).Milliseconds()
-	s.st.InsertFlow(flow)
+	s.insertFlow(flow)
 	http.Error(w, msg, http.StatusBadGateway)
+}
+
+// insertFlow persists a flow, logging on error rather than dropping it silently.
+func (s *Server) insertFlow(flow *store.Flow) {
+	if _, err := s.st.InsertFlow(flow); err != nil {
+		log.Printf("proxy: persist flow %s %s%s: %v", flow.Method, flow.Host, flow.Path, err)
+	}
 }
