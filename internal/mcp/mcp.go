@@ -1,0 +1,421 @@
+// Package mcp implements a Model Context Protocol server over stdio so an AI
+// agent can operate Interceptor as a set of tools. It is a thin, well-described
+// front end over the running control API (REST) — every tool maps to an endpoint
+// the web UI also uses, so the human and the agent drive the same engine.
+package mcp
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+)
+
+const protocolVersion = "2024-11-05"
+
+// Server is an MCP stdio server backed by the control API at base.
+type Server struct {
+	base  string
+	cl    *http.Client
+	tools map[string]tool
+	order []string
+}
+
+type tool struct {
+	description string
+	schema      map[string]any
+	call        func(args map[string]any) (string, error)
+}
+
+// New builds an MCP server that talks to the control API at baseURL
+// (e.g. http://127.0.0.1:9966).
+func New(baseURL string) *Server {
+	s := &Server{
+		base:  strings.TrimRight(baseURL, "/"),
+		cl:    &http.Client{Timeout: 60 * time.Second},
+		tools: map[string]tool{},
+	}
+	s.registerTools()
+	return s
+}
+
+// Serve runs the JSON-RPC loop over newline-delimited messages until EOF.
+func (s *Server) Serve(in io.Reader, out io.Writer) error {
+	br := bufio.NewReaderSize(in, 1<<20)
+	for {
+		line, err := br.ReadBytes('\n')
+		if t := bytes.TrimSpace(line); len(t) > 0 {
+			s.handleLine(t, out)
+		}
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+	}
+}
+
+type rpcError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+func (s *Server) handleLine(line []byte, out io.Writer) {
+	var req struct {
+		ID     json.RawMessage `json:"id"`
+		Method string          `json:"method"`
+		Params json.RawMessage `json:"params"`
+	}
+	if err := json.Unmarshal(line, &req); err != nil {
+		s.write(out, nil, nil, &rpcError{Code: -32700, Message: "parse error"})
+		return
+	}
+	notification := len(req.ID) == 0 || string(req.ID) == "null"
+	result, rerr := s.dispatch(req.Method, req.Params)
+	if notification {
+		return // notifications get no response
+	}
+	s.write(out, req.ID, result, rerr)
+}
+
+func (s *Server) dispatch(method string, params json.RawMessage) (any, *rpcError) {
+	switch method {
+	case "initialize":
+		var p struct {
+			ProtocolVersion string `json:"protocolVersion"`
+		}
+		json.Unmarshal(params, &p)
+		ver := p.ProtocolVersion
+		if ver == "" {
+			ver = protocolVersion
+		}
+		return map[string]any{
+			"protocolVersion": ver,
+			"capabilities":    map[string]any{"tools": map[string]any{}},
+			"serverInfo":      map[string]any{"name": "interceptor", "version": "0.1.0"},
+			"instructions":    "Interceptor: an intercepting HTTP/HTTPS proxy. Use these tools to list and read captured flows, replay/mutate requests (send_request), fuzz (start_intruder), passively scan (run_scanner), and control interception. Bodies are bounded by default; pass maxBytes to read more.",
+		}, nil
+	case "tools/list":
+		return map[string]any{"tools": s.toolList()}, nil
+	case "tools/call":
+		return s.callTool(params), nil
+	case "ping":
+		return map[string]any{}, nil
+	default:
+		return nil, &rpcError{Code: -32601, Message: "method not found: " + method}
+	}
+}
+
+func (s *Server) toolList() []map[string]any {
+	out := make([]map[string]any, 0, len(s.order))
+	for _, name := range s.order {
+		t := s.tools[name]
+		out = append(out, map[string]any{
+			"name":        name,
+			"description": t.description,
+			"inputSchema": t.schema,
+		})
+	}
+	return out
+}
+
+func (s *Server) callTool(params json.RawMessage) any {
+	var p struct {
+		Name      string         `json:"name"`
+		Arguments map[string]any `json:"arguments"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return toolError("invalid params: " + err.Error())
+	}
+	t, ok := s.tools[p.Name]
+	if !ok {
+		return toolError("unknown tool: " + p.Name)
+	}
+	if p.Arguments == nil {
+		p.Arguments = map[string]any{}
+	}
+	text, err := t.call(p.Arguments)
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return map[string]any{"content": []map[string]any{{"type": "text", "text": text}}}
+}
+
+func toolError(msg string) any {
+	return map[string]any{
+		"content": []map[string]any{{"type": "text", "text": msg}},
+		"isError": true,
+	}
+}
+
+func (s *Server) write(out io.Writer, id json.RawMessage, result any, rerr *rpcError) {
+	resp := map[string]any{"jsonrpc": "2.0"}
+	if id != nil {
+		resp["id"] = id
+	} else {
+		resp["id"] = nil
+	}
+	if rerr != nil {
+		resp["error"] = rerr
+	} else {
+		resp["result"] = result
+	}
+	b, _ := json.Marshal(resp)
+	out.Write(append(b, '\n'))
+}
+
+// ---- REST plumbing ----
+
+func (s *Server) apiGet(path string) (string, error) { return s.api(http.MethodGet, path, nil) }
+
+func (s *Server) api(method, path string, body any) (string, error) {
+	var rdr io.Reader
+	if body != nil {
+		b, _ := json.Marshal(body)
+		rdr = bytes.NewReader(b)
+	}
+	req, err := http.NewRequest(method, s.base+path, rdr)
+	if err != nil {
+		return "", err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := s.cl.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("control API unreachable at %s — is `interceptor` running? (%v)", s.base, err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("%s %s → %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	return string(b), nil
+}
+
+// ---- tool helpers ----
+
+func argStr(a map[string]any, key string) string {
+	v, ok := a[key]
+	if !ok || v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return fmt.Sprint(v)
+}
+
+func argInt(a map[string]any, key string, def int) int {
+	switch x := a[key].(type) {
+	case float64:
+		return int(x)
+	case int:
+		return x
+	case string:
+		if n, err := strconv.Atoi(x); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+func argBool(a map[string]any, key string, def bool) bool {
+	if b, ok := a[key].(bool); ok {
+		return b
+	}
+	return def
+}
+
+func truncate(s string, n int) string {
+	if n <= 0 || len(s) <= n {
+		return s
+	}
+	return s[:n] + fmt.Sprintf("\n…[truncated %d more bytes — increase maxBytes]", len(s)-n)
+}
+
+func obj(props map[string]any, required ...string) map[string]any {
+	m := map[string]any{"type": "object", "properties": props}
+	if len(required) > 0 {
+		m["required"] = required
+	}
+	return m
+}
+
+func p(typ, desc string) map[string]any { return map[string]any{"type": typ, "description": desc} }
+
+func (s *Server) add(name, desc string, schema map[string]any, call func(map[string]any) (string, error)) {
+	s.tools[name] = tool{description: desc, schema: schema, call: call}
+	s.order = append(s.order, name)
+}
+
+// registerTools wires every tool to a control-API endpoint.
+func (s *Server) registerTools() {
+	s.add("list_flows",
+		"List/search captured proxy flows (compact summaries). Filter by host, method, path search, scheme, status class (1-5 → 1xx-5xx).",
+		obj(map[string]any{
+			"host":   p("string", "host substring"),
+			"method": p("string", "exact HTTP method"),
+			"search": p("string", "path substring"),
+			"scheme": p("string", "http or https"),
+			"status": p("integer", "status class 1-5 (e.g. 4 = 4xx)"),
+			"limit":  p("integer", "max rows (default 50)"),
+		}),
+		func(a map[string]any) (string, error) {
+			q := url.Values{}
+			for _, k := range []string{"host", "method", "search", "scheme"} {
+				if v := argStr(a, k); v != "" {
+					q.Set(k, v)
+				}
+			}
+			if v := argStr(a, "status"); v != "" {
+				q.Set("status", v)
+			}
+			q.Set("limit", strconv.Itoa(argInt(a, "limit", 50)))
+			return s.apiGet("/api/flows?" + q.Encode())
+		})
+
+	s.add("get_flow",
+		"Read a captured flow's raw request and/or response (headers + body), bounded by maxBytes.",
+		obj(map[string]any{
+			"id":       p("integer", "flow id"),
+			"side":     p("string", "req | res | both (default both)"),
+			"maxBytes": p("integer", "max bytes per side (default 4000)"),
+		}, "id"),
+		func(a map[string]any) (string, error) {
+			id := argInt(a, "id", 0)
+			if id == 0 {
+				return "", fmt.Errorf("id is required")
+			}
+			max := argInt(a, "maxBytes", 4000)
+			side := argStr(a, "side")
+			if side == "" {
+				side = "both"
+			}
+			get := func(sd string) string {
+				raw, err := s.apiGet(fmt.Sprintf("/api/flows/%d/raw?side=%s", id, sd))
+				if err != nil {
+					return "(" + err.Error() + ")"
+				}
+				return truncate(raw, max)
+			}
+			if side == "both" {
+				return "=== REQUEST ===\n" + get("req") + "\n\n=== RESPONSE ===\n" + get("res"), nil
+			}
+			return get(side), nil
+		})
+
+	s.add("send_request",
+		"Send a request directly to a target (Repeater) and record it. Returns the resulting flow id+status; call get_flow with that id to read the response body.",
+		obj(map[string]any{
+			"method":  p("string", "HTTP method"),
+			"url":     p("string", "absolute URL"),
+			"headers": p("string", "raw header lines 'Key: Value', one per line"),
+			"body":    p("string", "request body"),
+		}, "url"),
+		func(a map[string]any) (string, error) {
+			out, err := s.api(http.MethodPost, "/api/repeater/send", map[string]any{
+				"method": argStr(a, "method"), "url": argStr(a, "url"),
+				"headers": argStr(a, "headers"), "body": argStr(a, "body"),
+			})
+			if err != nil {
+				return "", err
+			}
+			return out + "\n(call get_flow with this id for the full response)", nil
+		})
+
+	s.add("start_intruder",
+		"Start a payload attack. Wrap fuzz points in §…§ in the template. attackType: sniper (one position at a time) or pitchfork (lists in parallel). payloads: a list of lists (one list for sniper; one per position for pitchfork).",
+		obj(map[string]any{
+			"target":     p("string", "scheme://host[:port]"),
+			"template":   p("string", "raw request with §…§ fuzz points"),
+			"attackType": p("string", "sniper | pitchfork"),
+			"payloads":   map[string]any{"type": "array", "description": "list of payload lists", "items": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}},
+		}, "target", "template"),
+		func(a map[string]any) (string, error) {
+			return s.api(http.MethodPost, "/api/intruder/start", map[string]any{
+				"target": argStr(a, "target"), "template": argStr(a, "template"),
+				"attackType": argStr(a, "attackType"), "payloads": a["payloads"],
+			})
+		})
+
+	s.add("intruder_state",
+		"Get the current/last Intruder attack's progress and results (status/length/time per payload; anomalies flagged).",
+		obj(map[string]any{}),
+		func(a map[string]any) (string, error) {
+			out, err := s.apiGet("/api/intruder/state")
+			return truncate(out, 12000), err
+		})
+
+	s.add("run_scanner",
+		"Run the passive scanner over captured flows and return the findings (severity/title/target/evidence/fix).",
+		obj(map[string]any{}),
+		func(a map[string]any) (string, error) { return s.api(http.MethodPost, "/api/scanner/run", nil) })
+
+	s.add("list_issues", "List current scanner findings.", obj(map[string]any{}),
+		func(a map[string]any) (string, error) { return s.apiGet("/api/scanner/issues") })
+
+	s.add("get_intercept", "Get intercept state and the current hold queue.", obj(map[string]any{}),
+		func(a map[string]any) (string, error) { return s.apiGet("/api/intercept") })
+
+	s.add("set_intercept", "Enable or disable request interception.",
+		obj(map[string]any{"enabled": p("boolean", "true to hold requests")}, "enabled"),
+		func(a map[string]any) (string, error) {
+			return s.api(http.MethodPost, "/api/intercept/toggle", map[string]any{"enabled": argBool(a, "enabled", false)})
+		})
+
+	s.add("forward_request", "Forward a held request (optionally replacing it with edited raw bytes).",
+		obj(map[string]any{"id": p("integer", "held request id"), "raw": p("string", "optional edited raw request")}, "id"),
+		func(a map[string]any) (string, error) {
+			body := map[string]any{}
+			if r := argStr(a, "raw"); r != "" {
+				body["raw"] = r
+			}
+			return s.api(http.MethodPost, fmt.Sprintf("/api/intercept/%d/forward", argInt(a, "id", 0)), body)
+		})
+
+	s.add("drop_request", "Drop a held request.", obj(map[string]any{"id": p("integer", "held request id")}, "id"),
+		func(a map[string]any) (string, error) {
+			return s.api(http.MethodPost, fmt.Sprintf("/api/intercept/%d/drop", argInt(a, "id", 0)), nil)
+		})
+
+	s.add("list_rules", "List match-&-replace rules.", obj(map[string]any{}),
+		func(a map[string]any) (string, error) { return s.apiGet("/api/rules") })
+
+	s.add("add_rule", "Add a request-side match-&-replace rule (regex).",
+		obj(map[string]any{
+			"type":    p("string", "req-header | req-body"),
+			"match":   p("string", "regex to match"),
+			"replace": p("string", "replacement"),
+			"enabled": p("boolean", "default true"),
+		}, "type", "match"),
+		func(a map[string]any) (string, error) {
+			return s.api(http.MethodPost, "/api/rules", map[string]any{
+				"type": argStr(a, "type"), "match": argStr(a, "match"),
+				"replace": argStr(a, "replace"), "enabled": argBool(a, "enabled", true),
+			})
+		})
+
+	s.add("list_ws_frames", "List captured WebSocket frames for a flow (direction/opcode/length/preview).",
+		obj(map[string]any{"id": p("integer", "websocket flow id")}, "id"),
+		func(a map[string]any) (string, error) {
+			out, err := s.apiGet(fmt.Sprintf("/api/flows/%d/ws", argInt(a, "id", 0)))
+			return truncate(out, 12000), err
+		})
+
+	s.add("get_settings", "Get proxy/intercept settings (proxy bind address, intercept on/off).", obj(map[string]any{}),
+		func(a map[string]any) (string, error) { return s.apiGet("/api/settings") })
+
+	s.add("ca_info", "How to trust the CA so HTTPS can be intercepted (proxy address + CA location).", obj(map[string]any{}),
+		func(a map[string]any) (string, error) {
+			settings, _ := s.apiGet("/api/settings")
+			return fmt.Sprintf("To intercept HTTPS, point the client at the proxy and trust the local CA.\nSettings: %s\nCA download: %s/api/ca.crt (also at ~/.interceptor/ca/ca.crt). Install and trust it on the client.", strings.TrimSpace(settings), s.base), nil
+		})
+}

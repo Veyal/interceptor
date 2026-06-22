@@ -76,6 +76,28 @@ The web UI is a single self-contained `internal/control/ui/index.html`, embedded
 
 Design notes and the per-slice specs/plans live under [`docs/`](docs/).
 
+## Drive it with AI (MCP)
+
+Interceptor ships a **Model Context Protocol server** so an AI assistant can operate the proxy with
+the same capabilities as the UI. Run the app, then point your MCP client at `interceptor mcp`:
+
+```jsonc
+// e.g. Claude Desktop / Claude Code MCP config
+{
+  "mcpServers": {
+    "interceptor": { "command": "interceptor", "args": ["mcp"] }
+  }
+}
+```
+
+`interceptor mcp` is a stdio MCP server that drives the running instance over its control API
+(override the target with `INTERCEPTOR_CONTROL_URL`). It exposes 16 tools — `list_flows`, `get_flow`,
+`send_request`, `start_intruder`, `intruder_state`, `run_scanner`, `list_issues`, `get_intercept`,
+`set_intercept`, `forward_request`, `drop_request`, `list_rules`, `add_rule`, `list_ws_frames`,
+`get_settings`, `ca_info` — with bounded results so large bodies don't blow the agent's context.
+The UI's **API → MCP** tab shows a copy-paste config and the live tool list. Captured traffic never
+leaves your machine — the agent drives the local engine.
+
 ## Control API
 
 The full REST surface is documented at runtime: `GET /api/reference` (or the **API → REST** tab).

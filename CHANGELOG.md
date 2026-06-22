@@ -7,6 +7,16 @@ each "release" is an iteration of the Conduit design (`Conduit.dc.html`).
 ## [Unreleased]
 
 ### Added
+- **Real MCP server** (`interceptor mcp`) — a stdio JSON-RPC 2.0 Model Context Protocol server
+  (new `internal/mcp`) that lets an AI assistant operate Interceptor with the same capabilities as
+  the UI. It drives a running instance over the control API and exposes **16 tools** (`list_flows`,
+  `get_flow`, `send_request`, `start_intruder`, `intruder_state`, `run_scanner`, `list_issues`,
+  `get_intercept`, `set_intercept`, `forward_request`, `drop_request`, `list_rules`, `add_rule`,
+  `list_ws_frames`, `get_settings`, `ca_info`) with **bounded results** so large bodies don't blow
+  the agent's context. The `/api/mcp` descriptor now advertises the real server + a ready-to-paste
+  client config; the **API → MCP** UI tab shows that config (one-click copy), the connect command,
+  and the live tool list. README gained a "Drive it with AI (MCP)" section. (`INTERCEPTOR_CONTROL_URL`
+  overrides the control target.)
 - **Product-management docs** under `docs/product/`: a market-researched product **strategy**
   (vision, personas, competitive positioning vs Burp/ZAP/Caido/mitmproxy/Hetty, non-goals), a
   prioritized **roadmap** (Now/Next/Later with RICE scoring), **success metrics** (North Star =

@@ -97,20 +97,39 @@ func (h *Hub) apiReference(w http.ResponseWriter, r *http.Request) {
 var mcpDescriptor = map[string]any{
 	"name":    "interceptor",
 	"version": "0.1.0",
-	"status":  "preview",
-	"note":    "A full Model Context Protocol server is planned. The descriptor below maps the intended MCP tools onto the existing REST control API, which an agent can already drive directly.",
+	"status":  "ready",
+	"note":    "Run `interceptor` (this proxy/UI) first, then point your MCP client at `interceptor mcp` — a stdio MCP server that drives this engine over the control API. Set INTERCEPTOR_CONTROL_URL to override the default http://127.0.0.1:9966.",
 	"transport": map[string]any{
-		"rest": "http://127.0.0.1:9966/api",
-		"sse":  "http://127.0.0.1:9966/api/events",
+		"type":    "stdio",
+		"command": "interceptor",
+		"args":    []string{"mcp"},
+	},
+	// Ready to paste into a Claude Desktop / Claude Code MCP config.
+	"clientConfig": map[string]any{
+		"mcpServers": map[string]any{
+			"interceptor": map[string]any{
+				"command": "interceptor",
+				"args":    []string{"mcp"},
+			},
+		},
 	},
 	"tools": []map[string]string{
-		{"name": "list_flows", "maps": "GET /api/flows", "desc": "List or search captured traffic"},
-		{"name": "get_flow", "maps": "GET /api/flows/{id}/raw", "desc": "Read a request/response"},
-		{"name": "send_request", "maps": "POST /api/repeater/send", "desc": "Send a request (Repeater)"},
-		{"name": "run_intruder", "maps": "POST /api/intruder/start", "desc": "Run a payload attack"},
-		{"name": "run_scanner", "maps": "POST /api/scanner/run", "desc": "Run passive security checks"},
-		{"name": "set_intercept", "maps": "POST /api/intercept/toggle", "desc": "Toggle request interception"},
-		{"name": "add_rule", "maps": "POST /api/rules", "desc": "Add a match-&-replace rule"},
+		{"name": "list_flows", "desc": "List/search captured proxy flows"},
+		{"name": "get_flow", "desc": "Read a flow's raw request/response"},
+		{"name": "send_request", "desc": "Replay/mutate a request (Repeater)"},
+		{"name": "start_intruder", "desc": "Run a Sniper/Pitchfork payload attack"},
+		{"name": "intruder_state", "desc": "Attack progress + results"},
+		{"name": "run_scanner", "desc": "Passive scan of captured flows"},
+		{"name": "list_issues", "desc": "Scanner findings"},
+		{"name": "get_intercept", "desc": "Intercept state + hold queue"},
+		{"name": "set_intercept", "desc": "Toggle request interception"},
+		{"name": "forward_request", "desc": "Forward a held request (optionally edited)"},
+		{"name": "drop_request", "desc": "Drop a held request"},
+		{"name": "list_rules", "desc": "List match-&-replace rules"},
+		{"name": "add_rule", "desc": "Add a request match-&-replace rule"},
+		{"name": "list_ws_frames", "desc": "WebSocket frames for a flow"},
+		{"name": "get_settings", "desc": "Proxy/intercept settings"},
+		{"name": "ca_info", "desc": "How to trust the CA for HTTPS"},
 	},
 }
 

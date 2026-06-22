@@ -21,6 +21,7 @@ import (
 	"github.com/Veyal/interceptor/internal/capture"
 	"github.com/Veyal/interceptor/internal/control"
 	"github.com/Veyal/interceptor/internal/intercept"
+	"github.com/Veyal/interceptor/internal/mcp"
 	"github.com/Veyal/interceptor/internal/proxy"
 	"github.com/Veyal/interceptor/internal/store"
 	"github.com/Veyal/interceptor/internal/tlsca"
@@ -29,6 +30,19 @@ import (
 const controlAddr = "127.0.0.1:9966"
 
 func main() {
+	// `interceptor mcp` runs a Model Context Protocol server on stdio that drives
+	// a separately-running interceptor via its control API. All protocol traffic
+	// is on stdout; logs go to stderr so they can't corrupt the JSON-RPC stream.
+	if len(os.Args) > 1 && os.Args[1] == "mcp" {
+		base := os.Getenv("INTERCEPTOR_CONTROL_URL")
+		if base == "" {
+			base = "http://" + controlAddr
+		}
+		if err := mcp.New(base).Serve(os.Stdin, os.Stdout); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		log.Fatal(err)
 	}
