@@ -131,6 +131,7 @@ var mcpDescriptor = map[string]any{
 		{"name": "list_issues", "desc": "Scanner findings"},
 		{"name": "get_intercept", "desc": "Intercept state + hold queue"},
 		{"name": "set_intercept", "desc": "Toggle request interception"},
+		{"name": "set_response_intercept", "desc": "Toggle response interception"},
 		{"name": "forward_request", "desc": "Forward a held request (optionally edited)"},
 		{"name": "drop_request", "desc": "Drop a held request"},
 		{"name": "list_rules", "desc": "List match-&-replace rules"},

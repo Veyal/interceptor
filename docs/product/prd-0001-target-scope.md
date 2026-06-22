@@ -1,6 +1,6 @@
 # PRD-0001 — Target Scope
 
-*Owner: Product · Status: Proposed · Priority: Now (P0) · Last updated: 2026-06-22*
+*Owner: Product · Status: ✅ Shipped · Priority: Now (P0) · Last updated: 2026-06-22*
 *Links: [strategy.md](strategy.md) · [roadmap.md](roadmap.md) · [metrics.md](metrics.md)*
 
 > This PRD is also the **template** for future PRDs — keep the section structure.

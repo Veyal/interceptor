@@ -7,6 +7,10 @@ each "release" is an iteration of the Conduit design (`Conduit.dc.html`).
 ## [Unreleased]
 
 ### Added
+- **Benchmarks** — `docs/benchmarks.md` with measured numbers (~20 MB idle RSS, ~1 s cold start,
+  ~444 MB/s capture at ~1.5 KB/op) plus a `BenchmarkTeeBody` that proves capture streams rather than
+  buffers. The product **roadmap** rolled to cycle 2 (cycle 1's Now+Next slate shipped); PRD-0001
+  marked Shipped.
 - **Upstream / chained proxy** — route Interceptor's outbound traffic through another proxy (e.g. a
   corporate proxy). Configured via the `upstream.proxy` setting (`PUT /api/settings`
   `{upstreamProxy}`) and a **Settings → Upstream proxy** field; applied race-safely to the transport

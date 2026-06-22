@@ -22,58 +22,64 @@ keys and an MCP descriptor. ~3.7k LOC of Go, no cgo, single static binary.
 3. **Trustworthy core** — be a tool pentesters stage real work on (scope, scale, correctness).
 4. **Interop & reach** — HAR, upstream proxy, benchmarks, packaging.
 
-## Now (this slice) — make the AI a first-class operator + kill onboarding friction
+## ✅ Shipped (cycle 1 — the AI-operable pivot)
+
+The entire **Now + Next** slate of cycle 1 landed (each TDD'd, with a control API, UI, MCP tool, and
+verified live). See [CHANGELOG.md](../../CHANGELOG.md).
+
+| Shipped | Notes |
+|---|---|
+| **Real MCP server** (`interceptor mcp`) | stdio JSON-RPC, **18 tools**, bounded results |
+| **MCP setup in the UI** + AI-friendly API | copy-paste client config; `/api/reference` self-documents |
+| **Target scope** (PRD-0001) | include/exclude rules focus history + intercept + scanner |
+| **Response interception** | response match-&-replace + hold/edit/drop |
+| **HAR export & import** | HAR 1.2 round-trip; free interop |
+| **System-proxy toggle** (macOS) | opt-in only |
+| **Upstream / chained proxy** | race-safe, live + at startup |
+| **History full-text search** | method/host/path |
+| **Onboarding "get started" card** + **performance benchmarks** | see [benchmarks.md](../benchmarks.md): ~20 MB idle, ~1 s cold start |
+
+## Now (cycle 2) — depth on the core loop
 
 | Item | Theme | Why | Effort |
 |---|---|---|---|
-| **Real MCP server** (`interceptor mcp`, stdio JSON-RPC) exposing the control API as agent tools | AI-operable | The flagship for our intent — turns today's `/api/mcp` *descriptor* into a server an AI can actually drive. **← building now** | M |
-| **MCP setup in the UI** (copy-paste client config, connection status, tool list) | Frictionless UX | An AI feature no one uses if setup is hard; one-click config closes that | S |
-| **AI-friendly API polish** (consistent JSON shapes, `GET /api/reference` already machine-readable; ensure every tool's result is predictable) | AI-operable | The API is the AI's substrate; predictability > cleverness | S |
-| **System-proxy toggle** + **one-screen onboarding** (CA install hint, "you're capturing" state) | Frictionless UX | Removes the top setup friction for the human half of the pair | S–M |
-| **Target scope** (in/out-of-scope host/path patterns; filters history, focuses intercept & scanner) | Trustworthy core | #1 table-stakes gap; reduces noise → helps human *and* AI focus. **PRD:** [prd-0001-target-scope.md](prd-0001-target-scope.md) | M |
-| **Performance benchmarks, published** (cold start, idle RSS, 10k-flow scroll vs Burp/ZAP) | Interop & reach | Core thesis is unproven until measured; marketing gold + regression guard | S |
-| **HAR export** of selected flows / history | Interop & reach | Near-universal interop ask; we give it free | S–M |
+| **Projects** (named save/load; export/import a portable session: flows + rules + scope + settings) | Trustworthy core | Burp Community's most-missed feature; builds on HAR export + the SQLite store | M |
+| **Comparative benchmarks** (idle RSS / cold start / 10k-flow scroll **vs Burp & ZAP**, reproducible script) + CI throughput guard | Interop & reach | Turns our measured numbers into a credible published comparison | S–M |
+| **Saved filters / views** + scope-aware quick filters | Trustworthy core | Scales the core loop; pairs with scope and search | S–M |
 
-## Next — parity + differentiation
+## Next (cycle 2) — parity + agent depth
 
 | Item | Theme | Why | Effort |
 |---|---|---|---|
-| **Response interception** (hold/edit/drop responses; response-side match-&-replace executes) | Trustworthy core | Burp-parity gap explicitly deferred in the v1 spec; builds directly on the existing intercept engine; expose to the AI as MCP tools too | M |
-| **MCP: streamable-HTTP transport + richer tools** (remote MCP over the control port; per-tool result schemas; an `analyze_flow` helper) | AI-operable | Builds on the stdio server; lets hosted agents connect without a subcommand | M |
-| **Upstream / chained proxy** (route upstream through a corporate or another proxy) | Interop & reach | Recurring enterprise/corp-network requirement | M |
-| **History full-text search + saved filters** | Trustworthy core | Scales the core loop to large sessions; pairs with scope | M |
-| **HAR / raw import** (replay external captures) | Interop | Completes the interop story; feeds Repeater/Scanner from other tools | S–M |
+| **MCP: streamable-HTTP transport + `analyze_flow`** | AI-operable | Lets hosted agents connect without a subcommand; a decision-ready flow summary tool | M |
+| **Session / auth handling** (login macros, token refresh, re-auth on 401) | Trustworthy core | High value; a pain point across all tools | L |
+| **BYO-key AI assist** (explain request, suggest payloads, summarize findings) | Differentiator | Keeps pace with Burp AI without hosting a model; optional & local-first | M–L |
+| **WebSocket through an upstream proxy** + WS message replay | Interop & reach | Completes upstream-proxy + WS coverage | M |
 
-## Later — bigger bets & forward-looking
+## Later (cycle 2) — bigger bets
 
 | Item | Theme | Why / caveat | Effort |
 |---|---|---|---|
-| **Projects** (named save/load; export/import a portable session file) | Trustworthy core | Burp Community's most-missed feature; our SQLite store already persists — this is multi-DB + export | M |
-| **Session / auth handling** (login macros, token refresh, re-auth on 401) | Trustworthy core | High value, high complexity; a known pain point across *all* tools | L |
 | **HTTP/2 support** | Trustworthy core | Increasingly expected; significant proxy work | L |
-| **BYO-key AI assist** (explain request, suggest payloads, summarize findings) | Differentiator | Keeps pace with Burp AI without hosting our own model; optional & local-first | M–L |
-| **Extension / plugin API** | Differentiator | Burp's real moat; only worth it once core is sticky | XL |
-| **Remote tunnel** (expose the proxy to a remote device/LAN securely) | Interop | Niche; external dependency; lower priority for core users | M |
-| **Collaboration / multi-user** | Reach | Team/commercial segment; far off | XL |
-| **HTTP/3 / QUIC** | Trustworthy core | Immature even in mitmproxy; forward-looking differentiator, not table stakes | XL |
+| **Extension / plugin API** | Differentiator | Burp's real moat; worth it once core is sticky | XL |
+| **Collaboration / multi-user** | Reach | Team/commercial segment | XL |
+| **Remote tunnel** (expose the proxy to a remote device securely) | Interop | Niche; external dependency | M |
+| **HTTP/3 / QUIC** | Trustworthy core | Immature even in mitmproxy; forward-looking | XL |
 
 ## Prioritization model
 
 Lightweight RICE — **Reach × Impact × Confidence ÷ Effort**. Reach = share of target users
 touched; Impact = 0.25/0.5/1/2/3; Confidence = 0.5/0.8/1.0; Effort in person-weeks (S≈1, M≈2–4,
-L≈6–10, XL≈12+). Top current scores:
+L≈6–10, XL≈12+). Cycle-2 top scores:
 
 | Feature | Reach | Impact | Conf | Effort | ~Score | Bucket |
 |---|---|---|---|---|---|---|
-| Target scope | High | 1.0 | 1.0 | M | High | Now |
-| Perf benchmarks | High | 0.5 | 1.0 | S | High | Now |
-| System-proxy toggle | Med | 0.5 | 1.0 | S | High | Now |
-| HAR export | High | 0.5 | 0.8 | S–M | High | Now |
-| Response interception | Med | 1.0 | 0.8 | M | Med-High | Next |
-| Full MCP server | Med | 1.0 | 0.8 | M | Med-High | Next |
-| Upstream proxy | Med | 0.5 | 1.0 | M | Med | Next |
-| Projects (save/load) | Med | 1.0 | 0.8 | M | Med | Later |
-| Session/auth handling | Med | 2.0 | 0.5 | L | Med | Later |
+| Projects (save/load) | Med | 1.0 | 0.8 | M | High | Now |
+| Comparative benchmarks | High | 0.5 | 0.8 | S–M | High | Now |
+| Saved filters/views | Med | 0.5 | 1.0 | S–M | Med-High | Now |
+| MCP streamable-HTTP + analyze_flow | Med | 1.0 | 0.8 | M | Med-High | Next |
+| Session/auth handling | Med | 2.0 | 0.5 | L | Med | Next |
+| BYO-key AI assist | Med | 1.0 | 0.6 | M–L | Med | Next |
 | HTTP/2 | Med | 1.0 | 0.8 | L | Low-Med | Later |
 
 *Scores are directional, revisited each planning cycle. "Now" is a small committed slice; "Next"
