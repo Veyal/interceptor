@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -19,6 +20,39 @@ import (
 	"github.com/Veyal/interceptor/internal/store"
 	"github.com/Veyal/interceptor/internal/tlsca"
 )
+
+// wsTextFrame builds an RFC 6455 text frame (payload < 126 bytes).
+func wsTextFrame(payload string, masked bool) []byte {
+	p := []byte(payload)
+	f := []byte{0x81} // FIN + text opcode
+	if masked {
+		f = append(f, 0x80|byte(len(p)))
+		mask := []byte{0x12, 0x34, 0x56, 0x78}
+		f = append(f, mask...)
+		for i, b := range p {
+			f = append(f, b^mask[i%4])
+		}
+	} else {
+		f = append(f, byte(len(p)))
+		f = append(f, p...)
+	}
+	return f
+}
+
+func waitWSFrames(t *testing.T, s *store.Store, flowID int64, n int) []*store.WSFrame {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		fr, _ := s.QueryWSFrames(flowID, 50)
+		if len(fr) >= n {
+			return fr
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	fr, _ := s.QueryWSFrames(flowID, 50)
+	t.Fatalf("expected %d ws frames, got %d", n, len(fr))
+	return nil
+}
 
 func waitFlows(t *testing.T, s *store.Store, n int) []*store.Flow {
 	t.Helper()
@@ -160,22 +194,33 @@ func TestProxyTunnelsWebSocketUpgrade(t *testing.T) {
 		t.Fatalf("expected 101 Switching Protocols, got %d", resp.StatusCode)
 	}
 
-	// The tunnel must now be a transparent byte pipe.
-	io.WriteString(c, "frame-bytes")
-	got := make([]byte, len("frame-bytes"))
+	// The tunnel must relay WebSocket frames verbatim.
+	frame := wsTextFrame("frame-bytes", true)
+	if _, err := c.Write(frame); err != nil {
+		t.Fatalf("write frame: %v", err)
+	}
+	got := make([]byte, len(frame))
 	if _, err := io.ReadFull(br, got); err != nil {
 		t.Fatalf("read echoed frame: %v", err)
 	}
-	if string(got) != "frame-bytes" {
-		t.Fatalf("tunnel echo mismatch: %q", got)
+	if !bytes.Equal(got, frame) {
+		t.Fatalf("tunnel did not relay the frame verbatim")
 	}
 
 	f := waitFlows(t, s, 1)[0]
-	if f.Status != http.StatusSwitchingProtocols {
-		t.Fatalf("expected flow status 101, got %d", f.Status)
+	if f.Status != http.StatusSwitchingProtocols || f.Flags&store.FlagWebSocket == 0 {
+		t.Fatalf("expected 101 + FlagWebSocket, got status=%d flags=%d", f.Status, f.Flags)
 	}
-	if f.Flags&store.FlagWebSocket == 0 {
-		t.Fatalf("expected FlagWebSocket set, flags=%d", f.Flags)
+	// The frame was captured with its (unmasked) preview.
+	frames := waitWSFrames(t, s, f.ID, 2)
+	var sawSend bool
+	for _, fr := range frames {
+		if fr.Dir == "send" && fr.Opcode == 1 && fr.Preview == "frame-bytes" {
+			sawSend = true
+		}
+	}
+	if !sawSend {
+		t.Fatalf("expected a captured send frame with preview, got %+v", frames)
 	}
 }
 
@@ -261,13 +306,16 @@ func TestProxyMITMTunnelsWebSocketUpgrade(t *testing.T) {
 	if resp.StatusCode != http.StatusSwitchingProtocols {
 		t.Fatalf("expected 101 over MITM, got %d", resp.StatusCode)
 	}
-	io.WriteString(tlsClient, "wss-frame")
-	got := make([]byte, len("wss-frame"))
+	frame := wsTextFrame("wss-frame", true)
+	if _, err := tlsClient.Write(frame); err != nil {
+		t.Fatalf("write frame: %v", err)
+	}
+	got := make([]byte, len(frame))
 	if _, err := io.ReadFull(wsBr, got); err != nil {
 		t.Fatalf("read echoed frame: %v", err)
 	}
-	if string(got) != "wss-frame" {
-		t.Fatalf("MITM tunnel echo mismatch: %q", got)
+	if !bytes.Equal(got, frame) {
+		t.Fatalf("MITM tunnel did not relay the frame verbatim")
 	}
 
 	f := waitFlows(t, s, 1)[0]

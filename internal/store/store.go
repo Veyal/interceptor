@@ -96,6 +96,17 @@ CREATE TABLE IF NOT EXISTS scan_issues (
   detail TEXT, evidence TEXT, fix TEXT,
   UNIQUE(title, target)
 );
+
+CREATE TABLE IF NOT EXISTS ws_frames (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  flow_id INTEGER NOT NULL,
+  ts INTEGER NOT NULL,
+  dir TEXT NOT NULL,
+  opcode INTEGER NOT NULL,
+  length INTEGER NOT NULL,
+  preview TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ws_flow ON ws_frames(flow_id);
 `
 
 // Open creates (or opens) the database and body store under dir.

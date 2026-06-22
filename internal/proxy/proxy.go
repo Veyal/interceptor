@@ -280,9 +280,10 @@ func (s *Server) tunnelUpgrade(clientConn net.Conn, clientReader *bufio.Reader, 
 		return // upstream declined the upgrade; nothing to splice
 	}
 
+	// Frame-aware relay: capture each WebSocket frame while forwarding verbatim.
 	done := make(chan struct{}, 2)
-	go func() { io.Copy(up, clientReader); up.Close(); done <- struct{}{} }()
-	go func() { io.Copy(clientConn, upReader); clientConn.Close(); done <- struct{}{} }()
+	go func() { s.relayWSFrames(flow.ID, "send", clientReader, up); up.Close(); done <- struct{}{} }()
+	go func() { s.relayWSFrames(flow.ID, "recv", upReader, clientConn); clientConn.Close(); done <- struct{}{} }()
 	<-done
 	<-done
 }

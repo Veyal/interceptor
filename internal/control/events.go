@@ -14,6 +14,12 @@ func (h *Hub) FlowCaptured(f *store.Flow) {
 	h.broadcast(map[string]any{"type": "flow.new", "flow": toFlowJSON(f)})
 }
 
+// WSFramed implements the proxy's optional ws-frame sink: it nudges the UI to
+// refresh the frame list for a websocket flow.
+func (h *Hub) WSFramed(flowID int64) {
+	h.broadcast(map[string]any{"type": "ws.frame", "flowId": flowID})
+}
+
 // broadcastIntercept pushes the current intercept state (toggle + hold queue).
 // It is registered as the intercept engine's change notifier and may be invoked
 // concurrently.

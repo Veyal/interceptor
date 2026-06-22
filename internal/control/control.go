@@ -78,6 +78,7 @@ func (h *Hub) routes() {
 	h.mux.HandleFunc("GET /api/flows", h.listFlows)
 	h.mux.HandleFunc("GET /api/flows/{id}", h.getFlow)
 	h.mux.HandleFunc("GET /api/flows/{id}/raw", h.getFlowRaw)
+	h.mux.HandleFunc("GET /api/flows/{id}/ws", h.flowWS)
 	h.mux.HandleFunc("GET /api/rules", h.listRules)
 	h.mux.HandleFunc("POST /api/rules", h.createRule)
 	h.mux.HandleFunc("PUT /api/rules/{id}", h.updateRule)
@@ -250,6 +251,23 @@ func (h *Hub) rawResponse(f *store.Flow) []byte {
 	b.WriteString("\r\n")
 	b.Write(h.bodyBytes(f.ResBodyHash))
 	return b.Bytes()
+}
+
+func (h *Hub) flowWS(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		httpErr(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	frames, err := h.st.QueryWSFrames(id, 2000)
+	if err != nil {
+		httpErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if frames == nil {
+		frames = []*store.WSFrame{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"frames": frames})
 }
 
 func (h *Hub) bodyBytes(hash string) []byte {
