@@ -145,7 +145,7 @@ func scanFlow(row scanner) (*Flow, error) {
 	); err != nil {
 		return nil, err
 	}
-	f.TS = time.UnixMilli(tsMillis)
+	f.TS = time.UnixMilli(tsMillis).UTC()
 	_ = json.Unmarshal([]byte(reqH), &f.ReqHeaders)
 	_ = json.Unmarshal([]byte(resH), &f.ResHeaders)
 	return &f, nil

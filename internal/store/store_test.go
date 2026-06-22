@@ -43,6 +43,9 @@ func TestInsertAndGetFlow(t *testing.T) {
 	if got.Status != 200 || got.Mime != "text/plain" {
 		t.Fatalf("unexpected status/mime: %+v", got)
 	}
+	if got.TS.UnixMilli() != in.TS.UnixMilli() {
+		t.Fatalf("TS not round-tripped: got %v want %v", got.TS, in.TS)
+	}
 	if got.ReqHeaders["Accept"][0] != "application/json" {
 		t.Fatalf("headers not round-tripped: %+v", got.ReqHeaders)
 	}
