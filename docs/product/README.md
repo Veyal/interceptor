@@ -9,6 +9,7 @@ decide. These are living documents — PRs that change product direction update 
 |---|---|
 | [strategy.md](strategy.md) | Vision, target users/personas, value prop, competitive positioning, non-goals |
 | [roadmap.md](roadmap.md) | What's Now / Next / Later, with prioritization (RICE) and themes |
+| [improvements.md](improvements.md) | UX/ease + API/MCP gap analysis (what to improve and why) |
 | [metrics.md](metrics.md) | North Star (Weekly Active Hunters) + funnel KPIs + privacy-first measurement |
 | [prd-0001-target-scope.md](prd-0001-target-scope.md) | Flagship PRD for the #1 next feature — and the PRD template |
 

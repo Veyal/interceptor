@@ -2,9 +2,11 @@
 
 *Owner: Product · Last updated: 2026-06-22 · Horizon: rolling. Now/Next/Later, not dates.*
 
-Roadmap is organized around the strategy in [strategy.md](strategy.md). Two jobs: **(A) close the
-table-stakes gaps** that lose a "Burp alternative" evaluation, and **(B) press our differentiators**
-(lightweight, free/open, scriptable/agent-native).
+Roadmap is organized around the strategy in [strategy.md](strategy.md). The product **intent** is a
+proxy operated by **a penetration tester and their AI assistant together**, so the top priorities
+are: **(A) make the AI a first-class operator** (a real MCP server + an AI-friendly API), **(B)
+frictionless UX/onboarding** for the human, and only then **(C) close table-stakes gaps** and **(D)
+press differentiators**. See [improvements.md](improvements.md) for the gap analysis driving this.
 
 ## What exists today (v1 baseline)
 
@@ -15,27 +17,30 @@ keys and an MCP descriptor. ~3.7k LOC of Go, no cgo, single static binary.
 
 ## Themes
 
-1. **Trustworthy core** — be a tool pentesters stage real work on (scope, scale, correctness).
-2. **Interop** — play well with the rest of the toolchain (HAR, upstream proxy, browsers).
-3. **Differentiators** — lean into speed, free/open, and the API/MCP/agent story.
-4. **Reach** — make adoption frictionless and the value provable (benchmarks, docs, packaging).
+1. **AI-operable** — the AI can do everything the UI can: a real MCP server + an AI-friendly API.
+2. **Frictionless UX** — instant onboarding (CA, proxy setup, MCP setup), low-noise, easy to drive.
+3. **Trustworthy core** — be a tool pentesters stage real work on (scope, scale, correctness).
+4. **Interop & reach** — HAR, upstream proxy, benchmarks, packaging.
 
-## Now (next slice) — close the highest-leverage gaps + quick wins
+## Now (this slice) — make the AI a first-class operator + kill onboarding friction
 
 | Item | Theme | Why | Effort |
 |---|---|---|---|
-| **Target scope** (in/out-of-scope host/path patterns; filters history, focuses intercept & scanner) | Trustworthy core | #1 recurring table-stakes gap; reduces noise → reinforces our "quiet/precise" edge. **PRD:** [prd-0001-target-scope.md](prd-0001-target-scope.md) | M |
-| **Performance benchmarks, published** (cold start, idle RSS, 10k-flow scroll vs Burp/ZAP) | Reach | Our core thesis is unproven until measured; this is marketing gold and a regression guard | S |
-| **System-proxy toggle** (point the OS at the proxy from Settings; off by default, explicit) | Interop | Removes the #1 setup friction for new users | S |
-| **HAR export** of selected flows / history | Interop | Near-universal interop ask; HTTP Toolkit gating it behind Pro annoys users — we give it free | S–M |
+| **Real MCP server** (`interceptor mcp`, stdio JSON-RPC) exposing the control API as agent tools | AI-operable | The flagship for our intent — turns today's `/api/mcp` *descriptor* into a server an AI can actually drive. **← building now** | M |
+| **MCP setup in the UI** (copy-paste client config, connection status, tool list) | Frictionless UX | An AI feature no one uses if setup is hard; one-click config closes that | S |
+| **AI-friendly API polish** (consistent JSON shapes, `GET /api/reference` already machine-readable; ensure every tool's result is predictable) | AI-operable | The API is the AI's substrate; predictability > cleverness | S |
+| **System-proxy toggle** + **one-screen onboarding** (CA install hint, "you're capturing" state) | Frictionless UX | Removes the top setup friction for the human half of the pair | S–M |
+| **Target scope** (in/out-of-scope host/path patterns; filters history, focuses intercept & scanner) | Trustworthy core | #1 table-stakes gap; reduces noise → helps human *and* AI focus. **PRD:** [prd-0001-target-scope.md](prd-0001-target-scope.md) | M |
+| **Performance benchmarks, published** (cold start, idle RSS, 10k-flow scroll vs Burp/ZAP) | Interop & reach | Core thesis is unproven until measured; marketing gold + regression guard | S |
+| **HAR export** of selected flows / history | Interop & reach | Near-universal interop ask; we give it free | S–M |
 
 ## Next — parity + differentiation
 
 | Item | Theme | Why | Effort |
 |---|---|---|---|
-| **Response interception** (hold/edit/drop responses; response-side match-&-replace executes) | Trustworthy core | Burp-parity gap explicitly deferred in the v1 spec; builds directly on the existing intercept engine | M |
-| **Full MCP server** (stdio + SSE MCP exposing the control API as agent tools, beyond today's descriptor) | Differentiator | Rides the hottest 2024–25 trend; a defensible angle the JVM incumbents lack natively | M |
-| **Upstream / chained proxy** (route upstream through a corporate or another proxy) | Interop | Recurring enterprise/corp-network requirement | M |
+| **Response interception** (hold/edit/drop responses; response-side match-&-replace executes) | Trustworthy core | Burp-parity gap explicitly deferred in the v1 spec; builds directly on the existing intercept engine; expose to the AI as MCP tools too | M |
+| **MCP: streamable-HTTP transport + richer tools** (remote MCP over the control port; per-tool result schemas; an `analyze_flow` helper) | AI-operable | Builds on the stdio server; lets hosted agents connect without a subcommand | M |
+| **Upstream / chained proxy** (route upstream through a corporate or another proxy) | Interop & reach | Recurring enterprise/corp-network requirement | M |
 | **History full-text search + saved filters** | Trustworthy core | Scales the core loop to large sessions; pairs with scope | M |
 | **HAR / raw import** (replay external captures) | Interop | Completes the interop story; feeds Repeater/Scanner from other tools | S–M |
 

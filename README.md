@@ -6,6 +6,12 @@ MITM proxy plus a local web UI, with **performance as a first-class constraint**
 core, request/response bodies streamed to disk (never held whole in memory), and passive
 analysis kept off the hot path.
 
+**Built for the AI-assisted penetration tester.** The human drives a fast web UI; their AI assistant
+drives the **same engine** through a real **MCP server** (`interceptor mcp`) and a **REST/SSE API** —
+listing and reading flows, replaying and mutating requests, running Intruder/Scanner, toggling
+intercept, and adding rules, all under the tester's direction and entirely on the local machine.
+See [`docs/product/`](docs/product/) for the product intent and roadmap.
+
 > Status: feature-complete on the core proxy plus the Repeater, Intruder, Scanner, WebSocket
 > capture, and API modules. See [CHANGELOG.md](CHANGELOG.md).
 

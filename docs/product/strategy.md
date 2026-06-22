@@ -8,6 +8,21 @@
 binary you can run anywhere in under a second, that captures and manipulates traffic without the
 weight of a JVM — and that an AI agent or CI job can drive as easily as a human.
 
+## Intent (read this first)
+
+**Interceptor is an intercepting proxy built to be operated by a penetration tester *and their AI
+assistant together.*** The human and the AI are **both first-class users of the same engine**:
+
+- the **human** gets a fast, low-friction web UI to watch, intercept, replay, fuzz, and scan traffic;
+- the **AI** gets the *same capabilities* through a real **MCP server** and a clean **REST/SSE API**,
+  so it can autonomously list/inspect flows, replay and mutate requests, run Intruder/Scanner, toggle
+  intercept, and add match-&-replace rules — under the tester's direction.
+
+Everything we build serves that pairing: **great UI/UX for the tester, and an equally first-class
+MCP/API surface for the AI.** If a capability exists in the UI, it must be reachable by the agent,
+and vice-versa. Captured traffic stays on the tester's machine; the AI drives the local engine, it
+doesn't ship your traffic anywhere.
+
 ## The problem
 
 Web/API security testing is dominated by two heavy, JVM-based tools:
@@ -31,15 +46,20 @@ CI-integrated, and increasingly agent-driven.
 
 ## Target users & personas
 
+Our **primary target is the AI-assisted penetration tester**: a tester who works *with* an AI
+assistant (Claude, etc.) in the loop. This is a **pair** — the human and the agent — and we design
+for both as first-class users of the same engine.
+
 | Persona | Who | Primary jobs-to-be-done | What they value |
 |---|---|---|---|
-| **Bug-bounty hunter "Bea"** (primary) | Independent, often students/early-career, post-2024 cohort | Capture & replay requests fast; fuzz parameters; find auth/IDOR/injection bugs | Zero cost, instant start, low friction, portability |
-| **Pentester "Pavan"** | Consultant delivering client reports | Full manual workflow + repeatable evidence; intercept/edit; scope control | Trustworthy capture, scope, exportable findings |
-| **Security-minded dev "Devi"** | Builds APIs, wants to self-test | Inspect their own app's traffic; catch missing headers/secrets; debug | Clean UI, low noise, runs locally, no heavyweight install |
-| **Automation/agent "Auto"** (emerging) | CI pipelines & AI agents | Drive capture/replay/scan programmatically | Stable REST/SSE API + MCP; headless single binary |
+| **Priya — the AI-assisted pentester** (primary, human half) | Pentester/bug-bounty hunter who drives an AI assistant while testing | Direct the AI to capture/inspect/replay/fuzz/scan; jump in via the UI to verify, intercept, and edit | A fast UI to supervise + take over; an AI that can actually *do* the work in the tool |
+| **Atlas — her AI agent** (primary, agent half) | An LLM agent (Claude Code/Desktop, custom) connected over MCP | List & read flows, replay/mutate requests, run Intruder/Scanner, toggle intercept, add rules — autonomously | A complete, well-described **MCP** toolset + **REST/SSE** API; predictable, machine-readable results |
+| **Bug-bounty hunter "Bea"** (secondary) | Independent, price-sensitive, post-2024 cohort | Capture & replay fast; fuzz; find auth/IDOR/injection bugs | Zero cost, instant start, portability |
+| **Security-minded dev "Devi"** (secondary) | Builds APIs, self-tests | Inspect own traffic; catch missing headers/secrets | Clean UI, low noise, runs locally |
 
-**Primary segment to win first: Bea (bug-bounty hunters).** They're price-sensitive, vocal,
-fast-adopting, and already migrating to native tools — the same wedge Caido used.
+**Win first: the Priya + Atlas pair.** No incumbent is built for the human+AI loop — Burp bolts AI
+on for itself; the lightweight natives (Caido, Hetty) have no real agent surface. A proxy where the
+**AI is a first-class operator** is our defensible wedge, riding the hottest 2024–25 trend (MCP/agents).
 
 ## Value proposition
 
