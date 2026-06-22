@@ -80,6 +80,10 @@ func run() error {
 	hub := control.New(st, eng, ca, pm, sc)
 	prx := proxy.New(st, capture.New(st), ca, eng, hub)
 	prx.Scope = sc
+	hub.Upstream = prx.SetUpstreamProxy
+	if v, ok, _ := st.GetSetting("upstream.proxy"); ok && v != "" {
+		_ = prx.SetUpstreamProxy(v)
+	}
 	pm.handler = prx
 
 	proxyAddr := "127.0.0.1:8080"

@@ -45,6 +45,9 @@ type Hub struct {
 	sc     *scope.Engine
 	mux    *http.ServeMux
 
+	// Upstream applies a chained upstream-proxy URL ("" = direct). Set by cmd.
+	Upstream func(string) error
+
 	mu      sync.Mutex
 	clients map[chan string]struct{}
 }
@@ -180,6 +183,7 @@ type interceptJSON struct {
 type settingsJSON struct {
 	ProxyAddr        string `json:"proxyAddr"`
 	InterceptEnabled bool   `json:"interceptEnabled"`
+	UpstreamProxy    string `json:"upstreamProxy"`
 }
 
 func toFlowJSON(f *store.Flow) flowJSON {
@@ -556,15 +560,18 @@ func (h *Hub) currentProxyAddr() string {
 }
 
 func (h *Hub) getSettings(w http.ResponseWriter, r *http.Request) {
+	up, _, _ := h.st.GetSetting("upstream.proxy")
 	writeJSON(w, http.StatusOK, settingsJSON{
 		ProxyAddr:        h.currentProxyAddr(),
 		InterceptEnabled: h.eng != nil && h.eng.Enabled(),
+		UpstreamProxy:    up,
 	})
 }
 
 func (h *Hub) putSettings(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		ProxyAddr string `json:"proxyAddr"`
+		ProxyAddr     string  `json:"proxyAddr"`
+		UpstreamProxy *string `json:"upstreamProxy"` // pointer so "" can clear it
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		httpErr(w, http.StatusBadRequest, "bad json")
@@ -578,6 +585,16 @@ func (h *Hub) putSettings(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		_ = h.st.SetSetting("proxy.addr", in.ProxyAddr)
+		h.broadcast(map[string]any{"type": "settings.update"})
+	}
+	if in.UpstreamProxy != nil {
+		if h.Upstream != nil {
+			if err := h.Upstream(*in.UpstreamProxy); err != nil {
+				httpErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		_ = h.st.SetSetting("upstream.proxy", *in.UpstreamProxy)
 		h.broadcast(map[string]any{"type": "settings.update"})
 	}
 	h.getSettings(w, r)

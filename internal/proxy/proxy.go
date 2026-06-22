@@ -12,9 +12,11 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Veyal/interceptor/internal/capture"
@@ -41,26 +43,38 @@ type Server struct {
 	cap    *capture.Capturer
 	ca     *tlsca.CA         // nil → HTTPS CONNECT returns 501
 	eng    *intercept.Engine // nil → no intercept/rules
-	events Events            // nil → no live notifications
-	Scope  ScopeChecker      // nil → everything in scope
-	tr     *http.Transport
+	events   Events       // nil → no live notifications
+	Scope    ScopeChecker // nil → everything in scope
+	tr       *http.Transport
+	upstream atomic.Pointer[url.URL] // optional chained upstream proxy
 }
 
 // New builds a proxy Server. ca, eng, and events may each be nil.
 func New(st *store.Store, cap *capture.Capturer, ca *tlsca.CA, eng *intercept.Engine, events Events) *Server {
-	return &Server{
-		st:     st,
-		cap:    cap,
-		ca:     ca,
-		eng:    eng,
-		events: events,
-		tr: &http.Transport{
-			Proxy:                 nil, // dial upstream directly
-			MaxIdleConns:          100,
-			IdleConnTimeout:       90 * time.Second,
-			ResponseHeaderTimeout: 30 * time.Second,
-		},
+	s := &Server{st: st, cap: cap, ca: ca, eng: eng, events: events}
+	s.tr = &http.Transport{
+		// Honor an optionally-configured chained upstream proxy (race-safe).
+		Proxy:                 func(*http.Request) (*url.URL, error) { return s.upstream.Load(), nil },
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
 	}
+	return s
+}
+
+// SetUpstreamProxy routes outbound traffic through a chained proxy (e.g. a
+// corporate proxy). An empty string means connect directly.
+func (s *Server) SetUpstreamProxy(raw string) error {
+	if strings.TrimSpace(raw) == "" {
+		s.upstream.Store(nil)
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("invalid upstream proxy URL %q", raw)
+	}
+	s.upstream.Store(u)
+	return nil
 }
 
 // Serve accepts connections on ln until it is closed.

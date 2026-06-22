@@ -407,6 +407,11 @@ changeme</textarea>
           <button class="btn accent" id="saveAddrBtn">Apply &amp; rebind</button>
           <span class="hint">Use <b>0.0.0.0:8080</b> to intercept other devices on your LAN.</span>
         </div>
+        <div class="field" style="margin-top:16px">
+          <label>Upstream proxy (chain through another proxy; blank = direct)</label>
+          <input id="setUpstream" placeholder="http://corp-proxy:8080">
+        </div>
+        <div class="row"><button class="btn" id="saveUpstreamBtn">Save upstream</button></div>
       </div>
       <div class="section">
         <h3>SYSTEM PROXY</h3>
@@ -811,7 +816,12 @@ $('#addRuleBtn').onclick=async()=>{
 
 /* ---- settings ---- */
 async function loadSettings(){try{const s=await api('/api/settings');state.proxyAddr=s.proxyAddr;$('#proxyAddr').textContent=s.proxyAddr;$('#setAddr').value=s.proxyAddr;
+  if($('#setUpstream'))$('#setUpstream').value=s.upstreamProxy||'';
   state.intercept.enabled=s.interceptEnabled;}catch(e){}}
+$('#saveUpstreamBtn').onclick=async()=>{
+  try{await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({upstreamProxy:$('#setUpstream').value.trim()})});
+    toast('upstream proxy saved');}catch(e){toast(e.message);}
+};
 $('#saveAddrBtn').onclick=async()=>{
   try{const s=await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({proxyAddr:$('#setAddr').value})});
     $('#proxyAddr').textContent=s.proxyAddr;toast('proxy now on '+s.proxyAddr);}catch(e){toast(e.message);}

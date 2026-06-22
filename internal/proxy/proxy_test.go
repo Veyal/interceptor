@@ -324,6 +324,35 @@ func TestProxyMITMTunnelsWebSocketUpgrade(t *testing.T) {
 	}
 }
 
+func TestUpstreamProxyConfig(t *testing.T) {
+	s, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+	srv := New(s, capture.New(s), nil, nil, nil)
+
+	req := &http.Request{URL: &url.URL{Scheme: "http", Host: "example.com"}}
+	if u, _ := srv.tr.Proxy(req); u != nil {
+		t.Fatalf("default should be direct, got %v", u)
+	}
+	if err := srv.SetUpstreamProxy("http://corp:3128"); err != nil {
+		t.Fatalf("SetUpstreamProxy: %v", err)
+	}
+	if u, _ := srv.tr.Proxy(req); u == nil || u.Host != "corp:3128" {
+		t.Fatalf("expected upstream corp:3128, got %v", u)
+	}
+	if err := srv.SetUpstreamProxy(""); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if u, _ := srv.tr.Proxy(req); u != nil {
+		t.Fatalf("expected direct after clear, got %v", u)
+	}
+	if err := srv.SetUpstreamProxy("://bad"); err == nil {
+		t.Fatal("expected error for invalid upstream URL")
+	}
+}
+
 func TestProxyResponseMatchReplace(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")

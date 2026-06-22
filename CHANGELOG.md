@@ -7,6 +7,10 @@ each "release" is an iteration of the Conduit design (`Conduit.dc.html`).
 ## [Unreleased]
 
 ### Added
+- **Upstream / chained proxy** — route Interceptor's outbound traffic through another proxy (e.g. a
+  corporate proxy). Configured via the `upstream.proxy` setting (`PUT /api/settings`
+  `{upstreamProxy}`) and a **Settings → Upstream proxy** field; applied race-safely to the transport
+  (`atomic.Pointer`), live and at startup. Blank = direct.
 - **Response interception** — the intercept engine now handles the response side too:
   **response match-&-replace** (`res-header` / `res-body` rules execute, transforming responses
   before they reach the client) and a **response hold queue** (hold → edit raw → forward / drop),
