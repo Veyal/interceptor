@@ -107,6 +107,14 @@ CREATE TABLE IF NOT EXISTS ws_frames (
   preview TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_ws_flow ON ws_frames(flow_id);
+
+CREATE TABLE IF NOT EXISTS api_keys (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  label TEXT,
+  prefix TEXT NOT NULL,
+  hash TEXT NOT NULL,
+  created INTEGER NOT NULL
+);
 `
 
 // Open creates (or opens) the database and body store under dir.
