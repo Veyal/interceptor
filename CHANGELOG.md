@@ -7,6 +7,11 @@ each "release" is an iteration of the Conduit design (`Conduit.dc.html`).
 ## [Unreleased]
 
 ### Added
+- **Product-management docs** under `docs/product/`: a market-researched product **strategy**
+  (vision, personas, competitive positioning vs Burp/ZAP/Caido/mitmproxy/Hetty, non-goals), a
+  prioritized **roadmap** (Now/Next/Later with RICE scoring), **success metrics** (North Star =
+  Weekly Active Hunters, funnel KPIs, privacy-first measurement), and a flagship **PRD** for Target
+  Scope (also the PRD template). Linked from the README.
 - `README.md` (product overview, install/run, HTTPS CA setup, architecture, control API) and
   `CONTRIBUTING.md` (the code standards every change must follow — TDD, no cgo, conventional
   commits, changelog-per-change, package/concurrency/UI conventions).

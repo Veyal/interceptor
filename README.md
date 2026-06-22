@@ -87,3 +87,9 @@ go vet ./...           # static checks
 
 Please read [CONTRIBUTING.md](CONTRIBUTING.md) for the coding standards before sending changes —
 TDD, no cgo, conventional commits, and a CHANGELOG entry per change are expected.
+
+## Product & roadmap
+
+Why this exists, who it's for, and what's next live under [`docs/product/`](docs/product/):
+[strategy](docs/product/strategy.md) · [roadmap](docs/product/roadmap.md) ·
+[metrics](docs/product/metrics.md) · [flagship PRD](docs/product/prd-0001-target-scope.md).
