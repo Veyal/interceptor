@@ -6,13 +6,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Added
-- **`LICENSE`** — the project is now MIT licensed.
-- **README overhaul for the public release** — install via `go install …@latest` / `@v0.1.0` and the
-  Releases page, a quick-start, a configuration (env-var) table, a prominent responsible-use notice,
-  the full feature list (scope, projects/HAR, session injection, AI assist, WS replay, 24 MCP tools
-  over stdio + Streamable-HTTP), an updated architecture table, and badges.
-
 ## [0.1.0] — 2026-06-23 · first public release
 
 The first tagged release: an intercepting HTTP/HTTPS proxy and AI-operable security-testing toolkit
@@ -33,6 +26,10 @@ capture & replay, BYO-key AI assist (Anthropic / OpenRouter), an MCP server (std
   "expose to my LAN" path). TDD + verified live (normal use 200; cross-origin/rebind 403/400).
 
 ### Added
+- **`LICENSE`** — the project is MIT licensed.
+- **Public-ready README** — install via `go install …@latest` / `@v0.1.0`, a quick-start, an env-var
+  config table, a prominent responsible-use notice, the full feature list, an updated architecture
+  table, and badges.
 - **WebSocket message replay** (a WS Repeater) — a new `internal/wsrepeater` opens a fresh
   WebSocket to a target, sends one message, and captures the reply frames, speaking enough of
   RFC 6455 to do so with no external deps (client handshake with `Sec-WebSocket-Accept`
