@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Command palette (Ctrl / Cmd + K)** — fuzzy-search captured flows, jump to any tab, and run
+  commands (toggle intercept, run scanner, in-scope, export HAR, …) from one overlay; arrow-key
+  navigation, ⏎ to run, esc to close.
+- **Keyboard shortcuts** — **Ctrl+R** send the selected flow to Repeater, **Ctrl+I** to Intruder,
+  **Ctrl+Space** send the current Repeater request, **/** focus history search.
+- **Smarter history filters** — the method dropdown now lists only the HTTP methods that actually
+  appear in the current history (no empty POST/PUT/… options).
+- **Define scope from history** — a right-click **Add to scope** action adds a host as an include
+  rule, so the **◎ in scope** toggle is one click away from useful.
+- **Body beautify (size-gated)** — the inspector's **Pretty** view now pretty-prints JSON (and lightly
+  indents HTML/XML), but only for bodies under 256 KB so large responses stay cheap.
 - **Custom scanner checks (Starlark)** — the passive scanner is now extensible: drop a `.star` file
   defining `def check(flow): …` into `~/.interceptor/checks/` and it runs on every scan beside the
   built-ins. New `internal/checkscript` compiles and runs checks in an embedded **Starlark** engine

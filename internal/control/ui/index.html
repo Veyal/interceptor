@@ -575,7 +575,16 @@ async function loadFlows(){
   if(f.host)q.set('host',f.host);
   if(state.inScopeOnly)q.set('inScope','1');
   q.set('limit','500');
-  try{const d=await api('/api/flows?'+q.toString());state.flows=d.flows||[];renderRows();}catch(e){toast('flows: '+e.message);}
+  try{const d=await api('/api/flows?'+q.toString());state.flows=d.flows||[];renderRows();refreshMethodFilter();}catch(e){toast('flows: '+e.message);}
+}
+// Show only the HTTP methods that actually appear in the current history.
+function refreshMethodFilter(){
+  if(state.filters.method)return; // don't shrink the list while filtering by method
+  const order=['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS','CONNECT','TRACE'];
+  const present=[...new Set(state.flows.map(f=>f.method).filter(Boolean))]
+    .sort((a,b)=>{const ia=order.indexOf(a),ib=order.indexOf(b);return (ia<0?99:ia)-(ib<0?99:ib)||a.localeCompare(b);});
+  const sel=$('#fMethod');if(!sel)return;const cur=sel.value;
+  sel.innerHTML='<option value="">method</option>'+present.map(m=>`<option ${m===cur?'selected':''}>${esc(m)}</option>`).join('');
 }
 let reloadTimer=null;
 function scheduleReload(){clearTimeout(reloadTimer);reloadTimer=setTimeout(loadFlows,150);}
@@ -631,11 +640,27 @@ async function wsReplay(url){
     if(out)out.innerHTML=head+(r.frames||[]).map(f=>wsFrameRow(f.dir,f.opcode,f.len,f.text)).join('');
   }catch(e){if(out)out.innerHTML='<span style="color:var(--red)">'+esc(e.message)+'</span>';}
 }
+const PRETTY_MAX=256*1024; // only beautify smallish bodies, to stay light
+function beautifyBody(body){
+  const t=body.replace(/^﻿/,'').trim();
+  if(t&&(t[0]==='{'||t[0]==='[')){try{return JSON.stringify(JSON.parse(t),null,2);}catch(e){}}
+  if(t&&t[0]==='<'){try{
+    let depth=0,out='';
+    t.replace(/>\s*</g,'>\n<').split('\n').forEach(ln=>{
+      ln=ln.trim();if(!ln)return;
+      if(/^<\//.test(ln))depth=Math.max(0,depth-1);
+      out+='  '.repeat(depth)+ln+'\n';
+      if(/^<[^!?\/][^>]*[^\/]>$/.test(ln)&&!/^<(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)\b/i.test(ln))depth++;
+    });
+    return out.replace(/\s+$/,'');
+  }catch(e){}}
+  return body;
+}
 function prettify(raw){
   const i=raw.indexOf('\r\n\r\n');const head=i>=0?raw.slice(0,i):raw;const body=i>=0?raw.slice(i+4):'';
-  let pretty=body;
-  try{pretty=JSON.stringify(JSON.parse(body),null,2);}catch(e){}
-  return head+'\n\n'+pretty;
+  if(!body)return raw;
+  if(body.length>PRETTY_MAX)return head+'\n\n'+body+'\n\n— body too large to beautify ('+fmtSize(body.length)+'); showing raw —';
+  return head+'\n\n'+beautifyBody(body);
 }
 async function renderSide(side){
   const el=side==='req'?$('#reqView'):$('#resView');
@@ -693,6 +718,11 @@ $('#delViewBtn').onclick=async()=>{const id=$('#viewsSelect').value;if(!id)retur
 
 /* ---- target scope ---- */
 async function loadScope(){try{const d=await api('/api/scope');state.scope=d.rules||[];renderScope();}catch(e){}}
+async function addHostToScope(host){
+  try{await api('/api/scope',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'include',host:host,enabled:true})});
+    toast('added '+host+' to scope — toggle ◎ in scope to focus');loadScope();}
+  catch(e){toast(e.message);}
+}
 function renderScope(){
   const body=$('#scopeBody');if(!body)return;
   if(!state.scope.length){body.innerHTML='<tr><td colspan="6" class="hint" style="padding:10px 8px">No scope rules — everything is in scope.</td></tr>';return;}
@@ -766,6 +796,8 @@ function showCtx(x,y,f,field){
   html+='<div class="ctx-sep"></div>';
   html+=`<div class="ctx-item" data-i="${acts.length}">Copy URL</div>`;acts.push(()=>copyURL(f));
   html+=`<div class="ctx-item" data-i="${acts.length}">Copy as cURL</div>`;acts.push(()=>copyCurl(f));
+  html+='<div class="ctx-sep"></div>';
+  html+=`<div class="ctx-item" data-i="${acts.length}"><span class="lbl">Add to scope</span><span class="mono">${esc(f.host)}</span></div>`;acts.push(()=>addHostToScope(f.host));
   html+='<div class="ctx-sep"></div>';
   html+=`<div class="ctx-item" data-i="${acts.length}"><span class="lbl">Send to</span><span class="mono">Repeater</span></div>`;acts.push(()=>sendToRepeater(f));
   html+=`<div class="ctx-item" data-i="${acts.length}"><span class="lbl">Send to</span><span class="mono">Intruder</span></div>`;acts.push(()=>sendToIntruder(f));
@@ -1177,6 +1209,86 @@ function connectEvents(){
   };
   es.onerror=()=>{/* browser auto-reconnects */};
 }
+
+/* ---- command palette (Ctrl/Cmd+K) ---- */
+const cmdk={el:null,input:null,list:null,items:[],sel:0,open:false};
+function cmdkBuild(){
+  const o=document.createElement('div');o.id='cmdk';
+  o.style.cssText='position:fixed;inset:0;z-index:300;display:none;align-items:flex-start;justify-content:center;background:rgba(0,0,0,.5)';
+  o.innerHTML='<div style="margin-top:11vh;width:min(680px,92vw);background:var(--bg2,#15151b);border:1px solid var(--line);border-radius:12px;box-shadow:0 24px 70px rgba(0,0,0,.55);overflow:hidden">'
+    +'<input id="cmdkInput" placeholder="Search flows · jump to a tab · run a command…" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;padding:14px 16px;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--fg);font-size:15px;outline:none">'
+    +'<div id="cmdkList" style="max-height:52vh;overflow:auto;padding:6px"></div>'
+    +'<div style="padding:7px 14px;border-top:1px solid var(--line);color:var(--fg3);font-size:10px;display:flex;gap:16px"><span>↑ ↓ navigate</span><span>⏎ run</span><span>esc close</span></div></div>';
+  document.body.appendChild(o);
+  cmdk.el=o;cmdk.input=o.querySelector('#cmdkInput');cmdk.list=o.querySelector('#cmdkList');
+  o.onclick=e=>{if(e.target===o)cmdkClose();};
+  cmdk.input.oninput=cmdkRender;
+  cmdk.input.onkeydown=e=>{
+    if(e.key==='ArrowDown'){e.preventDefault();cmdk.sel=Math.min(cmdk.items.length-1,cmdk.sel+1);cmdkPaint();}
+    else if(e.key==='ArrowUp'){e.preventDefault();cmdk.sel=Math.max(0,cmdk.sel-1);cmdkPaint();}
+    else if(e.key==='Enter'){e.preventDefault();cmdkRun(cmdk.sel);}
+    else if(e.key==='Escape'){e.preventDefault();cmdkClose();}
+  };
+}
+function cmdkCommands(){
+  const go=name=>()=>document.querySelector('.tab[data-tab="'+name+'"]').click();
+  const c=[
+    {t:'Go to Proxy',run:go('proxy')},{t:'Go to Intercept',run:go('intercept')},
+    {t:'Go to Repeater',run:go('repeater')},{t:'Go to Intruder',run:go('intruder')},
+    {t:'Go to Scanner',run:go('scanner')},{t:'Go to API',run:go('api')},{t:'Go to Settings',run:go('settings')},
+    {t:'Toggle intercept',run:()=>{if(typeof toggleIntercept==='function')toggleIntercept();}},
+    {t:'Run scanner',run:()=>{go('scanner')();if(typeof runScan==='function')runScan();}},
+    {t:(state.inScopeOnly?'Show all traffic':'Show in-scope only'),run:()=>$('#scopeToggle')&&$('#scopeToggle').click()},
+    {t:'Export HAR',run:()=>{location.href='/api/export/har'+(state.inScopeOnly?'?inScope=1':'');}},
+    {t:'Clear all filters',run:()=>{if(typeof clearAllFilters==='function')clearAllFilters();}},
+  ];
+  if(state.selId){
+    c.push({t:'Send selected → Repeater  (Ctrl+R)',run:()=>{const f=state.flows.find(x=>x.id===state.selId);if(f)sendToRepeater(f);}});
+    c.push({t:'Send selected → Intruder  (Ctrl+I)',run:()=>{const f=state.flows.find(x=>x.id===state.selId);if(f)sendToIntruder(f);}});
+  }
+  return c;
+}
+function cmdkRender(){
+  const q=cmdk.input.value.trim().toLowerCase();
+  const items=[];
+  cmdkCommands().forEach(c=>{if(!q||c.t.toLowerCase().includes(q))items.push({label:c.t,kind:'command',run:c.run});});
+  if(q){
+    state.flows.filter(f=>(f.method+' '+f.host+f.path).toLowerCase().includes(q)).slice(0,8).forEach(f=>{
+      items.push({label:f.method+'  '+f.host+f.path,kind:'flow',sub:String(f.status||'—'),
+        run:()=>{document.querySelector('.tab[data-tab="proxy"]').click();selectFlow(f.id);}});
+    });
+  }
+  cmdk.items=items;cmdk.sel=0;cmdkPaint();
+}
+function cmdkPaint(){
+  cmdk.list.innerHTML=cmdk.items.map((it,i)=>
+    '<div class="cmdk-row" data-i="'+i+'" style="display:flex;justify-content:space-between;gap:12px;padding:9px 12px;border-radius:8px;cursor:pointer;'+(i===cmdk.sel?'background:var(--accent);color:#06140e':'')+'">'
+    +'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(it.label)+'</span>'
+    +'<span style="opacity:.55;font-size:11px;flex:none">'+esc(it.sub||it.kind)+'</span></div>'
+  ).join('')||'<div style="padding:14px;color:var(--fg3)">No matches</div>';
+  cmdk.list.querySelectorAll('.cmdk-row').forEach(r=>{
+    r.onclick=()=>cmdkRun(Number(r.dataset.i));
+    r.onmousemove=()=>{const n=Number(r.dataset.i);if(n!==cmdk.sel){cmdk.sel=n;cmdkPaint();}};
+  });
+  const cur=cmdk.list.querySelector('.cmdk-row[data-i="'+cmdk.sel+'"]');if(cur)cur.scrollIntoView({block:'nearest'});
+}
+function cmdkRun(i){const it=cmdk.items[i];if(!it)return;cmdkClose();try{it.run();}catch(e){toast(e.message);}}
+function cmdkOpen(){if(!cmdk.el)cmdkBuild();cmdk.open=true;cmdk.el.style.display='flex';cmdk.input.value='';cmdkRender();cmdk.input.focus();}
+function cmdkClose(){cmdk.open=false;if(cmdk.el)cmdk.el.style.display='none';}
+
+/* ---- global keyboard shortcuts ---- */
+function selectedFlow(){return state.selId?state.flows.find(x=>x.id===state.selId):null;}
+document.addEventListener('keydown',e=>{
+  const mod=e.ctrlKey||e.metaKey;
+  const tag=(e.target.tagName||'').toLowerCase();
+  const typing=tag==='input'||tag==='textarea'||e.target.isContentEditable;
+  if(mod&&e.key.toLowerCase()==='k'){e.preventDefault();cmdk.open?cmdkClose():cmdkOpen();return;}
+  if(cmdk.open)return; // the palette handles its own keys
+  if(mod&&(e.key===' '||e.code==='Space')){e.preventDefault();document.querySelector('.tab[data-tab="repeater"]').click();repSend();return;} // Ctrl+Space: send in Repeater
+  if(mod&&e.key.toLowerCase()==='r'){const f=selectedFlow();if(f){e.preventDefault();sendToRepeater(f);}return;} // Ctrl+R: → Repeater
+  if(mod&&e.key.toLowerCase()==='i'){const f=selectedFlow();if(f){e.preventDefault();sendToIntruder(f);}return;} // Ctrl+I: → Intruder
+  if(e.key==='/'&&!typing&&!mod){const s=$('#fSearch');if(s){e.preventDefault();document.querySelector('.tab[data-tab="proxy"]').click();s.focus();}return;} // /: focus search
+});
 
 /* ---- boot ---- */
 async function refreshIntercept(){try{state.intercept=await api('/api/intercept');renderIntercept();}catch(e){}}
