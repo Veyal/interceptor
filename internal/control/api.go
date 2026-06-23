@@ -90,6 +90,8 @@ var apiRoutes = []apiRoute{
 	{"PUT", "/api/settings", "Update settings (rebinds the proxy listener)"},
 	{"GET", "/api/sysproxy", "System-proxy status (supported/enabled)"},
 	{"POST", "/api/sysproxy", "Enable/disable the OS system proxy (macOS)"},
+	{"GET", "/api/flows/{id}/analyze", "Compact AI-friendly summary of a flow"},
+	{"POST", "/api/ai/assist", "BYO-key AI: explain/suggest/summarize a flow"},
 	{"GET", "/api/export/har", "Export history as HAR (optional ?inScope=1)"},
 	{"POST", "/api/import/har", "Import a HAR file as flows"},
 	{"GET", "/api/export/project", "Export a portable project (flows + rules + scope + settings)"},

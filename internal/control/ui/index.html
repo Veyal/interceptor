@@ -225,6 +225,7 @@ textarea.raw{width:100%;height:200px;resize:vertical;background:var(--bg);color:
       <div class="pane">
         <div class="pane-head"><span class="lbl">REQUEST</span>
           <div class="seg" data-side="req"><button class="on" data-view="raw">Raw</button><button data-view="pretty">Pretty</button></div>
+          <button class="btn" id="aiExplainBtn" title="Ask AI about this flow" style="padding:3px 9px">✨</button>
         </div>
         <pre id="reqView"><span style="color:var(--fg3)">Select a flow to inspect its request.</span></pre>
       </div>
@@ -434,6 +435,13 @@ changeme</textarea>
         </div>
       </div>
       <div class="section">
+        <h3>AI ASSIST · bring your own key</h3>
+        <p class="hint" style="margin-bottom:10px">Optional. With an Anthropic API key, the inspector's <b>✨</b> can explain a request, suggest payloads, or summarize findings. Off until a key is set; the exchange is sent to Anthropic only when you click ✨. <b id="aiKeyState"></b></p>
+        <div class="field"><label>Anthropic API key</label><input id="setAiKey" type="password" placeholder="sk-ant-…"></div>
+        <div class="field"><label>Model (optional)</label><input id="setAiModel" placeholder="claude-haiku-4-5-20251001"></div>
+        <div class="row"><button class="btn accent" id="saveAiBtn">Save AI settings</button></div>
+      </div>
+      <div class="section">
         <h3>TARGET SCOPE</h3>
         <p class="hint" style="margin-bottom:10px">With <b>include</b> rules, only matching traffic is in scope; <b>exclude</b> always wins; no rules = everything in scope. Scope focuses the <b>◎ in scope</b> history toggle, the intercept gate, and the scanner. Host supports a leading wildcard, e.g. <b style="color:var(--accent)">*.acme.com</b>; path is a prefix.</p>
         <table class="rules-tbl">
@@ -461,6 +469,17 @@ changeme</textarea>
 </div>
 
 <div id="ctxmenu"></div>
+<div id="aiModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;align-items:center;justify-content:center">
+  <div style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;max-width:700px;max-height:80vh;width:90%;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.6)">
+    <div class="row" style="padding:12px 16px;border-bottom:1px solid var(--line)">
+      <span style="font-weight:700;color:var(--accent)">✨ AI assist</span>
+      <div class="spacer"></div>
+      <div class="seg" id="aiKindSeg"><button class="on" data-k="explain">Explain</button><button data-k="suggest">Payloads</button><button data-k="summarize">Summary</button></div>
+      <button class="btn" id="aiClose" style="margin-left:10px">✕</button>
+    </div>
+    <pre id="aiOut" style="margin:0;padding:16px;overflow:auto;white-space:pre-wrap;font-size:12.5px;line-height:1.6;color:var(--fg)"></pre>
+  </div>
+</div>
 <div id="toast"></div>
 
 <script>
@@ -854,11 +873,37 @@ $('#addRuleBtn').onclick=async()=>{
 /* ---- settings ---- */
 async function loadSettings(){try{const s=await api('/api/settings');state.proxyAddr=s.proxyAddr;$('#proxyAddr').textContent=s.proxyAddr;$('#setAddr').value=s.proxyAddr;
   if($('#setUpstream'))$('#setUpstream').value=s.upstreamProxy||'';
+  if($('#setAiModel'))$('#setAiModel').value=s.aiModel||'';
+  if($('#aiKeyState'))$('#aiKeyState').textContent=s.aiHasKey?'Key configured ✓':'No key set.';
   state.intercept.enabled=s.interceptEnabled;}catch(e){}}
 $('#saveUpstreamBtn').onclick=async()=>{
   try{await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({upstreamProxy:$('#setUpstream').value.trim()})});
     toast('upstream proxy saved');}catch(e){toast(e.message);}
 };
+$('#saveAiBtn').onclick=async()=>{
+  const body={aiModel:$('#setAiModel').value.trim()};
+  if($('#setAiKey').value)body.aiApiKey=$('#setAiKey').value;
+  try{await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+    $('#setAiKey').value='';toast('AI settings saved');loadSettings();}catch(e){toast(e.message);}
+};
+/* ---- AI assist modal ---- */
+function openAi(kind){
+  if(state.selId==null){toast('select a flow first');return;}
+  $('#aiModal').style.display='flex';
+  $('#aiKindSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.k===kind));
+  runAi(kind);
+}
+async function runAi(kind){
+  $('#aiOut').textContent='Thinking…';
+  try{const r=await api('/api/ai/assist',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({flowId:state.selId,kind})});
+    $('#aiOut').textContent=r.text||'(empty response)';}
+  catch(e){$('#aiOut').textContent='Error: '+e.message+'\n\nSet an Anthropic API key in Settings → AI assist (or the ANTHROPIC_API_KEY env var).';}
+}
+$('#aiExplainBtn').onclick=()=>openAi('explain');
+$('#aiKindSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{$('#aiKindSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));runAi(b.dataset.k);});
+$('#aiClose').onclick=()=>$('#aiModal').style.display='none';
+$('#aiModal').onclick=e=>{if(e.target.id==='aiModal')$('#aiModal').style.display='none';};
+
 $('#importProjectBtn').onclick=()=>$('#importProjectFile').click();
 $('#importProjectFile').onchange=async e=>{
   const f=e.target.files[0];if(!f)return;

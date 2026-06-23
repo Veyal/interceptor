@@ -7,6 +7,12 @@ each "release" is an iteration of the Conduit design (`Conduit.dc.html`).
 ## [Unreleased]
 
 ### Added
+- **AI assist (bring-your-own-key)** — `internal/aiassist` calls the Anthropic Messages API with a
+  user-supplied key to **explain** a request, **suggest** payloads, or **summarize** findings.
+  Off until a key is set (Settings → AI assist, or `ANTHROPIC_API_KEY`); the exchange is sent to the
+  provider only on an explicit ✨ click. Control: `POST /api/ai/assist`; settings store the key
+  (never returned) + model; the inspector gets a ✨ button + result modal. Request construction is
+  unit-tested; declines cleanly (400) without a key.
 - **`analyze_flow` (AI tool)** — `GET /api/flows/{id}/analyze` and a matching MCP tool return a
   compact, decision-ready summary of a flow: URL/status, notable security headers, query parameters
   (injection points), passive scanner findings, and in-scope status — so an agent can triage without

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"sync"
@@ -105,6 +106,7 @@ func (h *Hub) routes() {
 	h.mux.HandleFunc("PUT /api/settings", h.putSettings)
 	h.mux.HandleFunc("GET /api/sysproxy", h.getSysProxy)
 	h.mux.HandleFunc("POST /api/sysproxy", h.setSysProxy)
+	h.mux.HandleFunc("POST /api/ai/assist", h.aiAssist)
 	h.mux.HandleFunc("GET /api/ca.crt", h.getCA)
 	h.mux.HandleFunc("POST /api/repeater/send", h.repeaterSend)
 	h.mux.HandleFunc("GET /api/repeater/history", h.repeaterHistory)
@@ -190,6 +192,8 @@ type settingsJSON struct {
 	ProxyAddr        string `json:"proxyAddr"`
 	InterceptEnabled bool   `json:"interceptEnabled"`
 	UpstreamProxy    string `json:"upstreamProxy"`
+	AiModel          string `json:"aiModel"`
+	AiHasKey         bool   `json:"aiHasKey"` // never returns the key itself
 }
 
 func toFlowJSON(f *store.Flow) flowJSON {
@@ -567,10 +571,14 @@ func (h *Hub) currentProxyAddr() string {
 
 func (h *Hub) getSettings(w http.ResponseWriter, r *http.Request) {
 	up, _, _ := h.st.GetSetting("upstream.proxy")
+	aiKey, _, _ := h.st.GetSetting("ai.apiKey")
+	aiModel, _, _ := h.st.GetSetting("ai.model")
 	writeJSON(w, http.StatusOK, settingsJSON{
 		ProxyAddr:        h.currentProxyAddr(),
 		InterceptEnabled: h.eng != nil && h.eng.Enabled(),
 		UpstreamProxy:    up,
+		AiModel:          aiModel,
+		AiHasKey:         aiKey != "" || os.Getenv("ANTHROPIC_API_KEY") != "",
 	})
 }
 
@@ -578,10 +586,18 @@ func (h *Hub) putSettings(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		ProxyAddr     string  `json:"proxyAddr"`
 		UpstreamProxy *string `json:"upstreamProxy"` // pointer so "" can clear it
+		AiApiKey      *string `json:"aiApiKey"`
+		AiModel       *string `json:"aiModel"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		httpErr(w, http.StatusBadRequest, "bad json")
 		return
+	}
+	if in.AiApiKey != nil {
+		_ = h.st.SetSetting("ai.apiKey", *in.AiApiKey)
+	}
+	if in.AiModel != nil {
+		_ = h.st.SetSetting("ai.model", *in.AiModel)
 	}
 	if in.ProxyAddr != "" && in.ProxyAddr != h.currentProxyAddr() {
 		if h.rebind != nil {
