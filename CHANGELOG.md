@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Active-scanning design** — [`docs/product/prd-0002-active-scanning.md`](docs/product/prd-0002-active-scanning.md):
+  a deterministic active-scan engine (injection-point enumeration + per-class payloads + detectors,
+  reusing `sender`/`scope`/`store`) that works **without AI**, with the AI as an optional operator on
+  the *same* engine via MCP. Safety-first (off by default, per-run consent, scope-gated,
+  non-destructive, kill switch); phased plan + open decisions. Design only — no engine yet.
 - **Decoder / encoder** — a `🧰 Decoder` tool (open it from the **Ctrl/Cmd+K** palette): Base64,
   URL, hex, HTML-entity, JWT inspection, and a **smart** auto-detect-and-decode, with chain
   (output → next input) and copy. Pure transforms in a tested `internal/codec`, exposed at
