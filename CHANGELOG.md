@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- **Suppress the browser's native right-click menu** app-wide so the app's own context menu (and a
+  cleaner feel) takes over — but it's still allowed in editable fields (paste/cut) and over a live
+  text selection (copy), so nothing useful is lost.
 - **Settings redesigned** — the long single-scroll Settings page is now a left **sub-nav**
   (Proxy & network · TLS / CA · Target scope · AI assist · Session / auth · Project & data) with a
   focused content pane per section. Regrouped related controls, surfaced the **Download CA** action,

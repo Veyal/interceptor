@@ -842,6 +842,15 @@ function showCtx(x,y,f,field){
 }
 document.addEventListener('click',e=>{if(!ctx.contains(e.target))hideCtx();});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')hideCtx();});
+// Suppress the browser's native context menu app-wide, but keep it where it's
+// genuinely useful: editable fields (paste/cut) and over a live text selection (copy).
+document.addEventListener('contextmenu',e=>{
+  const t=e.target,tag=(t.tagName||'').toLowerCase();
+  if(tag==='input'||tag==='textarea'||t.isContentEditable)return;
+  const sel=window.getSelection&&window.getSelection();
+  if(sel&&String(sel).length&&!sel.isCollapsed)return;
+  e.preventDefault();
+});
 $('#rows').addEventListener('scroll',hideCtx,{passive:true});
 window.addEventListener('blur',hideCtx);
 
