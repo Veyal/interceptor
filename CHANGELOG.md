@@ -7,6 +7,12 @@ each "release" is an iteration of the Conduit design (`Conduit.dc.html`).
 ## [Unreleased]
 
 ### Added
+- **Flow → curl** — a new `internal/curlgen` renders a captured request as a runnable `curl`
+  command (direct to target: `--path-as-is` to preserve the exact path, `-k` to skip TLS
+  verification — matching how Interceptor talks to targets). Exposed at `GET /api/flows/{id}/curl`
+  and as an MCP **`flow_as_curl`** tool (now **22 MCP tools**) so the AI can hand the user a repro
+  command. Complements the UI's existing *proxy-routed* "Copy as cURL" (which replays through
+  Interceptor); this one is standalone. TDD on the renderer (escaping, header order, body).
 - **Session / auth header injection** — a set of headers (typically an `Authorization` bearer token
   or a `Cookie`) is now auto-applied to every **Repeater** and **Intruder** send, which bypass the
   proxy and so were previously unreachable by match-&-replace rules. Keeps sends authenticated

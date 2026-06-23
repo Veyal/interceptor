@@ -420,6 +420,17 @@ func (s *Server) registerTools() {
 			return s.apiGet(fmt.Sprintf("/api/flows/%d/analyze", id))
 		})
 
+	s.add("flow_as_curl",
+		"Render a captured flow's request as a runnable curl command (preserves the exact path; skips TLS verification) so the user can reproduce or iterate on it in a terminal.",
+		obj(map[string]any{"id": p("integer", "flow id")}, "id"),
+		func(a map[string]any) (string, error) {
+			id := argInt(a, "id", 0)
+			if id == 0 {
+				return "", fmt.Errorf("id is required")
+			}
+			return s.apiGet(fmt.Sprintf("/api/flows/%d/curl", id))
+		})
+
 	s.add("send_request",
 		"Send a request directly to a target (Repeater) and record it. Returns the resulting flow id+status; call get_flow with that id to read the response body.",
 		obj(map[string]any{
