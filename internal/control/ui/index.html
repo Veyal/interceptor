@@ -422,6 +422,15 @@ changeme</textarea>
         </div>
       </div>
       <div class="section">
+        <h3>PROJECT</h3>
+        <p class="hint" style="margin-bottom:10px">Save or load a portable session — captured flows, match-&amp;-replace rules, target scope, and the upstream proxy. Import merges into the current session.</p>
+        <div class="row" style="gap:8px">
+          <a class="btn accent" id="exportProject" href="/api/export/project" download style="text-decoration:none">Export project</a>
+          <button class="btn" id="importProjectBtn">Import project</button>
+          <input type="file" id="importProjectFile" accept=".json,application/json" style="display:none">
+        </div>
+      </div>
+      <div class="section">
         <h3>TARGET SCOPE</h3>
         <p class="hint" style="margin-bottom:10px">With <b>include</b> rules, only matching traffic is in scope; <b>exclude</b> always wins; no rules = everything in scope. Scope focuses the <b>◎ in scope</b> history toggle, the intercept gate, and the scanner. Host supports a leading wildcard, e.g. <b style="color:var(--accent)">*.acme.com</b>; path is a prefix.</p>
         <table class="rules-tbl">
@@ -821,6 +830,14 @@ async function loadSettings(){try{const s=await api('/api/settings');state.proxy
 $('#saveUpstreamBtn').onclick=async()=>{
   try{await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({upstreamProxy:$('#setUpstream').value.trim()})});
     toast('upstream proxy saved');}catch(e){toast(e.message);}
+};
+$('#importProjectBtn').onclick=()=>$('#importProjectFile').click();
+$('#importProjectFile').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  try{const text=await f.text();const r=await api('/api/import/project',{method:'POST',headers:{'content-type':'application/json'},body:text});
+    toast(`imported ${r.importedFlows} flows · ${r.importedRules} rules · ${r.importedScope} scope`);
+    loadFlows();loadRules();loadScope();loadSettings();}catch(err){toast('import: '+err.message);}
+  e.target.value='';
 };
 $('#saveAddrBtn').onclick=async()=>{
   try{const s=await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({proxyAddr:$('#setAddr').value})});

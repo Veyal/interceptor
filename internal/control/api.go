@@ -89,6 +89,8 @@ var apiRoutes = []apiRoute{
 	{"POST", "/api/sysproxy", "Enable/disable the OS system proxy (macOS)"},
 	{"GET", "/api/export/har", "Export history as HAR (optional ?inScope=1)"},
 	{"POST", "/api/import/har", "Import a HAR file as flows"},
+	{"GET", "/api/export/project", "Export a portable project (flows + rules + scope + settings)"},
+	{"POST", "/api/import/project", "Import (merge) a project bundle"},
 	{"GET", "/api/ca.crt", "Download the local CA certificate"},
 	{"GET", "/api/keys", "List API keys"},
 	{"POST", "/api/keys", "Create an API key"},

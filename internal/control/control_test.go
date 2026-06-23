@@ -2,6 +2,7 @@ package control
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -272,6 +273,47 @@ func flowCount(t *testing.T, url string) int {
 	}
 	json.NewDecoder(resp.Body).Decode(&out)
 	return len(out.Flows)
+}
+
+func TestProjectExportImportRoundTrip(t *testing.T) {
+	h, s, _ := newHub(t)
+	s.InsertFlow(&store.Flow{TS: time.UnixMilli(1), Method: "GET", Scheme: "https", Host: "app.test", Path: "/", Status: 200})
+	s.CreateRule(&store.Rule{Enabled: true, Type: "req-header", Match: "User-Agent: .*", Replace: "User-Agent: x"})
+	s.CreateScopeRule(&store.ScopeRule{Enabled: true, Action: "include", Host: "*.test"})
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	// Export the project.
+	er, err := http.Get(ts.URL + "/api/export/project")
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	bundle, _ := io.ReadAll(er.Body)
+	er.Body.Close()
+
+	// Fresh hub; import the bundle.
+	h2, s2, _ := newHub(t)
+	ts2 := httptest.NewServer(h2.Handler())
+	defer ts2.Close()
+	ir, err := http.Post(ts2.URL+"/api/import/project", "application/json", bytes.NewReader(bundle))
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	var res struct {
+		ImportedFlows, ImportedRules, ImportedScope int
+	}
+	json.NewDecoder(ir.Body).Decode(&res)
+	ir.Body.Close()
+	if res.ImportedFlows != 1 || res.ImportedRules != 1 || res.ImportedScope != 1 {
+		t.Fatalf("import counts wrong: %+v", res)
+	}
+	if rules, _ := s2.ListRules(); len(rules) != 1 {
+		t.Fatalf("rules not restored: %d", len(rules))
+	}
+	if sc, _ := s2.ListScopeRules(); len(sc) != 1 {
+		t.Fatalf("scope not restored: %d", len(sc))
+	}
+	_ = s
 }
 
 func TestSSEReceivesFlowNew(t *testing.T) {

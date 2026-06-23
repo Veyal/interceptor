@@ -118,6 +118,8 @@ func (h *Hub) routes() {
 	h.mux.HandleFunc("GET /api/mcp", h.apiMCP)
 	h.mux.HandleFunc("GET /api/export/har", h.exportHAR)
 	h.mux.HandleFunc("POST /api/import/har", h.importHAR)
+	h.mux.HandleFunc("GET /api/export/project", h.exportProject)
+	h.mux.HandleFunc("POST /api/import/project", h.importProject)
 	h.mux.HandleFunc("GET /api/scope", h.listScope)
 	h.mux.HandleFunc("POST /api/scope", h.createScope)
 	h.mux.HandleFunc("PUT /api/scope/{id}", h.updateScope)

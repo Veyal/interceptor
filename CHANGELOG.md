@@ -7,6 +7,10 @@ each "release" is an iteration of the Conduit design (`Conduit.dc.html`).
 ## [Unreleased]
 
 ### Added
+- **Projects (save/load)** — export/import a portable session: captured flows (as HAR) + match-&-
+  replace rules + target-scope rules + the upstream-proxy setting, in one JSON bundle. Control:
+  `GET /api/export/project`, `POST /api/import/project` (additive merge; does not rebind the
+  listener); **Settings → Project** Export/Import buttons. Round-trip tested.
 - **Benchmarks** — `docs/benchmarks.md` with measured numbers (~20 MB idle RSS, ~1 s cold start,
   ~444 MB/s capture at ~1.5 KB/op) plus a `BenchmarkTeeBody` that proves capture streams rather than
   buffers. The product **roadmap** rolled to cycle 2 (cycle 1's Now+Next slate shipped); PRD-0001
