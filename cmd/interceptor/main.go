@@ -78,6 +78,10 @@ func run() error {
 	sc := scope.New() // one shared target-scope matcher: control owns CRUD, the proxy gate reads it
 	pm := &proxyManager{}
 	hub := control.New(st, eng, ca, pm, sc)
+	// User-authored Starlark scanner checks live here (created so it's discoverable).
+	checksDir := filepath.Join(dir, "checks")
+	_ = os.MkdirAll(checksDir, 0o755)
+	hub.ChecksDir = checksDir
 	prx := proxy.New(st, capture.New(st), ca, eng, hub)
 	prx.Scope = sc
 	hub.Upstream = prx.SetUpstreamProxy

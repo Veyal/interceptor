@@ -50,6 +50,9 @@ type Hub struct {
 	// Upstream applies a chained upstream-proxy URL ("" = direct). Set by cmd.
 	Upstream func(string) error
 
+	// ChecksDir holds user-authored Starlark scanner checks ("" = none). Set by cmd.
+	ChecksDir string
+
 	mcpMu  sync.Mutex
 	mcpSrv *mcp.Server // lazily built streamable-HTTP MCP front end (POST /mcp)
 

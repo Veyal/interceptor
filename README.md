@@ -42,6 +42,9 @@ tester's direction and **entirely on the local machine**.
 - **Scanner** — 12 passive checks (missing CSP/HSTS/`nosniff`/clickjacking headers, wildcard CORS,
   reflected parameters, secrets in bodies, insecure cookies, Basic-auth & version disclosure, …),
   exportable as a **Markdown findings report**.
+- **Custom checks** — extend the scanner with your own passive checks in sandboxed **Starlark**
+  (drop a `.star` file in `~/.interceptor/checks/`). See the
+  [check-authoring guide](docs/custom-checks.md) and [`examples/checks/`](examples/checks/).
 - **Target scope** — include/exclude rules that focus history, the intercept gate, and the scanner.
 - **WebSocket** capture (`ws://`/`wss://` per-frame) **and replay** (a WebSocket Repeater).
 - **Session / auth injection** — auto-apply an `Authorization`/`Cookie` to every Repeater & Intruder
@@ -177,6 +180,7 @@ independently tested.
 | `internal/sender` | One-off direct request sender (+ session-header injection) — backs Repeater & Intruder |
 | `internal/intruder` | Sniper / Pitchfork attack engine |
 | `internal/scanner` | Passive security checks over captured flows |
+| `internal/checkscript` | Runs user-authored Starlark scanner checks (sandboxed, bounded) |
 | `internal/curlgen` · `internal/report` | Render a flow as `curl`; render findings as Markdown |
 | `internal/wsrepeater` | WebSocket Repeater (RFC 6455 handshake + masked frames, no deps) |
 | `internal/harx` | HAR 1.2 import/export |

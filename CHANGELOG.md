@@ -6,6 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Custom scanner checks (Starlark)** — the passive scanner is now extensible: drop a `.star` file
+  defining `def check(flow): …` into `~/.interceptor/checks/` and it runs on every scan beside the
+  built-ins. New `internal/checkscript` compiles and runs checks in an embedded **Starlark** engine
+  that is **sandboxed** (no file/network/clock access, no `load()`/imports — safe to share) and
+  **step-bounded** (a runaway check aborts, never hangs a scan); broken/erroring checks are logged
+  and skipped. The `flow` object exposes method/scheme/host/port/path/status/mime, bodies, headers
+  (dicts + case-insensitive `req_header`/`res_header`), and `query_param`; builtins `finding(…)` and
+  `re_search(…)`. Documented as the authoring **standard** in [docs/custom-checks.md](docs/custom-checks.md)
+  with ready-to-copy [`examples/checks/`](examples/checks/) (guarded by a test that they compile). TDD.
+
 ## [0.1.1] — 2026-06-23
 
 ### Added

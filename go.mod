@@ -2,7 +2,10 @@ module github.com/Veyal/interceptor
 
 go 1.25.0
 
-require modernc.org/sqlite v1.53.0
+require (
+	go.starlark.net v0.0.0-20260613233743-8ba36ccb83fb
+	modernc.org/sqlite v1.53.0
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
