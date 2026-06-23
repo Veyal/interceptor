@@ -58,6 +58,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `re_search(…)`. Documented as the authoring **standard** in [docs/custom-checks.md](docs/custom-checks.md)
   with ready-to-copy [`examples/checks/`](examples/checks/) (guarded by a test that they compile). TDD.
 
+### Removed
+- **CI / release workflows pulled from version control (temporary).** Pushing `.github/workflows/*`
+  requires a git token with the `workflow` scope; to publish the rest of the work without it, the CI
+  and release workflows were removed from the tree for now. They're preserved locally and will be
+  re-added — re-enabling the per-tag binary releases described under 0.1.1 — once that scope is
+  granted. (Until then the README's CI badge shows no status.)
+
 ## [0.1.1] — 2026-06-23
 
 ### Added
