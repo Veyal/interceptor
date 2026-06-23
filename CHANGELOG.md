@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`LICENSE`** — the project is now MIT licensed.
+- **README overhaul for the public release** — install via `go install …@latest` / `@v0.1.0` and the
+  Releases page, a quick-start, a configuration (env-var) table, a prominent responsible-use notice,
+  the full feature list (scope, projects/HAR, session injection, AI assist, WS replay, 24 MCP tools
+  over stdio + Streamable-HTTP), an updated architecture table, and badges.
+
 ## [0.1.0] — 2026-06-23 · first public release
 
 The first tagged release: an intercepting HTTP/HTTPS proxy and AI-operable security-testing toolkit
