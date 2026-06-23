@@ -93,6 +93,53 @@ func TestInsertAndGetFlow(t *testing.T) {
 	}
 }
 
+func TestUpdateFlowFillsInResponse(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	// A flow inserted at request time: no status/response yet.
+	f := &Flow{
+		TS: time.UnixMilli(1_700_000_000_000), Method: "POST", Scheme: "https",
+		Host: "api.example.com", Port: 443, Path: "/submit",
+		ReqHeaders: map[string][]string{"Host": {"api.example.com"}},
+	}
+	id, err := s.InsertFlow(f)
+	if err != nil {
+		t.Fatalf("InsertFlow: %v", err)
+	}
+	if pending, _ := s.GetFlow(id); pending.Status != 0 || pending.ResLen != 0 {
+		t.Fatalf("expected pending flow with no response, got %+v", pending)
+	}
+
+	// Then the response arrives and we fill it in (same row).
+	f.Status = 201
+	f.ResHeaders = map[string][]string{"Content-Type": {"application/json"}}
+	f.Mime = "application/json"
+	f.ResBodyHash, f.ResLen = "abc123", 42
+	f.DurationMs = 17
+	if err := s.UpdateFlow(f); err != nil {
+		t.Fatalf("UpdateFlow: %v", err)
+	}
+
+	got, err := s.GetFlow(id)
+	if err != nil {
+		t.Fatalf("GetFlow: %v", err)
+	}
+	if got.Status != 201 || got.Mime != "application/json" || got.ResLen != 42 || got.ResBodyHash != "abc123" || got.DurationMs != 17 {
+		t.Fatalf("response not filled in: %+v", got)
+	}
+	if got.Method != "POST" || got.Host != "api.example.com" || got.Path != "/submit" {
+		t.Fatalf("request-side fields clobbered: %+v", got)
+	}
+	// Exactly one row — update must not insert a duplicate.
+	if flows, _ := s.QueryFlows(10); len(flows) != 1 {
+		t.Fatalf("expected 1 row after update, got %d", len(flows))
+	}
+}
+
 func TestSettingsRoundTrip(t *testing.T) {
 	s, err := Open(t.TempDir())
 	if err != nil {

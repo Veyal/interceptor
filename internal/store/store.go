@@ -194,6 +194,24 @@ func (s *Store) InsertFlow(f *Flow) (int64, error) {
 	return id, nil
 }
 
+// UpdateFlow fills in the response-side (and post-send request) fields of a flow
+// that was first inserted at request time, keyed by f.ID. The immutable request
+// identity (ts, scheme, host, port, version, client) is left untouched.
+func (s *Store) UpdateFlow(f *Flow) error {
+	rh, _ := json.Marshal(f.ReqHeaders)
+	sh, _ := json.Marshal(f.ResHeaders)
+	_, err := s.db.Exec(
+		`UPDATE flows SET
+		   method=?, path=?, status=?, req_headers=?, res_headers=?,
+		   req_body_hash=?, res_body_hash=?, req_len=?, res_len=?,
+		   mime=?, duration_ms=?, error=?, flags=?
+		 WHERE id=?`,
+		f.Method, f.Path, f.Status, string(rh), string(sh),
+		f.ReqBodyHash, f.ResBodyHash, f.ReqLen, f.ResLen,
+		f.Mime, f.DurationMs, f.Error, f.Flags, f.ID)
+	return err
+}
+
 // GetFlow loads a single flow by id.
 func (s *Store) GetFlow(id int64) (*Flow, error) {
 	row := s.db.QueryRow(`SELECT `+flowColumns+` FROM flows WHERE id = ?`, id)

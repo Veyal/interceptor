@@ -122,4 +122,26 @@ func TestQueryFlowsFilter(t *testing.T) {
 	if len(page2) != 2 || page2[0].ID >= all[len(all)-1].ID {
 		t.Fatalf("pagination broken: %+v", page2)
 	}
+
+	// Negative filters: exclude by method / host / status / path.
+	if got, _ := s.QueryFlowsFilter(FlowFilter{Limit: 10, NotMethods: []string{"GET"}}); len(got) != 1 || got[0].Method != "POST" {
+		t.Fatalf("NotMethods: %+v", got)
+	}
+	if got, _ := s.QueryFlowsFilter(FlowFilter{Limit: 10, NotHosts: []string{"cdn.other.com"}}); len(got) != 3 {
+		t.Fatalf("NotHosts: expected 3, got %d", len(got))
+	}
+	if got, _ := s.QueryFlowsFilter(FlowFilter{Limit: 10, NotStatuses: []int{200}}); len(got) != 2 {
+		t.Fatalf("NotStatuses: expected 2 (401,500), got %d", len(got))
+	}
+	if got, _ := s.QueryFlowsFilter(FlowFilter{Limit: 10, NotPaths: []string{"/users"}}); len(got) != 2 {
+		t.Fatalf("NotPaths: expected 2 (excludes /users and /users/42), got %d", len(got))
+	}
+	// Multiple exclusions of the same field are ANDed (hide GET and hide POST → none of those methods).
+	if got, _ := s.QueryFlowsFilter(FlowFilter{Limit: 10, NotMethods: []string{"GET", "POST"}}); len(got) != 0 {
+		t.Fatalf("NotMethods x2: expected 0, got %d", len(got))
+	}
+	// Positive and negative combine: GETs that are not 200.
+	if got, _ := s.QueryFlowsFilter(FlowFilter{Limit: 10, Method: "GET", NotStatuses: []int{200}}); len(got) != 1 || got[0].Status != 500 {
+		t.Fatalf("combine include+exclude: %+v", got)
+	}
 }

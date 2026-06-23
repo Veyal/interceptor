@@ -75,6 +75,12 @@ type FlowFilter struct {
 	StatusClass int    // 1..5 → 1xx..5xx; 0 = any
 	RequireFlags int64 // only rows with any of these flag bits set
 	ExcludeFlags int64 // only rows with none of these flag bits set
+
+	// Negative filters — each entry excludes matching rows; multiples are ANDed.
+	NotMethods  []string // exclude these exact methods
+	NotHosts    []string // exclude rows whose host contains any of these
+	NotPaths    []string // exclude rows whose path contains any of these
+	NotStatuses []int    // exclude these exact status codes
 }
 
 // QueryFlowsFilter returns flows matching f, newest first. Filtering and paging
@@ -121,6 +127,22 @@ func (s *Store) QueryFlowsFilter(f FlowFilter) ([]*Flow, error) {
 	if f.ExcludeFlags != 0 {
 		where = append(where, "(flags & ?) = 0")
 		args = append(args, f.ExcludeFlags)
+	}
+	for _, m := range f.NotMethods {
+		where = append(where, "method <> ?")
+		args = append(args, m)
+	}
+	for _, h := range f.NotHosts {
+		where = append(where, "instr(lower(host), lower(?)) = 0")
+		args = append(args, h)
+	}
+	for _, p := range f.NotPaths {
+		where = append(where, "instr(lower(path), lower(?)) = 0")
+		args = append(args, p)
+	}
+	for _, st := range f.NotStatuses {
+		where = append(where, "status <> ?")
+		args = append(args, st)
 	}
 
 	q := "SELECT " + flowColumns + " FROM flows"
