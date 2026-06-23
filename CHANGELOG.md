@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Settings redesigned** — the long single-scroll Settings page is now a left **sub-nav**
+  (Proxy & network · TLS / CA · Target scope · AI assist · Session / auth · Project & data) with a
+  focused content pane per section. Regrouped related controls, surfaced the **Download CA** action,
+  added a "define scope by right-clicking a flow" tip and a note on the `~/.interceptor/` data dir,
+  clarified the external-bind opt-in, and removed the redundant second intercept toggle. Verified in
+  a headless browser (0 console errors).
+
 ### Added
 - **Repeater multi-tab** — the Repeater now holds multiple tabs, one per endpoint under test, each
   with its own request editor, response, and **endpoint-scoped send history**. New tab (＋) / close
