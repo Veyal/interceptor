@@ -131,15 +131,14 @@ The check never opens a socket; the sandboxed-and-shareable property is preserve
 4. **Later:** more classes (CRLF, SSRF w/ collaborator, XXE, header injection), light crawling to
    discover endpoints, auth-aware scanning, and a tuneable aggressiveness profile.
 
-## 9. Open decisions (need your steer)
+## 9. Decisions (resolved)
 
-1. **Default aggressiveness for v1:** ship the 4 high-signal checks (XSS/SQLi/redirect/SSTI) — agree?
-   Or include timing-based command-injection/path-traversal from day one (higher value, more noise +
-   slower)?
-2. **Consent model:** per-run confirmation each time (safest) vs a session-level "I'm authorized" arm
-   that persists until toggled off. Recommendation: **per-run** to start.
-3. **Targeting:** v1 runs against a **single selected flow's** endpoint (precise, safe) before adding
-   "scan all in-scope" (broad, slower). Recommendation: **single flow first.**
+1. **Aggressiveness:** ship **all 7 classes** in v1 (XSS, error-SQLi, boolean-SQLi, SSTI, open
+   redirect, path traversal, timing OS-command-injection). Timing checks are flagged lower-confidence.
+2. **Consent:** **session-level arm** — one "I'm authorized to test in-scope targets" toggle that
+   persists until turned off (and resets on restart); active scans refuse to run while disarmed.
+3. **Targeting:** support **both** a single selected flow *and* "scan all in-scope" (bulk), bounded by
+   the request budget + per-host rate limit + kill switch.
 
 ## 10. Out of scope (for now)
 Full active crawl/spider, authenticated multi-step sequences (depends on the session/login-macro

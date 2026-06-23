@@ -56,6 +56,8 @@ type Hub struct {
 	mcpMu  sync.Mutex
 	mcpSrv *mcp.Server // lazily built streamable-HTTP MCP front end (POST /mcp)
 
+	as asState // active-scan state (armed/running/findings)
+
 	mu      sync.Mutex
 	clients map[chan string]struct{}
 }
@@ -147,6 +149,10 @@ func (h *Hub) routes() {
 	h.mux.HandleFunc("DELETE /api/checks/{id}", h.deleteCheck)
 	h.mux.HandleFunc("POST /api/ws/send", h.wsSend)
 	h.mux.HandleFunc("POST /api/decode", h.decode)
+	h.mux.HandleFunc("GET /api/activescan", h.asGet)
+	h.mux.HandleFunc("POST /api/activescan/arm", h.asArm)
+	h.mux.HandleFunc("POST /api/activescan/start", h.asStart)
+	h.mux.HandleFunc("POST /api/activescan/stop", h.asStop)
 	h.mux.HandleFunc("GET /api/keys", h.listKeys)
 	h.mux.HandleFunc("POST /api/keys", h.createKey)
 	h.mux.HandleFunc("DELETE /api/keys/{id}", h.deleteKey)
@@ -254,7 +260,7 @@ func (h *Hub) listFlows(w http.ResponseWriter, r *http.Request) {
 		Host:         q.Get("host"),
 		Search:       q.Get("search"),
 		Scheme:       q.Get("scheme"),
-		ExcludeFlags: store.FlagRepeater | store.FlagIntruder, // Repeater/Intruder have their own views
+		ExcludeFlags: store.FlagRepeater | store.FlagIntruder | store.FlagActiveScan, // these have their own views
 	}
 	if sc := q.Get("status"); sc != "" {
 		f.StatusClass = atoiOr(sc, 0)

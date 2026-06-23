@@ -621,6 +621,29 @@ func (s *Server) registerTools() {
 			})
 		})
 
+	s.add("active_scan",
+		"ACTIVE scan: send crafted attack payloads to confirm vulnerabilities (reflected XSS, SQLi, SSTI, open redirect, path traversal, timing OS command injection) on an in-scope endpoint. This sends real attack traffic — only run against targets you're authorized to test. Pass arm=true to confirm authorization and enable scanning (a session-level gate). Target a single flow with flowId, or set inScope=true to scan all in-scope endpoints. Returns immediately; poll active_scan_state for progress + confirmed findings.",
+		obj(map[string]any{
+			"arm":         p("boolean", "true to confirm you're authorized and enable active scanning"),
+			"flowId":      p("integer", "scan one captured flow's endpoint"),
+			"inScope":     p("boolean", "scan all in-scope endpoints with injectable params"),
+			"maxRequests": p("integer", "total probe budget (default 2000)"),
+		}),
+		func(a map[string]any) (string, error) {
+			return s.api(http.MethodPost, "/api/activescan/start", map[string]any{
+				"arm": argBool(a, "arm", false), "flowId": argInt(a, "flowId", 0),
+				"inScope": argBool(a, "inScope", false), "maxRequests": argInt(a, "maxRequests", 0),
+			})
+		})
+
+	s.add("active_scan_state", "Active-scan progress + confirmed findings (armed/running/targets/requests).",
+		obj(map[string]any{}),
+		func(a map[string]any) (string, error) { return s.apiGet("/api/activescan") })
+
+	s.add("active_scan_stop", "Stop the running active scan (kill switch).",
+		obj(map[string]any{}),
+		func(a map[string]any) (string, error) { return s.api(http.MethodPost, "/api/activescan/stop", nil) })
+
 	s.add("decode",
 		"Decode or encode a string. op: base64encode/base64decode, urlencode/urldecode, hexencode/hexdecode, htmlencode/htmldecode, jwtdecode (inspect a JWT's header+payload), or smart (auto-detect and decode one layer).",
 		obj(map[string]any{

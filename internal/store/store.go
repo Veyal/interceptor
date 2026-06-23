@@ -53,6 +53,7 @@ const (
 	FlagRepeater                       // a request sent from the Repeater module
 	FlagIntruder                       // a request sent from the Intruder module
 	FlagImported                       // a flow imported from a HAR file (not proxied)
+	FlagActiveScan                     // a probe sent by the active scanner
 )
 
 // flowColumns is the canonical SELECT column order; scanFlow consumes it.

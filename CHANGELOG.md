@@ -7,11 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- **Active-scanning design** — [`docs/product/prd-0002-active-scanning.md`](docs/product/prd-0002-active-scanning.md):
-  a deterministic active-scan engine (injection-point enumeration + per-class payloads + detectors,
-  reusing `sender`/`scope`/`store`) that works **without AI**, with the AI as an optional operator on
-  the *same* engine via MCP. Safety-first (off by default, per-run consent, scope-gated,
-  non-destructive, kill switch); phased plan + open decisions. Design only — no engine yet.
+- **Active scanning — Phase 1 (engine + API + MCP)** — a deterministic active-scan engine
+  (`internal/activescan`) that **sends crafted payloads to confirm vulnerabilities** without any AI:
+  it enumerates query/form/JSON injection points, fires per-class payloads through the existing
+  `sender` (probes recorded + session-auth applied), and confirms with detectors for **reflected XSS,
+  error- & boolean-based SQLi, SSTI, open redirect, path traversal, and timing OS-command-injection**.
+  **Safety-gated:** a session-level **arm** consent (refuses to run disarmed), **scope-restricted**
+  targets, non-destructive payloads, a shared request budget, and a **kill switch** (cancellable run).
+  Control: `GET /api/activescan`, `POST /api/activescan/{arm,start,stop}` (`start` takes a `flowId` or
+  `inScope`); probes are flagged `FlagActiveScan` and kept out of the proxy history/passive scan.
+  MCP: **`active_scan` / `active_scan_state` / `active_scan_stop`** (now **32 tools**) so the AI can
+  arm-and-operate the same engine. Findings land in the issues store as `[active] …` with the
+  confirming request/response linked. TDD on every detector + engine; verified live against a
+  vulnerable target (XSS + SQLi + open-redirect confirmed). Design: [prd-0002](docs/product/prd-0002-active-scanning.md).
+  **UI (Scanner → Active) lands next.**
 - **Decoder / encoder** — a `🧰 Decoder` tool (open it from the **Ctrl/Cmd+K** palette): Base64,
   URL, hex, HTML-entity, JWT inspection, and a **smart** auto-detect-and-decode, with chain
   (output → next input) and copy. Pure transforms in a tested `internal/codec`, exposed at
