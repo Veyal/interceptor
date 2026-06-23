@@ -136,6 +136,7 @@ func (h *Hub) routes() {
 	h.mux.HandleFunc("POST /api/scanner/run", h.scannerRun)
 	h.mux.HandleFunc("GET /api/scanner/issues", h.scannerIssues)
 	h.mux.HandleFunc("GET /api/scanner/report", h.scannerReport)
+	h.mux.HandleFunc("POST /api/ws/send", h.wsSend)
 	h.mux.HandleFunc("GET /api/keys", h.listKeys)
 	h.mux.HandleFunc("POST /api/keys", h.createKey)
 	h.mux.HandleFunc("DELETE /api/keys/{id}", h.deleteKey)

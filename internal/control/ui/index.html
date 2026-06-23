@@ -598,19 +598,38 @@ async function selectFlow(id){
   }catch(e){toast('flow: '+e.message);}
 }
 function wsOpcode(o){return {0:'cont',1:'text',2:'bin',8:'close',9:'ping',10:'pong'}[o]||('0x'+o.toString(16));}
+function wsFrameRow(dir,opcode,length,text){
+  const arrow=dir==='send'?'<span style="color:var(--blue)">▲ send</span>':'<span style="color:var(--accent)">▼ recv</span>';
+  return `<div style="display:flex;gap:10px;padding:3px 0;border-bottom:1px solid var(--line)">
+    <span style="width:60px;flex:none">${arrow}</span>
+    <span style="width:46px;flex:none;color:var(--fg3)">${wsOpcode(opcode)}</span>
+    <span style="width:58px;flex:none;color:var(--fg2);text-align:right">${length} B</span>
+    <span style="color:var(--fg);overflow-wrap:anywhere">${esc(text)}</span></div>`;
+}
+function flowWsURL(d){const s=d.scheme==='https'?'wss':'ws';const def=(d.scheme==='https'&&d.port===443)||(d.scheme==='http'&&d.port===80);return `${s}://${d.host}${def?'':':'+d.port}${d.path||'/'}`;}
 async function renderWSFrames(id){
   try{
     const d=await api('/api/flows/'+id+'/ws');const frames=d.frames||[];
-    if(!frames.length){$('#resView').innerHTML='<span style="color:var(--fg3)">No frames captured yet — frames stream in live as the socket exchanges messages.</span>';return;}
-    $('#resView').innerHTML=frames.map(f=>{
-      const arrow=f.dir==='send'?'<span style="color:var(--blue)">▲ send</span>':'<span style="color:var(--accent)">▼ recv</span>';
-      return `<div style="display:flex;gap:10px;padding:3px 0;border-bottom:1px solid var(--line)">
-        <span style="width:60px;flex:none">${arrow}</span>
-        <span style="width:46px;flex:none;color:var(--fg3)">${wsOpcode(f.opcode)}</span>
-        <span style="width:58px;flex:none;color:var(--fg2);text-align:right">${f.length} B</span>
-        <span style="color:var(--fg);overflow-wrap:anywhere">${esc(f.preview)}</span></div>`;
-    }).join('');
+    const url=flowWsURL(state.detail||{});
+    const box=`<div style="display:flex;gap:6px;margin-bottom:10px">
+        <input id="wsMsg" placeholder="Replay a frame to ${esc(url)}" style="flex:1;font-family:var(--mono)">
+        <button class="btn accent" id="wsSendBtn">▲ Send</button></div>
+      <div id="wsReplayOut" style="margin-bottom:10px"></div>`;
+    const list=frames.length?frames.map(f=>wsFrameRow(f.dir,f.opcode,f.length,f.preview)).join('')
+      :'<span style="color:var(--fg3)">No frames captured yet — frames stream in live as the socket exchanges messages.</span>';
+    $('#resView').innerHTML=box+list;
+    const sb=document.getElementById('wsSendBtn');if(sb)sb.onclick=()=>wsReplay(url);
+    const inp=document.getElementById('wsMsg');if(inp)inp.onkeydown=e=>{if(e.key==='Enter')wsReplay(url);};
   }catch(e){$('#resView').textContent='(error: '+e.message+')';}
+}
+async function wsReplay(url){
+  const msg=($('#wsMsg')||{}).value||'';
+  const out=$('#wsReplayOut');if(out)out.innerHTML='<span style="color:var(--fg3)">opening socket…</span>';
+  try{
+    const r=await api('/api/ws/send',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({url,message:msg})});
+    const head=`<div style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3);margin:4px 0 4px">REPLAY · HTTP ${r.status} · ${(r.frames||[]).length} frame(s)</div>`;
+    if(out)out.innerHTML=head+(r.frames||[]).map(f=>wsFrameRow(f.dir,f.opcode,f.len,f.text)).join('');
+  }catch(e){if(out)out.innerHTML='<span style="color:var(--red)">'+esc(e.message)+'</span>';}
 }
 function prettify(raw){
   const i=raw.indexOf('\r\n\r\n');const head=i>=0?raw.slice(0,i):raw;const body=i>=0?raw.slice(i+4):'';

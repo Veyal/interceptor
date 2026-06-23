@@ -49,7 +49,9 @@ verified live). See [CHANGELOG.md](../../CHANGELOG.md).
 | **Benchmark guard** | `BenchmarkInsertFlow` + `scripts/bench.sh` (reproduces the documented numbers) |
 | **BYO-key AI assist** (Anthropic **+ OpenRouter**) | explain / suggest payloads / summarize, off until a key is set; provider-selectable |
 | **MCP Streamable-HTTP transport** | `POST /mcp` on the control port — same tools, no stdio subprocess; stateless, batch-aware; unit-tested + live-verified |
-| **Session / auth — header injection** | auth headers (bearer/cookie) auto-applied to every Repeater/Intruder send; `set_session` MCP tool (**21 tools**). *Slice of the L item; login macros + 401 re-auth still roadmapped.* |
+| **Session / auth — header injection** | auth headers (bearer/cookie) auto-applied to every Repeater/Intruder send; `set_session` MCP tool. *Slice of the L item; login macros + 401 re-auth still roadmapped.* |
+| **Flow → curl** + **findings → Markdown report** | `flow_as_curl` and `scan_report` MCP tools / endpoints |
+| **WebSocket message replay** | `internal/wsrepeater` (RFC 6455, no deps); WS-inspector replay box, `POST /api/ws/send`, `ws_send` MCP tool (**24 tools**) |
 
 ## Cycle 3 — remaining bets (all genuinely L/XL; not single-session work)
 
@@ -59,7 +61,7 @@ These are the honest, larger efforts left. Each deserves its own design → PRD 
 |---|---|---|---|
 | **Session / auth handling** (login macros, token refresh, re-auth on 401) | Trustworthy core | High value; a pain point across all tools | L |
 | **Comparative benchmarks vs Burp & ZAP** | Interop & reach | Our harness + numbers shipped ([benchmarks.md](../benchmarks.md)); the *comparison* needs those tools installed on the same box | S–M |
-| **WebSocket through an upstream proxy** + WS message replay | Interop & reach | Completes upstream-proxy + WS coverage | M |
+| **WebSocket through an upstream proxy** | Interop & reach | WS *message replay* shipped (`ws_send` / WS Repeater); routing the WS handshake via an upstream proxy remains | M |
 | **HTTP/2 support** | Trustworthy core | Increasingly expected; significant proxy work | L |
 | **Extension / plugin API** | Differentiator | Burp's real moat; worth it once core is sticky | XL |
 | **Collaboration / multi-user** | Reach | Team/commercial segment | XL |

@@ -7,6 +7,13 @@ each "release" is an iteration of the Conduit design (`Conduit.dc.html`).
 ## [Unreleased]
 
 ### Added
+- **WebSocket message replay** (a WS Repeater) — a new `internal/wsrepeater` opens a fresh
+  WebSocket to a target, sends one message, and captures the reply frames, speaking enough of
+  RFC 6455 to do so with no external deps (client handshake with `Sec-WebSocket-Accept`
+  validation, masked client frames, frame reading; TLS verification skipped for `wss`). Drive it
+  from the WS frame inspector's **Replay a frame** box, `POST /api/ws/send`, or the MCP **`ws_send`**
+  tool (now **24 MCP tools**) — so the AI can fuzz a socket too. Optional binary frames and extra
+  handshake headers (e.g. a Cookie). TDD incl. the RFC accept-key vector and a full echo round-trip.
 - **Findings → Markdown report** — a new `internal/report` renders the passive-scan findings as a
   severity-grouped Markdown report (summary line, per-finding target/detail/evidence/remediation).
   Download it from the Scanner tab's **Export report** button (`GET /api/scanner/report`) or pull it

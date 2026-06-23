@@ -540,6 +540,21 @@ func (s *Server) registerTools() {
 			return truncate(out, 12000), err
 		})
 
+	s.add("ws_send",
+		"WebSocket Repeater: open a fresh WebSocket to a target, send one message, and return the frames the server replies with. url is ws:// or wss://. Optionally send a binary frame, or pass extra handshake headers (e.g. a Cookie) as 'Key: Value' lines.",
+		obj(map[string]any{
+			"url":     p("string", "ws:// or wss:// target URL"),
+			"message": p("string", "message payload to send"),
+			"binary":  p("boolean", "send a binary frame instead of text"),
+			"headers": p("string", "extra handshake header lines 'Key: Value' (optional)"),
+		}, "url", "message"),
+		func(a map[string]any) (string, error) {
+			return s.api(http.MethodPost, "/api/ws/send", map[string]any{
+				"url": argStr(a, "url"), "message": argStr(a, "message"),
+				"binary": argBool(a, "binary", false), "headers": argStr(a, "headers"),
+			})
+		})
+
 	s.add("list_scope", "List target-scope rules (which hosts/paths are in scope).", obj(map[string]any{}),
 		func(a map[string]any) (string, error) { return s.apiGet("/api/scope") })
 
