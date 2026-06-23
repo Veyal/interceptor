@@ -6,6 +6,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-06-23
+
+### Added
+- **Projects (Burp-style).** On an interactive launch Interceptor now offers a
+  startup picker — *new project*, *continue from a saved project*, or the default
+  project — so captured flows, rules, scope and custom checks can be kept in
+  separate per-project databases under `~/.interceptor/projects/<name>/`. Skip the
+  prompt with `--project <name|path>` or `INTERCEPTOR_PROJECT`; suppress it with
+  `INTERCEPTOR_NO_PROMPT`. The CA stays shared at `~/.interceptor/ca`, so switching
+  projects never means re-trusting a certificate. The active project is shown in the
+  startup log, a header badge, and `GET /api/version`.
+- **Conditional intercept.** A regex filter on the Intercept tab holds only requests
+  whose URL / headers / body / method (or anything) match, forwarding the rest
+  untouched. Configurable via `POST /api/intercept/filter` and persisted across
+  restarts (`intercept.filter.*` settings).
+- **Intercept keyboard shortcuts.** On the Intercept tab, `Ctrl+F` forwards and
+  `Ctrl+D` drops the selected held request/response (no reach for the mouse).
+- **Light / dark theme toggle.** A theme switch in the top bar, persisted to
+  `localStorage` and applied before first paint (no flash). Defaults to the OS
+  `prefers-color-scheme`. The palette is fully CSS-variable driven.
+- **Color-coded request/response.** The read-only inspector and Repeater response
+  views now syntax-highlight the HTTP message — request/status line, header
+  names/values, and status code (2xx/3xx/4xx/5xx) — in both raw and pretty modes.
+- **Negative (exclude) history filters.** Hide flows by method / host / path /
+  status, with a right-click **Exclude** quick-action on any flow cell. Exclusions
+  stack, show as red `≠` chips (removable), combine with the positive filters, and
+  persist in saved views. Backed by repeatable `notMethod` / `notHost` / `notPath`
+  / `notStatus` query params on `GET /api/flows`.
+
+### Changed
+- **Live history rows.** A flow now appears in History the moment its request is
+  sent upstream (shown pending, with a blinking `•••` and no status yet) and is
+  then updated in place once the response arrives — instead of only showing up
+  after the full exchange completes. Backed by a new `flow.update` SSE event and
+  `store.UpdateFlow`; long-running requests are visible while in flight.
+- **Settings layout redone** as spaced, bordered cards with consistent padding and
+  vertical rhythm, replacing the cramped flush-divider sections.
+- The `● intercepted` flag is now set only for requests the gate actually held, so
+  the conditional-intercept filter no longer mislabels traffic it forwards through.
+
 ## [0.2.2] — 2026-06-23
 
 ### Added
