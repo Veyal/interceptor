@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-06-24
+
 ### Added
 - **Project notes (markdown notebook).** A new **Notes** tab gives each project a
   shared markdown scratchpad — for credentials, findings, scope, and to-dos — with
