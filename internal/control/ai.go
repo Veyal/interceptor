@@ -46,7 +46,7 @@ func (h *Hub) aiAssist(w http.ResponseWriter, r *http.Request) {
 
 	reqRaw := clip(string(h.rawRequest(f)), 4000)
 	resRaw := clip(string(h.rawResponse(f)), 4000)
-	const system = "You are a concise web application security testing assistant helping a penetration tester. Be specific and practical. Do not include disclaimers."
+	const system = "Concise web-app security testing assistant for a pentester. Be specific and practical; no disclaimers or preamble."
 
 	var user string
 	switch in.Kind {

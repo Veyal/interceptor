@@ -23,16 +23,66 @@ const protocolVersion = "2024-11-05"
 
 // Server is an MCP stdio server backed by the control API at base.
 type Server struct {
-	base  string
-	cl    *http.Client
-	tools map[string]tool
-	order []string
+	base   string
+	cl     *http.Client
+	tools  map[string]tool
+	order  []string
+	report func(Activity) // called after each tool call; surfaces AI actions in the UI
 }
 
 type tool struct {
 	description string
 	schema      map[string]any
 	call        func(args map[string]any) (string, error)
+}
+
+// Activity is a record of one MCP tool call. It is reported to the control plane
+// after every call so a human watching the UI can see, live, what the AI is
+// doing — which tool, the gist of the arguments, and the outcome.
+type Activity struct {
+	Tool    string `json:"tool"`
+	Summary string `json:"summary"` // short, human-readable gist of the arguments
+	OK      bool   `json:"ok"`
+	Result  string `json:"result"` // first line of the result / error, truncated
+	Ms      int64  `json:"ms"`
+}
+
+// activitySummary renders the most informative arguments of a tool call into a
+// short one-liner (e.g. "method=POST url=https://x/login"). Tool-agnostic: it
+// picks known, high-signal keys in priority order so every tool reads sensibly.
+func activitySummary(tool string, args map[string]any) string {
+	order := []string{"method", "url", "target", "host", "path", "id", "op", "input", "match", "type", "side", "status", "message", "template", "source", "scheme", "enabled", "limit"}
+	var parts []string
+	for _, k := range order {
+		v, ok := args[k]
+		if !ok || v == nil {
+			continue
+		}
+		sv := strings.TrimSpace(fmt.Sprint(v))
+		if sv == "" {
+			continue
+		}
+		if len(sv) > 60 {
+			sv = sv[:60] + "…"
+		}
+		parts = append(parts, k+"="+sv)
+		if len(parts) >= 3 {
+			break
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// firstLine returns the first non-empty line of s, trimmed and capped at n runes.
+func firstLine(s string, n int) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	s = strings.TrimSpace(s)
+	if n > 0 && len(s) > n {
+		s = s[:n] + "…"
+	}
+	return s
 }
 
 // New builds an MCP server that talks to the control API at baseURL
@@ -43,8 +93,29 @@ func New(baseURL string) *Server {
 		cl:    &http.Client{Timeout: 60 * time.Second},
 		tools: map[string]tool{},
 	}
+	s.report = s.postActivity
 	s.registerTools()
 	return s
+}
+
+// postActivity reports a tool call to the control plane (best-effort, async) so
+// it shows up in the live AI-activity feed. Failures are ignored — observability
+// must never affect the tool call itself.
+func (s *Server) postActivity(a Activity) {
+	b, err := json.Marshal(a)
+	if err != nil {
+		return
+	}
+	go func() {
+		req, err := http.NewRequest(http.MethodPost, s.base+"/api/activity", bytes.NewReader(b))
+		if err != nil {
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req); err == nil {
+			resp.Body.Close()
+		}
+	}()
 }
 
 // Serve runs the JSON-RPC loop over newline-delimited messages until EOF.
@@ -102,7 +173,7 @@ func (s *Server) dispatch(method string, params json.RawMessage) (any, *rpcError
 			"protocolVersion": ver,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "interceptor", "version": version.Version},
-			"instructions":    "Interceptor: an intercepting HTTP/HTTPS proxy. Use these tools to list and read captured flows, replay/mutate requests (send_request), fuzz (start_intruder), passively scan (run_scanner), and control interception. Bodies are bounded by default; pass maxBytes to read more.",
+			"instructions":    "Interceptor: an intercepting HTTP/HTTPS proxy for web pentesting. Flow: list_flows/analyze_flow to find & triage → get_flow to read → send_request (replay) or start_intruder (fuzz) to attack → run_scanner (passive) or active_scan (sends payloads) to find bugs. Flow ids come from list_flows. Bodies truncate to maxBytes (default 4000). Scanners obey target scope (list_scope/add_scope_rule). active_scan sends real attacks: pass arm=true once to confirm authorization, and it only fires in-scope.",
 		}, nil
 	case "tools/list":
 		return map[string]any{"tools": s.toolList()}, nil
@@ -143,7 +214,17 @@ func (s *Server) callTool(params json.RawMessage) any {
 	if p.Arguments == nil {
 		p.Arguments = map[string]any{}
 	}
+	start := time.Now()
 	text, err := t.call(p.Arguments)
+	if s.report != nil {
+		a := Activity{Tool: p.Name, Summary: activitySummary(p.Name, p.Arguments), OK: err == nil, Ms: time.Since(start).Milliseconds()}
+		if err != nil {
+			a.Result = firstLine(err.Error(), 160)
+		} else {
+			a.Result = firstLine(text, 160)
+		}
+		s.report(a)
+	}
 	if err != nil {
 		return toolError(err.Error())
 	}
@@ -350,6 +431,10 @@ func obj(props map[string]any, required ...string) map[string]any {
 
 func p(typ, desc string) map[string]any { return map[string]any{"type": typ, "description": desc} }
 
+// pt declares a parameter with no description — for self-evident names (id, url,
+// method, body…) where a description would only cost tokens, not add meaning.
+func pt(typ string) map[string]any { return map[string]any{"type": typ} }
+
 func (s *Server) add(name, desc string, schema map[string]any, call func(map[string]any) (string, error)) {
 	s.tools[name] = tool{description: desc, schema: schema, call: call}
 	s.order = append(s.order, name)
@@ -358,14 +443,14 @@ func (s *Server) add(name, desc string, schema map[string]any, call func(map[str
 // registerTools wires every tool to a control-API endpoint.
 func (s *Server) registerTools() {
 	s.add("list_flows",
-		"List/search captured proxy flows (compact summaries). Filter by host, method, path search, scheme, status class (1-5 → 1xx-5xx).",
+		"Search captured flows → compact rows (id, method, host, path, status). Filters optional.",
 		obj(map[string]any{
-			"host":   p("string", "host substring"),
-			"method": p("string", "exact HTTP method"),
+			"host":   p("string", "substring"),
+			"method": pt("string"),
 			"search": p("string", "path substring"),
-			"scheme": p("string", "http or https"),
-			"status": p("integer", "status class 1-5 (e.g. 4 = 4xx)"),
-			"limit":  p("integer", "max rows (default 50)"),
+			"scheme": pt("string"),
+			"status": p("integer", "class 1-5 (4=4xx)"),
+			"limit":  p("integer", "default 50"),
 		}),
 		func(a map[string]any) (string, error) {
 			q := url.Values{}
@@ -382,11 +467,11 @@ func (s *Server) registerTools() {
 		})
 
 	s.add("get_flow",
-		"Read a captured flow's raw request and/or response (headers + body), bounded by maxBytes.",
+		"Read a flow's raw request and/or response (headers + body).",
 		obj(map[string]any{
-			"id":       p("integer", "flow id"),
+			"id":       pt("integer"),
 			"side":     p("string", "req | res | both (default both)"),
-			"maxBytes": p("integer", "max bytes per side (default 4000)"),
+			"maxBytes": pt("integer"),
 		}, "id"),
 		func(a map[string]any) (string, error) {
 			id := argInt(a, "id", 0)
@@ -412,8 +497,8 @@ func (s *Server) registerTools() {
 		})
 
 	s.add("analyze_flow",
-		"Get a compact, decision-ready summary of a flow: URL/status, notable security headers, query parameters (injection points), passive scanner findings, and whether it's in scope. Use this before get_flow to decide what to inspect.",
-		obj(map[string]any{"id": p("integer", "flow id")}, "id"),
+		"Compact triage of a flow: URL/status, security headers, query params (injection points), passive findings, in-scope flag. Cheaper than get_flow for deciding what to inspect.",
+		obj(map[string]any{"id": pt("integer")}, "id"),
 		func(a map[string]any) (string, error) {
 			id := argInt(a, "id", 0)
 			if id == 0 {
@@ -423,8 +508,8 @@ func (s *Server) registerTools() {
 		})
 
 	s.add("flow_as_curl",
-		"Render a captured flow's request as a runnable curl command (preserves the exact path; skips TLS verification) so the user can reproduce or iterate on it in a terminal.",
-		obj(map[string]any{"id": p("integer", "flow id")}, "id"),
+		"Render a flow's request as a runnable curl command.",
+		obj(map[string]any{"id": pt("integer")}, "id"),
 		func(a map[string]any) (string, error) {
 			id := argInt(a, "id", 0)
 			if id == 0 {
@@ -434,12 +519,12 @@ func (s *Server) registerTools() {
 		})
 
 	s.add("send_request",
-		"Send a request directly to a target (Repeater) and record it. Returns the resulting flow id+status; call get_flow with that id to read the response body.",
+		"Send an HTTP request (Repeater) and record it. Returns the flow id+status; get_flow that id for the body.",
 		obj(map[string]any{
-			"method":  p("string", "HTTP method"),
+			"method":  pt("string"),
 			"url":     p("string", "absolute URL"),
-			"headers": p("string", "raw header lines 'Key: Value', one per line"),
-			"body":    p("string", "request body"),
+			"headers": p("string", "'Key: Value' lines"),
+			"body":    pt("string"),
 		}, "url"),
 		func(a map[string]any) (string, error) {
 			out, err := s.api(http.MethodPost, "/api/repeater/send", map[string]any{
@@ -453,12 +538,12 @@ func (s *Server) registerTools() {
 		})
 
 	s.add("start_intruder",
-		"Start a payload attack. Wrap fuzz points in §…§ in the template. attackType: sniper (one position at a time) or pitchfork (lists in parallel). payloads: a list of lists (one list for sniper; one per position for pitchfork).",
+		"Fuzz a request. Mark fuzz points with §…§ in template. attackType sniper=one position at a time, pitchfork=lists in parallel. payloads=list of lists (one for sniper; one per position for pitchfork).",
 		obj(map[string]any{
 			"target":     p("string", "scheme://host[:port]"),
-			"template":   p("string", "raw request with §…§ fuzz points"),
+			"template":   p("string", "raw request with §…§"),
 			"attackType": p("string", "sniper | pitchfork"),
-			"payloads":   map[string]any{"type": "array", "description": "list of payload lists", "items": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}},
+			"payloads":   map[string]any{"type": "array", "items": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}},
 		}, "target", "template"),
 		func(a map[string]any) (string, error) {
 			return s.api(http.MethodPost, "/api/intruder/start", map[string]any{
@@ -468,7 +553,7 @@ func (s *Server) registerTools() {
 		})
 
 	s.add("intruder_state",
-		"Get the current/last Intruder attack's progress and results (status/length/time per payload; anomalies flagged).",
+		"Intruder progress + results (status/length/time per payload; anomalies flagged).",
 		obj(map[string]any{}),
 		func(a map[string]any) (string, error) {
 			out, err := s.apiGet("/api/intruder/state")
@@ -476,7 +561,7 @@ func (s *Server) registerTools() {
 		})
 
 	s.add("run_scanner",
-		"Run the passive scanner over captured flows and return the findings (severity/title/target/evidence/fix).",
+		"Passive scan over captured flows → findings (severity/title/target/evidence/fix). No requests sent.",
 		obj(map[string]any{}),
 		func(a map[string]any) (string, error) { return s.api(http.MethodPost, "/api/scanner/run", nil) })
 
@@ -484,58 +569,58 @@ func (s *Server) registerTools() {
 		func(a map[string]any) (string, error) { return s.apiGet("/api/scanner/issues") })
 
 	s.add("scan_report",
-		"Get the current passive-scan findings as a formatted Markdown report grouped by severity — ready to drop into a writeup.",
+		"Passive findings as a Markdown report, grouped by severity.",
 		obj(map[string]any{}),
 		func(a map[string]any) (string, error) { return s.apiGet("/api/scanner/report") })
 
 	s.add("list_checks",
-		"List the custom Starlark scanner checks (id, source, and any compile error). These run on every scan alongside the built-ins.",
+		"List custom Starlark checks (id, source, compile error). They run on every scan.",
 		obj(map[string]any{}),
 		func(a map[string]any) (string, error) { return s.apiGet("/api/checks") })
 
 	s.add("test_check",
-		"Compile and run a custom check's Starlark source against a captured flow WITHOUT saving it — returns the findings, or the compile/runtime error. Iterate here until it's right, then save_check. Omit flowId to test against the most recent flow. A check is `def check(flow): return [finding(severity,title,detail=,evidence=,fix=)]` — flow exposes method/scheme/host/port/path/status/mime, req_body/res_body, req_header(name)/res_header(name), query_param(name); builtin re_search(pattern,text).",
+		"Compile+run a Starlark check against a flow WITHOUT saving (returns findings or the error). Iterate, then save_check. Omit flowId for the latest flow. Shape: def check(flow): return [finding(severity,title,detail=,evidence=,fix=)]. flow has method/scheme/host/port/path/status/mime, req_body/res_body, req_header(n)/res_header(n), query_param(n); builtin re_search(pat,text).",
 		obj(map[string]any{
-			"source": p("string", "the check's Starlark source"),
-			"flowId": p("integer", "flow to test against (optional; default = most recent)"),
+			"source": p("string", "Starlark source"),
+			"flowId": p("integer", "default latest"),
 		}, "source"),
 		func(a map[string]any) (string, error) {
 			return s.api(http.MethodPost, "/api/checks/test", map[string]any{"source": argStr(a, "source"), "flowId": argInt(a, "flowId", 0)})
 		})
 
 	s.add("save_check",
-		"Create or update a custom Starlark scanner check by id (letters/digits/-/_). The source must compile or it is rejected. Once saved it runs on every scan. Use test_check first.",
+		"Save a Starlark check by id (letters/digits/-/_); must compile. Runs on every scan. test_check first.",
 		obj(map[string]any{
-			"id":     p("string", "check id / filename stem"),
-			"source": p("string", "the check's Starlark source"),
+			"id":     pt("string"),
+			"source": p("string", "Starlark source"),
 		}, "id", "source"),
 		func(a map[string]any) (string, error) {
 			return s.api(http.MethodPut, "/api/checks/"+url.PathEscape(argStr(a, "id")), map[string]any{"source": argStr(a, "source")})
 		})
 
-	s.add("delete_check", "Delete a custom scanner check by id.",
-		obj(map[string]any{"id": p("string", "check id")}, "id"),
+	s.add("delete_check", "Delete a custom check by id.",
+		obj(map[string]any{"id": pt("string")}, "id"),
 		func(a map[string]any) (string, error) {
 			return s.api(http.MethodDelete, "/api/checks/"+url.PathEscape(argStr(a, "id")), nil)
 		})
 
-	s.add("get_intercept", "Get intercept state and the current hold queue.", obj(map[string]any{}),
+	s.add("get_intercept", "Intercept state + current hold queue.", obj(map[string]any{}),
 		func(a map[string]any) (string, error) { return s.apiGet("/api/intercept") })
 
-	s.add("set_intercept", "Enable or disable request interception.",
-		obj(map[string]any{"enabled": p("boolean", "true to hold requests")}, "enabled"),
+	s.add("set_intercept", "Enable/disable request interception (hold requests to edit/drop).",
+		obj(map[string]any{"enabled": pt("boolean")}, "enabled"),
 		func(a map[string]any) (string, error) {
 			return s.api(http.MethodPost, "/api/intercept/toggle", map[string]any{"enabled": argBool(a, "enabled", false)})
 		})
 
-	s.add("set_response_intercept", "Enable or disable response interception (hold responses to edit/drop before they reach the client).",
-		obj(map[string]any{"enabled": p("boolean", "true to hold responses")}, "enabled"),
+	s.add("set_response_intercept", "Enable/disable response interception (hold responses to edit/drop).",
+		obj(map[string]any{"enabled": pt("boolean")}, "enabled"),
 		func(a map[string]any) (string, error) {
 			return s.api(http.MethodPost, "/api/intercept/response/toggle", map[string]any{"enabled": argBool(a, "enabled", false)})
 		})
 
-	s.add("forward_request", "Forward a held request (optionally replacing it with edited raw bytes).",
-		obj(map[string]any{"id": p("integer", "held request id"), "raw": p("string", "optional edited raw request")}, "id"),
+	s.add("forward_request", "Forward a held request (optionally with edited raw bytes).",
+		obj(map[string]any{"id": pt("integer"), "raw": p("string", "edited raw request (optional)")}, "id"),
 		func(a map[string]any) (string, error) {
 			body := map[string]any{}
 			if r := argStr(a, "raw"); r != "" {
@@ -544,7 +629,7 @@ func (s *Server) registerTools() {
 			return s.api(http.MethodPost, fmt.Sprintf("/api/intercept/%d/forward", argInt(a, "id", 0)), body)
 		})
 
-	s.add("drop_request", "Drop a held request.", obj(map[string]any{"id": p("integer", "held request id")}, "id"),
+	s.add("drop_request", "Drop a held request.", obj(map[string]any{"id": pt("integer")}, "id"),
 		func(a map[string]any) (string, error) {
 			return s.api(http.MethodPost, fmt.Sprintf("/api/intercept/%d/drop", argInt(a, "id", 0)), nil)
 		})
@@ -555,8 +640,8 @@ func (s *Server) registerTools() {
 	s.add("add_rule", "Add a request-side match-&-replace rule (regex).",
 		obj(map[string]any{
 			"type":    p("string", "req-header | req-body"),
-			"match":   p("string", "regex to match"),
-			"replace": p("string", "replacement"),
+			"match":   p("string", "regex"),
+			"replace": pt("string"),
 			"enabled": p("boolean", "default true"),
 		}, "type", "match"),
 		func(a map[string]any) (string, error) {
@@ -566,20 +651,20 @@ func (s *Server) registerTools() {
 			})
 		})
 
-	s.add("list_ws_frames", "List captured WebSocket frames for a flow (direction/opcode/length/preview).",
-		obj(map[string]any{"id": p("integer", "websocket flow id")}, "id"),
+	s.add("list_ws_frames", "List a flow's WebSocket frames (dir/opcode/length/preview).",
+		obj(map[string]any{"id": pt("integer")}, "id"),
 		func(a map[string]any) (string, error) {
 			out, err := s.apiGet(fmt.Sprintf("/api/flows/%d/ws", argInt(a, "id", 0)))
 			return truncate(out, 12000), err
 		})
 
 	s.add("ws_send",
-		"WebSocket Repeater: open a fresh WebSocket to a target, send one message, and return the frames the server replies with. url is ws:// or wss://. Optionally send a binary frame, or pass extra handshake headers (e.g. a Cookie) as 'Key: Value' lines.",
+		"Open a fresh WebSocket, send one message, return the server's reply frames.",
 		obj(map[string]any{
-			"url":     p("string", "ws:// or wss:// target URL"),
-			"message": p("string", "message payload to send"),
-			"binary":  p("boolean", "send a binary frame instead of text"),
-			"headers": p("string", "extra handshake header lines 'Key: Value' (optional)"),
+			"url":     p("string", "ws:// or wss://"),
+			"message": pt("string"),
+			"binary":  p("boolean", "send a binary frame"),
+			"headers": p("string", "extra handshake 'Key: Value' lines"),
 		}, "url", "message"),
 		func(a map[string]any) (string, error) {
 			return s.api(http.MethodPost, "/api/ws/send", map[string]any{
@@ -592,11 +677,11 @@ func (s *Server) registerTools() {
 		func(a map[string]any) (string, error) { return s.apiGet("/api/scope") })
 
 	s.add("add_scope_rule",
-		"Add a target-scope rule. action: include | exclude. host supports a leading wildcard (e.g. *.acme.com); path is a prefix. Scope focuses the history, intercept, and scanner.",
+		"Add a scope rule. host allows a leading wildcard (*.acme.com); path is a prefix. Scope focuses history/intercept/scanners.",
 		obj(map[string]any{
 			"action":  p("string", "include | exclude"),
-			"host":    p("string", "host pattern, e.g. *.acme.com"),
-			"path":    p("string", "path prefix (optional)"),
+			"host":    p("string", "e.g. *.acme.com"),
+			"path":    p("string", "prefix (optional)"),
 			"scheme":  p("string", "http | https (optional)"),
 			"enabled": p("boolean", "default true"),
 		}, "action"),
@@ -607,14 +692,14 @@ func (s *Server) registerTools() {
 			})
 		})
 
-	s.add("get_settings", "Get proxy/intercept settings (proxy bind address, intercept on/off).", obj(map[string]any{}),
+	s.add("get_settings", "Proxy/intercept settings (bind address, intercept on/off).", obj(map[string]any{}),
 		func(a map[string]any) (string, error) { return s.apiGet("/api/settings") })
 
 	s.add("set_session",
-		"Set session/auth headers auto-applied to every Repeater/Intruder send (e.g. an Authorization bearer token or a Cookie), so your requests stay authenticated without re-pasting credentials. Provide headers as 'Key: Value' lines; set enabled=false to stop applying them.",
+		"Auth headers auto-applied to every Repeater/Intruder send (e.g. Authorization/Cookie) so sends stay authenticated. enabled=false to stop.",
 		obj(map[string]any{
-			"enabled": p("boolean", "true to apply the headers to outgoing sends"),
-			"headers": p("string", "header lines 'Key: Value', one per line (e.g. 'Authorization: Bearer …')"),
+			"enabled": pt("boolean"),
+			"headers": p("string", "'Key: Value' lines"),
 		}, "enabled"),
 		func(a map[string]any) (string, error) {
 			return s.api(http.MethodPost, "/api/session", map[string]any{
@@ -624,12 +709,12 @@ func (s *Server) registerTools() {
 		})
 
 	s.add("active_scan",
-		"ACTIVE scan: send crafted attack payloads to confirm vulnerabilities (reflected XSS, SQLi, SSTI, open redirect, path traversal, timing OS command injection) on an in-scope endpoint. This sends real attack traffic — only run against targets you're authorized to test. Pass arm=true to confirm authorization and enable scanning (a session-level gate). Target a single flow with flowId, or set inScope=true to scan all in-scope endpoints. Returns immediately; poll active_scan_state for progress + confirmed findings.",
+		"ACTIVE scan — sends real attack payloads (reflected XSS, SQLi, SSTI, open redirect, path traversal, timing OS-cmd-injection) to an in-scope target. Authorized targets only. arm=true confirms authorization (session gate, required once). Target one flowId, or inScope=true for all in-scope endpoints. Async — poll active_scan_state.",
 		obj(map[string]any{
-			"arm":         p("boolean", "true to confirm you're authorized and enable active scanning"),
-			"flowId":      p("integer", "scan one captured flow's endpoint"),
-			"inScope":     p("boolean", "scan all in-scope endpoints with injectable params"),
-			"maxRequests": p("integer", "total probe budget (default 2000)"),
+			"arm":         p("boolean", "confirm authorization + enable"),
+			"flowId":      p("integer", "scan one flow's endpoint"),
+			"inScope":     p("boolean", "scan all in-scope endpoints"),
+			"maxRequests": p("integer", "probe budget (default 2000)"),
 		}),
 		func(a map[string]any) (string, error) {
 			return s.api(http.MethodPost, "/api/activescan/start", map[string]any{
@@ -638,7 +723,7 @@ func (s *Server) registerTools() {
 			})
 		})
 
-	s.add("active_scan_state", "Active-scan progress + confirmed findings (armed/running/targets/requests).",
+	s.add("active_scan_state", "Active-scan progress + confirmed findings.",
 		obj(map[string]any{}),
 		func(a map[string]any) (string, error) { return s.apiGet("/api/activescan") })
 
@@ -647,10 +732,10 @@ func (s *Server) registerTools() {
 		func(a map[string]any) (string, error) { return s.api(http.MethodPost, "/api/activescan/stop", nil) })
 
 	s.add("decode",
-		"Decode or encode a string. op: base64encode/base64decode, urlencode/urldecode, hexencode/hexdecode, htmlencode/htmldecode, jwtdecode (inspect a JWT's header+payload), or smart (auto-detect and decode one layer).",
+		"Encode/decode a string. op: base64encode/base64decode, urlencode/urldecode, hexencode/hexdecode, htmlencode/htmldecode, jwtdecode, smart (auto-detect one layer).",
 		obj(map[string]any{
-			"op":    p("string", "the transform to apply"),
-			"input": p("string", "the string to transform"),
+			"op":    p("string", "see list above"),
+			"input": pt("string"),
 		}, "op", "input"),
 		func(a map[string]any) (string, error) {
 			return s.api(http.MethodPost, "/api/decode", map[string]any{"op": argStr(a, "op"), "input": argStr(a, "input")})

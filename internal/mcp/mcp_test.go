@@ -39,6 +39,61 @@ func decodeResponses(t *testing.T, out string) []rpcResponse {
 	return resps
 }
 
+func TestActivitySummary(t *testing.T) {
+	if got := activitySummary("send_request", map[string]any{"method": "POST", "url": "https://x/login"}); !strings.Contains(got, "method=POST") || !strings.Contains(got, "url=https://x/login") {
+		t.Fatalf("send_request summary: %q", got)
+	}
+	if got := activitySummary("get_flow", map[string]any{"id": float64(42)}); got != "id=42" {
+		t.Fatalf("get_flow summary: %q", got)
+	}
+	if got := activitySummary("active_scan", map[string]any{"target": "https://x"}); got != "target=https://x" {
+		t.Fatalf("active_scan summary: %q", got)
+	}
+}
+
+// Every tool call must be reported so the human can watch the AI work.
+func TestActivityReporting(t *testing.T) {
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/repeater/send" {
+			io.WriteString(w, `{"id":7,"status":201,"method":"POST"}`)
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer mock.Close()
+
+	s := New(mock.URL)
+	var got []Activity
+	s.report = func(a Activity) { got = append(got, a) } // sync recorder (replaces async POST)
+
+	s.callTool(json.RawMessage(`{"name":"send_request","arguments":{"method":"POST","url":"https://victim.test/login"}}`))
+
+	if len(got) != 1 {
+		t.Fatalf("expected 1 activity, got %d", len(got))
+	}
+	a := got[0]
+	if a.Tool != "send_request" || !a.OK {
+		t.Fatalf("unexpected activity: %+v", a)
+	}
+	if !strings.Contains(a.Summary, "method=POST") || !strings.Contains(a.Summary, "url=https://victim.test/login") {
+		t.Fatalf("summary missing args: %q", a.Summary)
+	}
+	if a.Result == "" {
+		t.Fatal("expected a result snippet")
+	}
+
+	// A failing tool call is reported with OK=false (point at a dead control plane).
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	dead.Close()
+	s2 := New(dead.URL)
+	var got2 []Activity
+	s2.report = func(a Activity) { got2 = append(got2, a) }
+	s2.callTool(json.RawMessage(`{"name":"list_flows","arguments":{}}`))
+	if len(got2) != 1 || got2[0].OK {
+		t.Fatalf("errored call should report OK=false: %+v", got2)
+	}
+}
+
 func TestMCPProtocolAndTools(t *testing.T) {
 	var sentRepeater bool
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
