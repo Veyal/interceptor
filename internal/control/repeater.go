@@ -16,6 +16,17 @@ type repeaterSendJSON struct {
 	Body    string `json:"body"`
 }
 
+// aiSourceFlag returns store.FlagAI when a request was issued by the AI assistant
+// over MCP — the MCP server stamps every control call with X-Interceptor-Source:
+// ai. It lets the control plane distinguish AI-originated Repeater/Intruder/scan
+// sends from a human's and surface them in Proxy/History.
+func aiSourceFlag(r *http.Request) int64 {
+	if strings.EqualFold(r.Header.Get("X-Interceptor-Source"), "ai") {
+		return store.FlagAI
+	}
+	return 0
+}
+
 func (h *Hub) repeaterSend(w http.ResponseWriter, r *http.Request) {
 	var in repeaterSendJSON
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
@@ -27,7 +38,7 @@ func (h *Hub) repeaterSend(w http.ResponseWriter, r *http.Request) {
 		URL:     in.URL,
 		Headers: parseHeaderLines(in.Headers),
 		Body:    []byte(in.Body),
-		Flags:   store.FlagRepeater,
+		Flags:   store.FlagRepeater | aiSourceFlag(r),
 	})
 	if err != nil {
 		httpErr(w, http.StatusBadRequest, err.Error())

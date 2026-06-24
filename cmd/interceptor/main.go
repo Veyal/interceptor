@@ -141,6 +141,11 @@ func run() error {
 	if v, ok, _ := st.GetSetting("upstream.proxy"); ok && v != "" {
 		_ = prx.SetUpstreamProxy(v)
 	}
+	// Capture policy: persist all traffic, or only in-scope (saves DB space).
+	hub.SetCaptureScopeOnly = prx.SetCaptureScopeOnly
+	if v, ok, _ := st.GetSetting("capture.scopeOnly"); ok && v == "1" {
+		prx.SetCaptureScopeOnly(true)
+	}
 	pm.handler = prx
 
 	proxyAddr := "127.0.0.1:8080"

@@ -25,6 +25,7 @@ func (h *Hub) intruderStart(w http.ResponseWriter, r *http.Request) {
 		Template:   in.Template,
 		AttackType: in.AttackType,
 		Payloads:   in.Payloads,
+		ExtraFlags: aiSourceFlag(r),
 	})
 	if err != nil {
 		httpErr(w, http.StatusBadRequest, err.Error())

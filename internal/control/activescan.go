@@ -135,16 +135,18 @@ func (h *Hub) asStart(w http.ResponseWriter, r *http.Request) {
 	h.as.mu.Unlock()
 	h.broadcast(map[string]any{"type": "activescan.update"})
 
-	go h.asRun(ctx, targets, in.MaxRequests)
+	go h.asRun(ctx, targets, in.MaxRequests, aiSourceFlag(r))
 	h.asWriteState(w)
 }
 
 // asRun executes the scan across targets within a shared request budget.
-func (h *Hub) asRun(ctx context.Context, targets []activescan.Target, budget int) {
+// extraFlags is OR'd onto each probe (store.FlagAI when the run was kicked off
+// by the AI over MCP) so the traffic can be recognized in History.
+func (h *Hub) asRun(ctx context.Context, targets []activescan.Target, budget int, extraFlags int64) {
 	if budget <= 0 {
 		budget = 2000
 	}
-	send := h.activeSender(ctx)
+	send := h.activeSender(ctx, extraFlags)
 	for _, t := range targets {
 		if ctx.Err() != nil || budget <= 0 {
 			break
@@ -220,14 +222,14 @@ func (h *Hub) isOwnListener(f *store.Flow) bool {
 // activeSender bridges the engine to the real sender (records each probe as a
 // flagged flow, applies session auth) and reads the response back for detection.
 // The ctx is threaded into each send so the kill switch aborts in-flight probes.
-func (h *Hub) activeSender(ctx context.Context) activescan.SendFunc {
+func (h *Hub) activeSender(ctx context.Context, extraFlags int64) activescan.SendFunc {
 	return func(t activescan.Target) activescan.Response {
 		flow, err := h.snd.Send(sender.Request{
 			Method:  t.Method,
 			URL:     t.URL,
 			Headers: map[string][]string(t.Headers),
 			Body:    []byte(t.Body),
-			Flags:   store.FlagActiveScan,
+			Flags:   store.FlagActiveScan | extraFlags,
 			Context: ctx,
 		})
 		if err != nil || flow == nil {

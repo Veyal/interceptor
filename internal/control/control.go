@@ -49,6 +49,8 @@ type Hub struct {
 
 	// Upstream applies a chained upstream-proxy URL ("" = direct). Set by cmd.
 	Upstream func(string) error
+	// SetCaptureScopeOnly toggles persisting only in-scope traffic. Set by cmd.
+	SetCaptureScopeOnly func(bool)
 
 	// ChecksDir holds user-authored Starlark scanner checks ("" = none). Set by cmd.
 	ChecksDir string
@@ -71,7 +73,7 @@ type Hub struct {
 
 	as asState // active-scan state (armed/running/findings)
 
-	updMu    sync.Mutex // update-check result (set by cmd's background check)
+	updMu     sync.Mutex // update-check result (set by cmd's background check)
 	updLatest string
 	updAvail  bool
 
@@ -137,6 +139,11 @@ func (h *Hub) routes() {
 	h.mux.HandleFunc("GET /api/flows/{id}/ws", h.flowWS)
 	h.mux.HandleFunc("GET /api/flows/{id}/analyze", h.analyzeFlow)
 	h.mux.HandleFunc("GET /api/flows/{id}/curl", h.flowCurl)
+	h.mux.HandleFunc("PUT /api/flows/{id}/note", h.setFlowNote)
+	h.mux.HandleFunc("POST /api/flows/delete", h.deleteFlows)
+	h.mux.HandleFunc("GET /api/endpoints", h.listEndpoints)
+	h.mux.HandleFunc("GET /api/notes", h.getNotes)
+	h.mux.HandleFunc("PUT /api/notes", h.putNotes)
 	h.mux.HandleFunc("GET /api/rules", h.listRules)
 	h.mux.HandleFunc("POST /api/rules", h.createRule)
 	h.mux.HandleFunc("PUT /api/rules/{id}", h.updateRule)
@@ -223,6 +230,7 @@ type flowJSON struct {
 	ClientAddr string `json:"clientAddr"`
 	Error      string `json:"error"`
 	Flags      int64  `json:"flags"`
+	Note       string `json:"note"`
 }
 
 type flowDetailJSON struct {
@@ -269,6 +277,7 @@ type settingsJSON struct {
 	AiProvider       string `json:"aiProvider"`
 	AiModel          string `json:"aiModel"`
 	AiHasKey         bool   `json:"aiHasKey"` // never returns the key itself
+	CaptureScopeOnly bool   `json:"captureScopeOnly"`
 }
 
 func toFlowJSON(f *store.Flow) flowJSON {
@@ -276,7 +285,75 @@ func toFlowJSON(f *store.Flow) flowJSON {
 		ID: f.ID, TS: f.TS.UnixMilli(), Method: f.Method, Scheme: f.Scheme, Host: f.Host,
 		Port: f.Port, Path: f.Path, Status: f.Status, Mime: f.Mime, ReqLen: f.ReqLen,
 		ResLen: f.ResLen, DurationMs: f.DurationMs, ClientAddr: f.ClientAddr, Error: f.Error, Flags: f.Flags,
+		Note: f.Note,
 	}
+}
+
+// setFlowNote attaches (or clears, with an empty string) a free-text note on a
+// flow — used by the inspector's Notes field and the MCP set_note tool. The
+// change is broadcast so every connected client updates the row and open detail.
+func (h *Hub) setFlowNote(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		httpErr(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	var in struct {
+		Note string `json:"note"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		httpErr(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	if err := h.st.SetFlowNote(id, in.Note); err != nil {
+		httpErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if f, err := h.st.GetFlow(id); err == nil {
+		h.FlowUpdated(f)
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteFlows removes the listed flows from History. Bodies are content-addressed
+// and shared, so only the metadata rows are dropped. Clients are told to reload.
+func (h *Hub) deleteFlows(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		httpErr(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	n, err := h.st.DeleteFlows(in.IDs)
+	if err != nil {
+		httpErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if n > 0 {
+		h.broadcast(map[string]any{"type": "flow.new"}) // reuse the reload signal
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": n})
+}
+
+// listEndpoints returns the unique-endpoint map for the attack-surface view —
+// proxied/manual traffic aggregated by (host, method, path); bulk attack traffic
+// (Intruder / active scan) is excluded as noise.
+func (h *Hub) listEndpoints(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	eps, err := h.st.Endpoints(store.EndpointFilter{
+		Host:         q.Get("host"),
+		Search:       q.Get("search"),
+		ExcludeFlags: store.FlagIntruder | store.FlagActiveScan,
+	})
+	if err != nil {
+		httpErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if eps == nil {
+		eps = []store.Endpoint{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"endpoints": eps})
 }
 
 // ---- Flows ----
@@ -291,6 +368,11 @@ func (h *Hub) listFlows(w http.ResponseWriter, r *http.Request) {
 		Search:       q.Get("search"),
 		Scheme:       q.Get("scheme"),
 		ExcludeFlags: store.FlagRepeater | store.FlagIntruder | store.FlagActiveScan, // these have their own views
+	}
+	// AI-originated sends carry FlagAI on top of those flags; exempt them from the
+	// exclusion so the human can watch the AI work inline in History. ?ai=0 hides them.
+	if q.Get("ai") != "0" {
+		f.IncludeFlags = store.FlagAI
 	}
 	if sc := q.Get("status"); sc != "" {
 		f.StatusClass = atoiOr(sc, 0)
@@ -692,6 +774,7 @@ func (h *Hub) getSettings(w http.ResponseWriter, r *http.Request) {
 	if aiProvider == "openrouter" {
 		envKey = os.Getenv("OPENROUTER_API_KEY")
 	}
+	scopeOnly, _, _ := h.st.GetSetting("capture.scopeOnly")
 	writeJSON(w, http.StatusOK, settingsJSON{
 		ProxyAddr:        h.currentProxyAddr(),
 		InterceptEnabled: h.eng != nil && h.eng.Enabled(),
@@ -699,16 +782,18 @@ func (h *Hub) getSettings(w http.ResponseWriter, r *http.Request) {
 		AiProvider:       aiProvider,
 		AiModel:          aiModel,
 		AiHasKey:         aiKey != "" || envKey != "",
+		CaptureScopeOnly: scopeOnly == "1",
 	})
 }
 
 func (h *Hub) putSettings(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		ProxyAddr     string  `json:"proxyAddr"`
-		UpstreamProxy *string `json:"upstreamProxy"` // pointer so "" can clear it
-		AiProvider    *string `json:"aiProvider"`
-		AiApiKey      *string `json:"aiApiKey"`
-		AiModel       *string `json:"aiModel"`
+		ProxyAddr        string  `json:"proxyAddr"`
+		UpstreamProxy    *string `json:"upstreamProxy"` // pointer so "" can clear it
+		AiProvider       *string `json:"aiProvider"`
+		AiApiKey         *string `json:"aiApiKey"`
+		AiModel          *string `json:"aiModel"`
+		CaptureScopeOnly *bool   `json:"captureScopeOnly"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		httpErr(w, http.StatusBadRequest, "bad json")
@@ -722,6 +807,17 @@ func (h *Hub) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.AiModel != nil {
 		_ = h.st.SetSetting("ai.model", *in.AiModel)
+	}
+	if in.CaptureScopeOnly != nil {
+		v := "0"
+		if *in.CaptureScopeOnly {
+			v = "1"
+		}
+		_ = h.st.SetSetting("capture.scopeOnly", v)
+		if h.SetCaptureScopeOnly != nil {
+			h.SetCaptureScopeOnly(*in.CaptureScopeOnly)
+		}
+		h.broadcast(map[string]any{"type": "settings.update"})
 	}
 	if in.ProxyAddr != "" && in.ProxyAddr != h.currentProxyAddr() {
 		// Refuse to expose the proxy on a non-loopback interface unless the
