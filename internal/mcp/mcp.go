@@ -365,6 +365,9 @@ func (s *Server) api(method, path string, body any) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Marks every call as AI-originated so the control plane can tag the
+	// resulting Repeater/Intruder/scan sends (FlagAI) and show them in History.
+	req.Header.Set("X-Interceptor-Source", "ai")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -516,6 +519,73 @@ func (s *Server) registerTools() {
 				return "", fmt.Errorf("id is required")
 			}
 			return s.apiGet(fmt.Sprintf("/api/flows/%d/curl", id))
+		})
+
+	s.add("set_note",
+		"Annotate a flow with a note (record a finding for the operator; \"\" clears it). Visible in the UI inspector and on get_flow/list_flows.",
+		obj(map[string]any{
+			"id":   pt("integer"),
+			"note": pt("string"),
+		}, "id", "note"),
+		func(a map[string]any) (string, error) {
+			id := argInt(a, "id", 0)
+			if id == 0 {
+				return "", fmt.Errorf("id is required")
+			}
+			if _, err := s.api(http.MethodPut, fmt.Sprintf("/api/flows/%d/note", id), map[string]any{"note": argStr(a, "note")}); err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("noted flow %d", id), nil
+		})
+
+	s.add("get_notes",
+		"Read the project's shared markdown notebook — the operator's scratchpad for credentials, scope, findings and to-dos. Read it before editing with set_notes.",
+		obj(map[string]any{}),
+		func(a map[string]any) (string, error) {
+			raw, err := s.apiGet("/api/notes")
+			if err != nil {
+				return "", err
+			}
+			var d struct {
+				Notes string `json:"notes"`
+			}
+			json.Unmarshal([]byte(raw), &d)
+			if d.Notes == "" {
+				return "(notebook is empty)", nil
+			}
+			return d.Notes, nil
+		})
+
+	s.add("set_notes",
+		"Replace the project's shared markdown notebook. Call get_notes first and edit the returned text so existing content isn't clobbered; use append_notes to only add.",
+		obj(map[string]any{"notes": pt("string")}, "notes"),
+		func(a map[string]any) (string, error) {
+			if _, err := s.api(http.MethodPut, "/api/notes", map[string]any{"notes": argStr(a, "notes")}); err != nil {
+				return "", err
+			}
+			return "notes saved", nil
+		})
+
+	s.add("append_notes",
+		"Append a markdown block to the project notebook (e.g. a new finding) without rewriting the rest.",
+		obj(map[string]any{"text": pt("string")}, "text"),
+		func(a map[string]any) (string, error) {
+			raw, err := s.apiGet("/api/notes")
+			if err != nil {
+				return "", err
+			}
+			var d struct {
+				Notes string `json:"notes"`
+			}
+			json.Unmarshal([]byte(raw), &d)
+			joined := argStr(a, "text")
+			if d.Notes != "" {
+				joined = d.Notes + "\n\n" + joined
+			}
+			if _, err := s.api(http.MethodPut, "/api/notes", map[string]any{"notes": joined}); err != nil {
+				return "", err
+			}
+			return "appended to notes", nil
 		})
 
 	s.add("send_request",
