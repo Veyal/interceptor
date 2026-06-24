@@ -3,8 +3,13 @@ package control
 import (
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/Veyal/interceptor/internal/harx"
@@ -107,4 +112,63 @@ func (h *Hub) importProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"importedFlows": flows, "importedRules": len(bundle.Rules), "importedScope": len(bundle.Scope),
 	})
+}
+
+// apiProject reports the active project and the projects available to switch to.
+func (h *Hub) apiProject(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"current":   h.ProjectName,
+		"dir":       h.ProjectDir,
+		"projects":  h.availableProjects(),
+		"canSwitch": h.SwitchProject != nil,
+	})
+}
+
+// availableProjects lists "default" plus every named project directory under
+// GlobalDir/projects ("default" first, the rest sorted).
+func (h *Hub) availableProjects() []string {
+	out := []string{"default"}
+	if h.GlobalDir == "" {
+		return out
+	}
+	entries, err := os.ReadDir(filepath.Join(h.GlobalDir, "projects"))
+	if err != nil {
+		return out
+	}
+	var named []string
+	for _, e := range entries {
+		// "default" is reserved for the root project (already listed first); a
+		// like-named subdirectory would otherwise show up twice in the picker.
+		if e.IsDir() && !strings.EqualFold(e.Name(), "default") {
+			named = append(named, e.Name())
+		}
+	}
+	sort.Strings(named)
+	return append(out, named...)
+}
+
+// switchProject relaunches Interceptor pointed at another project (by name or
+// path). It answers first, then the process re-execs; the UI reconnects once the
+// listeners are back.
+func (h *Hub) switchProject(w http.ResponseWriter, r *http.Request) {
+	if h.SwitchProject == nil {
+		httpErr(w, http.StatusNotImplemented, "project switching unavailable")
+		return
+	}
+	var in struct {
+		Target string `json:"target"`
+	}
+	json.NewDecoder(r.Body).Decode(&in)
+	target := strings.TrimSpace(in.Target)
+	if target == "" {
+		httpErr(w, http.StatusBadRequest, "target required")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"switching": target})
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		if err := h.SwitchProject(target); err != nil {
+			log.Printf("control: project switch to %q failed: %v", target, err)
+		}
+	}()
 }

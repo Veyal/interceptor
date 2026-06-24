@@ -14,7 +14,11 @@ import (
 // Intruder's attack traffic) and persists the deduplicated findings. Both the
 // built-in checks and any user-authored Starlark checks (ChecksDir) run.
 func (h *Hub) scannerRun(w http.ResponseWriter, r *http.Request) {
-	flows, err := h.st.QueryFlowsFilter(store.FlowFilter{Limit: 5000, ExcludeFlags: store.FlagIntruder | store.FlagActiveScan})
+	// Optional ?host= and ?search= focus the scan on one target instead of all
+	// captured traffic (host is a substring match; search matches path/host/method).
+	host := r.URL.Query().Get("host")
+	search := r.URL.Query().Get("search")
+	flows, err := h.st.QueryFlowsFilter(store.FlowFilter{Limit: 5000, Host: host, Search: search, ExcludeFlags: store.FlagIntruder | store.FlagActiveScan})
 	if err != nil {
 		httpErr(w, http.StatusInternalServerError, err.Error())
 		return

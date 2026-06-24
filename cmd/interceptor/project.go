@@ -71,8 +71,14 @@ func listProjects(projectsDir string) []string {
 func selectProject(in io.Reader, out io.Writer, globalDir, flagOrEnv, homeDir string, interactive bool) (name, dir string, err error) {
 	projectsDir := filepath.Join(globalDir, "projects")
 
-	if strings.TrimSpace(flagOrEnv) != "" {
-		name, dir = resolveProjectDir(projectsDir, flagOrEnv, homeDir)
+	if v := strings.TrimSpace(flagOrEnv); v != "" {
+		// "default" always means the global root, matching the no-flag default —
+		// so switching to "default" returns to the original project, not a
+		// separate projects/default.
+		if strings.EqualFold(v, "default") {
+			return "default", globalDir, nil
+		}
+		name, dir = resolveProjectDir(projectsDir, v, homeDir)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return "", "", err
 		}

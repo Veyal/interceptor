@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -52,6 +54,116 @@ func TestListFlowsJSON(t *testing.T) {
 	}
 	if out.Flows[0]["path"] != "/b" { // newest first
 		t.Fatalf("expected newest-first, got %v", out.Flows[0]["path"])
+	}
+}
+
+func TestActivityFeed(t *testing.T) {
+	h, _, _ := newHub(t)
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	post := func(tool, summary string, ok bool) {
+		body, _ := json.Marshal(map[string]any{"tool": tool, "summary": summary, "ok": ok, "result": "r", "ms": 12})
+		resp, err := http.Post(ts.URL+"/api/activity", "application/json", strings.NewReader(string(body)))
+		if err != nil {
+			t.Fatalf("POST activity: %v", err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("POST activity status %d", resp.StatusCode)
+		}
+	}
+	post("send_request", "method=POST url=/login", true)
+	post("active_scan", "target=https://x", true)
+
+	resp, err := http.Get(ts.URL + "/api/activity")
+	if err != nil {
+		t.Fatalf("GET activity: %v", err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Activity []activityItem `json:"activity"`
+	}
+	json.NewDecoder(resp.Body).Decode(&out)
+	if len(out.Activity) != 2 {
+		t.Fatalf("expected 2 activity items, got %d", len(out.Activity))
+	}
+	if out.Activity[0].Tool != "active_scan" { // newest first
+		t.Fatalf("expected newest-first, got %q", out.Activity[0].Tool)
+	}
+	if out.Activity[0].ID == 0 || out.Activity[0].TS == 0 {
+		t.Fatalf("server should assign id+ts: %+v", out.Activity[0])
+	}
+
+	// A bad POST (no tool) is rejected.
+	bad, err := http.Post(ts.URL+"/api/activity", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("POST bad activity: %v", err)
+	}
+	defer bad.Body.Close()
+	if bad.StatusCode != http.StatusBadRequest {
+		t.Fatalf("empty activity should be 400, got %d", bad.StatusCode)
+	}
+}
+
+func TestProjectListAndSwitch(t *testing.T) {
+	h, _, _ := newHub(t)
+	gd := t.TempDir()
+	os.MkdirAll(filepath.Join(gd, "projects", "acme"), 0o755)
+	os.MkdirAll(filepath.Join(gd, "projects", "beta"), 0o755)
+	h.GlobalDir = gd
+	h.ProjectName = "default"
+	done := make(chan string, 1)
+	h.SwitchProject = func(target string) error { done <- target; return nil }
+
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	// GET /api/project: default first, then named projects sorted.
+	resp, err := http.Get(ts.URL + "/api/project")
+	if err != nil {
+		t.Fatalf("GET project: %v", err)
+	}
+	var info struct {
+		Current   string   `json:"current"`
+		Projects  []string `json:"projects"`
+		CanSwitch bool     `json:"canSwitch"`
+	}
+	json.NewDecoder(resp.Body).Decode(&info)
+	resp.Body.Close()
+	if info.Current != "default" || !info.CanSwitch {
+		t.Fatalf("project info: %+v", info)
+	}
+	if len(info.Projects) != 3 || info.Projects[0] != "default" || info.Projects[1] != "acme" || info.Projects[2] != "beta" {
+		t.Fatalf("projects: %v", info.Projects)
+	}
+
+	// Empty target → 400.
+	bad, err := http.Post(ts.URL+"/api/project/switch", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("switch empty: %v", err)
+	}
+	bad.Body.Close()
+	if bad.StatusCode != http.StatusBadRequest {
+		t.Fatalf("empty switch should be 400, got %d", bad.StatusCode)
+	}
+
+	// Valid target → 202, and the switch callback fires with that target.
+	ok, err := http.Post(ts.URL+"/api/project/switch", "application/json", strings.NewReader(`{"target":"acme"}`))
+	if err != nil {
+		t.Fatalf("switch: %v", err)
+	}
+	ok.Body.Close()
+	if ok.StatusCode != http.StatusAccepted {
+		t.Fatalf("switch should be 202, got %d", ok.StatusCode)
+	}
+	select {
+	case got := <-done:
+		if got != "acme" {
+			t.Fatalf("switched to %q, want acme", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("SwitchProject callback was not invoked")
 	}
 }
 

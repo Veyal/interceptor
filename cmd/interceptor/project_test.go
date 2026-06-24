@@ -86,6 +86,20 @@ func TestSelectProjectFlag(t *testing.T) {
 	}
 }
 
+func TestSelectProjectDefaultFlagIsRoot(t *testing.T) {
+	root := t.TempDir()
+	// --project default (or switching back to "default") must return to the
+	// global root, not a separate projects/default — otherwise switching away
+	// and back would silently orphan the original project's data.
+	name, dir, err := selectProject(strings.NewReader(""), &strings.Builder{}, root, "default", root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != "default" || dir != root {
+		t.Fatalf("--project default must map to the root, got (%q,%q)", name, dir)
+	}
+}
+
 func TestSelectProjectInteractiveEnterIsDefault(t *testing.T) {
 	root := t.TempDir()
 	name, dir, err := selectProject(strings.NewReader("\n"), &strings.Builder{}, root, "", root, true)

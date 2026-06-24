@@ -61,6 +61,10 @@ type Hub struct {
 	// surfaced at GET /api/version so the UI can show which project is loaded.
 	ProjectName string
 	ProjectDir  string
+	// GlobalDir is ~/.interceptor (named projects live in GlobalDir/projects).
+	// SwitchProject re-launches Interceptor into another project; nil if unsupported.
+	GlobalDir     string
+	SwitchProject func(target string) error
 
 	mcpMu  sync.Mutex
 	mcpSrv *mcp.Server // lazily built streamable-HTTP MCP front end (POST /mcp)
@@ -70,6 +74,10 @@ type Hub struct {
 	updMu    sync.Mutex // update-check result (set by cmd's background check)
 	updLatest string
 	updAvail  bool
+
+	actMu  sync.Mutex // live AI-activity feed (MCP tool calls); ring buffer
+	actLog []activityItem
+	actSeq int64
 
 	mu      sync.Mutex
 	clients map[chan string]struct{}
@@ -171,6 +179,10 @@ func (h *Hub) routes() {
 	h.mux.HandleFunc("POST /api/keys", h.createKey)
 	h.mux.HandleFunc("DELETE /api/keys/{id}", h.deleteKey)
 	h.mux.HandleFunc("GET /api/version", h.apiVersion)
+	h.mux.HandleFunc("GET /api/activity", h.listActivity)
+	h.mux.HandleFunc("POST /api/activity", h.postActivity)
+	h.mux.HandleFunc("GET /api/project", h.apiProject)
+	h.mux.HandleFunc("POST /api/project/switch", h.switchProject)
 	h.mux.HandleFunc("GET /api/reference", h.apiReference)
 	h.mux.HandleFunc("GET /api/mcp", h.apiMCP)
 	// Streamable-HTTP MCP transport: a remote/hosted agent can drive the engine
@@ -351,18 +363,22 @@ func (h *Hub) getFlowRaw(w http.ResponseWriter, r *http.Request) {
 func (h *Hub) rawRequest(f *store.Flow) []byte {
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "%s %s %s\r\n", f.Method, orVal(f.Path, "/"), orVal(f.HTTPVersion, "HTTP/1.1"))
-	writeHeaders(&b, f.ReqHeaders, f.Host)
+	hdr, body := decodeForDisplay(f.ReqHeaders, h.bodyBytes(f.ReqBodyHash))
+	writeHeaders(&b, hdr, f.Host)
 	b.WriteString("\r\n")
-	b.Write(h.bodyBytes(f.ReqBodyHash))
+	b.Write(body)
 	return b.Bytes()
 }
 
 func (h *Hub) rawResponse(f *store.Flow) []byte {
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "%s %d %s\r\n", orVal(f.HTTPVersion, "HTTP/1.1"), f.Status, http.StatusText(f.Status))
-	writeHeaders(&b, f.ResHeaders, "")
+	// Decompress Content-Encoding (gzip/br/zstd/deflate) so the body is readable
+	// rather than showing compressed bytes that look undecrypted.
+	hdr, body := decodeForDisplay(f.ResHeaders, h.bodyBytes(f.ResBodyHash))
+	writeHeaders(&b, hdr, "")
 	b.WriteString("\r\n")
-	b.Write(h.bodyBytes(f.ResBodyHash))
+	b.Write(body)
 	return b.Bytes()
 }
 

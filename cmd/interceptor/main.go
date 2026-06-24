@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -124,6 +125,16 @@ func run() error {
 	hub.SelfAddr = controlAddr // so the active scanner never targets our own API
 	hub.ProjectName = projectName
 	hub.ProjectDir = dir
+	hub.GlobalDir = globalDir
+	// Switching projects re-execs this binary with --project <target>: a clean
+	// fresh start on the new project's store/CA, no mid-session store swapping.
+	hub.SwitchProject = func(target string) error {
+		exe, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		return syscall.Exec(exe, []string{exe, "--project", target}, os.Environ())
+	}
 	prx := proxy.New(st, capture.New(st), ca, eng, hub)
 	prx.Scope = sc
 	hub.Upstream = prx.SetUpstreamProxy
@@ -136,6 +147,9 @@ func run() error {
 	if v, ok, _ := st.GetSetting("proxy.addr"); ok && v != "" {
 		proxyAddr = v
 	}
+	// Never record traffic aimed at our own listeners, so proxying localhost
+	// doesn't fill history with — or feedback-loop on — our own UI/API.
+	prx.SelfPorts = selfPorts(controlAddr, proxyAddr)
 	if err := pm.Start(proxyAddr); err != nil {
 		return fmt.Errorf("proxy listen on %s: %w", proxyAddr, err)
 	}
@@ -244,6 +258,20 @@ func (m *proxyManager) Addr() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.addr
+}
+
+// selfPorts extracts the TCP ports from host:port listener addresses, skipping
+// any that don't parse. Used to keep our own traffic out of captured history.
+func selfPorts(addrs ...string) []int {
+	var ports []int
+	for _, a := range addrs {
+		if _, p, err := net.SplitHostPort(a); err == nil {
+			if n, e := strconv.Atoi(p); e == nil {
+				ports = append(ports, n)
+			}
+		}
+	}
+	return ports
 }
 
 // Shutdown gracefully stops the current proxy listener.

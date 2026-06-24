@@ -11,14 +11,14 @@
   --bg:#08080a;--bg1:#101013;--bg2:#17171a;--bg3:#232329;--line:#2e2e36;--line2:#43434d;
   --fg:#f2f2f5;--fg2:#bcbcc6;--fg3:#8e8e99;--accent:#00e08a;--onAccent:#04150d;
   --sel:rgba(0,224,138,0.12);--accentDim:rgba(0,224,138,0.13);--blue:#4aa8ff;--amber:#ffb02e;
-  --red:#ff5b5b;--violet:#c08cff;--cyan:#3fd8d0;--scroll:#2a2a30;--shadow:rgba(0,0,0,.5);
+  --red:#ff5b5b;--violet:#c08cff;--cyan:#3fd8d0;--scroll:#2a2a30;--shadow:rgba(0,0,0,.5);--overlay:rgba(0,0,0,.6);
   --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
 }
 :root[data-theme="light"]{
   --bg:#ffffff;--bg1:#f6f7f9;--bg2:#eef0f3;--bg3:#e4e7ec;--line:#dcdfe6;--line2:#c2c7d0;
   --fg:#16181d;--fg2:#454b56;--fg3:#787f8c;--accent:#00a368;--onAccent:#ffffff;
   --sel:rgba(0,163,104,0.10);--accentDim:rgba(0,163,104,0.13);--blue:#1667d6;--amber:#9a6700;
-  --red:#cf3a3a;--violet:#7b46cf;--cyan:#0f9b92;--scroll:#cdd2da;--shadow:rgba(20,24,33,.16);
+  --red:#cf3a3a;--violet:#7b46cf;--cyan:#0f9b92;--scroll:#cdd2da;--shadow:rgba(20,24,33,.16);--overlay:rgba(20,24,33,.34);
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
@@ -134,6 +134,18 @@ textarea.raw{width:100%;height:200px;resize:vertical;background:var(--bg);color:
 .hint{font-size:11px;color:var(--fg3);line-height:1.6}
 .scroll{overflow:auto;min-height:0;flex:1}
 
+/* AI activity feed */
+#aiPulse .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent)}
+#aiPulse.live .dot{animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.5);opacity:.5}}
+.act-row{display:flex;align-items:baseline;gap:10px;padding:9px 14px;border-bottom:1px solid var(--line);font-size:11.5px}
+.act-row:hover{background:var(--bg1)}
+.act-row .ok{width:7px;height:7px;flex:none;border-radius:50%;align-self:center}
+.act-tool{flex:none;font-weight:700;color:var(--accent);min-width:130px;font-family:var(--mono)}
+.act-sum{flex:none;color:var(--fg);font-family:var(--mono);max-width:38%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.act-res{flex:1;color:var(--fg3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.act-meta{flex:none;color:var(--fg3);font-size:10.5px;text-align:right}
+
 /* active-filter chips */
 #chips{display:none;flex-wrap:wrap;gap:6px;padding:0 12px;background:var(--bg1)}
 #chips.has{display:flex;padding:8px 12px;border-bottom:1px solid var(--line)}
@@ -145,7 +157,7 @@ textarea.raw{width:100%;height:200px;resize:vertical;background:var(--bg);color:
 .chip .x:hover{color:var(--red);background:var(--bg1)}
 
 /* right-click context menu */
-#ctxmenu{position:fixed;z-index:100;min-width:210px;background:var(--bg2);border:1px solid var(--line2);border-radius:10px;box-shadow:0 16px 48px rgba(0,0,0,.6);padding:5px;display:none;font-size:11.5px}
+#ctxmenu{position:fixed;z-index:100;min-width:210px;background:var(--bg2);border:1px solid var(--line2);border-radius:10px;box-shadow:0 16px 48px var(--shadow);padding:5px;display:none;font-size:11.5px}
 #ctxmenu.show{display:block}
 .ctx-head{font-size:9px;font-weight:700;letter-spacing:.7px;color:var(--fg3);padding:7px 9px 4px}
 .ctx-item{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:6px;color:var(--fg);white-space:nowrap;cursor:pointer}
@@ -211,7 +223,7 @@ textarea.raw{width:100%;height:200px;resize:vertical;background:var(--bg);color:
 .evidence{background:var(--bg1);border:1px solid var(--line);border-radius:8px;padding:10px 13px;font-family:var(--mono);font-size:11.5px;color:var(--fg);overflow-wrap:anywhere;margin:14px 0}
 .fixbox{background:var(--accentDim);border-radius:8px;padding:12px 14px;font-size:12.5px;color:var(--fg);line-height:1.6}
 
-#toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--bg2);border:1px solid var(--line2);border-radius:9px;padding:9px 16px;font-size:12px;color:var(--fg);box-shadow:0 10px 30px rgba(0,0,0,.5);opacity:0;transition:opacity .2s;pointer-events:none}
+#toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--bg2);border:1px solid var(--line2);border-radius:9px;padding:9px 16px;font-size:12px;color:var(--fg);box-shadow:0 10px 30px var(--shadow);opacity:0;transition:opacity .2s;pointer-events:none}
 #toast.show{opacity:1}
 </style>
 <script>
@@ -240,9 +252,12 @@ textarea.raw{width:100%;height:200px;resize:vertical;background:var(--bg);color:
   <button class="tab" data-tab="repeater">Repeater</button>
   <button class="tab" data-tab="intruder">Intruder</button>
   <button class="tab" data-tab="scanner">Scanner</button>
+  <button class="tab" data-tab="activity">Activity<span id="actBadge" class="badge" style="display:none">0</span></button>
   <button class="tab" data-tab="api">API</button>
   <button class="tab" data-tab="settings">Settings</button>
-  <span id="projBadge" style="margin-left:auto;align-self:center;padding:3px 9px;font-size:11px;font-weight:600;color:var(--accent);background:var(--accentDim);border-radius:6px;display:none" title="Active project"></span>
+  <div class="spacer"></div>
+  <span id="aiPulse" style="align-self:center;display:none;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--accent);padding:3px 10px;border-radius:6px;background:var(--accentDim);cursor:pointer" title="The AI assistant is acting on this project — click to watch"><span class="dot"></span><span id="aiPulseLbl">AI active</span></span>
+  <span id="projBadge" style="align-self:center;margin-left:10px;padding:3px 9px;font-size:11px;font-weight:600;color:var(--accent);background:var(--accentDim);border-radius:6px;display:none" title="Active project"></span>
   <a id="verBadge" href="https://github.com/Veyal/interceptor/releases" target="_blank" rel="noopener" style="align-self:center;padding:0 12px;font-size:11px;color:var(--fg3);text-decoration:none" title="Interceptor"></a>
 </div>
 
@@ -420,6 +435,8 @@ changeme</textarea>
   <!-- SCANNER -->
   <div class="panel" data-panel="scanner">
     <div class="toolbar">
+      <select id="scanTarget" class="btn" style="background:var(--bg3);max-width:230px" title="Scan only this target"><option value="">All in-scope hosts</option></select>
+      <input id="scanFilter" class="btn" style="background:var(--bg3);width:150px" placeholder="path filter (optional)" title="Only scan flows whose path/host matches">
       <button class="btn accent" id="scanRun">Run scan ▸</button>
       <button class="btn" id="scanReport">Export report</button>
       <button class="btn" id="checksBtn">✎ Custom checks</button>
@@ -432,6 +449,18 @@ changeme</textarea>
       <div id="scanList" class="scan-list"><div class="hint" style="padding:12px">Run a scan to find issues.</div></div>
       <div id="scanDetail" class="pane" style="flex:1"><div class="hint" style="padding:16px">Select an issue.</div></div>
     </div>
+  </div>
+
+  <!-- Activity (live AI feed) -->
+  <div class="panel" data-panel="activity">
+    <div class="toolbar">
+      <span style="font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--fg2)">AI ACTIVITY</span>
+      <span class="hint">Every action your AI assistant takes over MCP — live. Watch, supervise, and jump in manually anytime.</span>
+      <div class="spacer"></div>
+      <span class="count" id="actCount"></span>
+      <button class="btn" id="actClear" style="margin-left:8px">Clear</button>
+    </div>
+    <div id="actFeed" class="scroll"></div>
   </div>
 
   <!-- API -->
@@ -496,7 +525,7 @@ changeme</textarea>
           <div class="section">
             <h3>TLS CERTIFICATE AUTHORITY</h3>
             <p class="hint" style="margin-bottom:12px">Install &amp; trust this CA on the client to intercept HTTPS. Per-host leaf certificates are minted on demand.</p>
-            <a class="btn accent" href="/api/ca.crt" download style="text-decoration:none;display:inline-block">Download CA certificate</a>
+            <a class="btn accent" id="dlCaBtn" href="/api/ca.crt" download style="text-decoration:none;display:inline-block">Download CA certificate</a>
           </div>
         </section>
         <section class="set-sec" data-sec="scope" hidden>
@@ -537,13 +566,26 @@ changeme</textarea>
         <section class="set-sec" data-sec="project" hidden>
           <div class="section">
             <h3>PROJECT</h3>
-            <p class="hint" style="margin-bottom:10px">Save or load a portable session — captured flows, match-&amp;-replace rules, target scope, and the upstream proxy. Import merges into the current session.</p>
+            <p class="hint" style="margin-bottom:12px">Each project keeps its own captured history, rules, target scope &amp; custom checks under <code>~/.interceptor/projects/&lt;name&gt;/</code>. The CA is shared across all projects (<code>~/.interceptor/ca</code>), so you only trust it once. Switching restarts Interceptor on the chosen project.</p>
+            <div class="field"><label>Active project</label><div style="font-size:13px"><b id="projNameHint" style="color:var(--accent)">default</b> · <span id="projDirHint" style="color:var(--fg3)">~/.interceptor</span></div></div>
+            <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+              <div class="field" style="margin-bottom:0"><label>Switch to a saved project</label><select id="projSelect" class="btn" style="background:var(--bg3);min-width:200px"></select></div>
+              <button class="btn accent" id="projSwitchBtn">Open ▸</button>
+            </div>
+            <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
+              <div class="field" style="margin-bottom:0;flex:1;min-width:220px"><label>…or start a new project (name or absolute path)</label><input id="projNew" class="btn" style="background:var(--bg3);width:100%" placeholder="acme-engagement   or   /tmp/scan"></div>
+              <button class="btn" id="projNewBtn">Create &amp; open</button>
+            </div>
+            <p class="hint" id="projSwitchNote" style="margin-top:12px;display:none;color:var(--accent)"></p>
+          </div>
+          <div class="section">
+            <h3>EXPORT / IMPORT</h3>
+            <p class="hint" style="margin-bottom:10px">Save or load a portable session bundle — captured flows, match-&amp;-replace rules, target scope, and the upstream proxy. Import merges into the current project.</p>
             <div class="row" style="gap:8px">
               <a class="btn accent" id="exportProject" href="/api/export/project" download style="text-decoration:none">Export project</a>
               <button class="btn" id="importProjectBtn">Import project</button>
               <input type="file" id="importProjectFile" accept=".json,application/json" style="display:none">
             </div>
-            <p class="hint" style="margin-top:14px">Active project: <b id="projDirHint">~/.interceptor</b> (its own database, bodies &amp; custom checks). The CA is shared across projects at <b>~/.interceptor/ca</b>, so you only trust it once. Start with <code>--project &lt;name&gt;</code> or pick at launch to switch projects.</p>
           </div>
         </section>
       </div>
@@ -552,8 +594,8 @@ changeme</textarea>
 </div>
 
 <div id="ctxmenu"></div>
-<div id="aiModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;align-items:center;justify-content:center">
-  <div style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;max-width:700px;max-height:80vh;width:90%;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.6)">
+<div id="aiModal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:200;align-items:center;justify-content:center">
+  <div style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;max-width:700px;max-height:80vh;width:90%;display:flex;flex-direction:column;box-shadow:0 20px 60px var(--shadow)">
     <div class="row" style="padding:12px 16px;border-bottom:1px solid var(--line)">
       <span style="font-weight:700;color:var(--accent)">✨ AI assist</span>
       <div class="spacer"></div>
@@ -563,8 +605,8 @@ changeme</textarea>
     <pre id="aiOut" style="margin:0;padding:16px;overflow:auto;white-space:pre-wrap;font-size:12.5px;line-height:1.6;color:var(--fg)"></pre>
   </div>
 </div>
-<div id="checksModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;align-items:center;justify-content:center">
-  <div style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;max-width:920px;max-height:84vh;width:94%;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.6)">
+<div id="checksModal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:200;align-items:center;justify-content:center">
+  <div style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;max-width:920px;max-height:84vh;width:94%;display:flex;flex-direction:column;box-shadow:0 20px 60px var(--shadow)">
     <div class="row" style="padding:12px 16px;border-bottom:1px solid var(--line)">
       <span style="font-weight:700;color:var(--accent)">✎ Custom scanner checks</span>
       <span class="hint" style="margin-left:10px">Starlark · runs on every scan · sandboxed</span>
@@ -590,8 +632,8 @@ changeme</textarea>
     </div>
   </div>
 </div>
-<div id="activeModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;align-items:center;justify-content:center">
-  <div style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;max-width:800px;max-height:86vh;width:94%;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.6)">
+<div id="activeModal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:200;align-items:center;justify-content:center">
+  <div style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;max-width:800px;max-height:86vh;width:94%;display:flex;flex-direction:column;box-shadow:0 20px 60px var(--shadow)">
     <div class="row" style="padding:12px 16px;border-bottom:1px solid var(--line)">
       <span style="font-weight:700;color:var(--red)">⚡ Active scan</span>
       <span class="hint" style="margin-left:10px">sends crafted attack requests · scope-restricted</span>
@@ -616,8 +658,8 @@ changeme</textarea>
     </div>
   </div>
 </div>
-<div id="decModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;align-items:center;justify-content:center">
-  <div style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;max-width:760px;max-height:86vh;width:92%;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.6)">
+<div id="decModal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:200;align-items:center;justify-content:center">
+  <div style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;max-width:760px;max-height:86vh;width:92%;display:flex;flex-direction:column;box-shadow:0 20px 60px var(--shadow)">
     <div class="row" style="padding:12px 16px;border-bottom:1px solid var(--line)">
       <span style="font-weight:700;color:var(--accent)">🧰 Decoder</span>
       <span class="hint" style="margin-left:10px">↓ decode · ↑ encode</span>
@@ -631,6 +673,13 @@ changeme</textarea>
     </div>
   </div>
 </div>
+<div id="promptModal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:240;align-items:center;justify-content:center">
+  <div style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;width:420px;max-width:92%;box-shadow:0 20px 60px var(--shadow);overflow:hidden">
+    <div style="padding:14px 16px 0"><div id="promptTitle" style="font-weight:700;color:var(--fg);font-size:13px">Enter a value</div></div>
+    <div style="padding:12px 16px"><input id="promptInput" class="btn" style="width:100%;background:var(--bg3);border:1px solid var(--line);font-size:13px;padding:9px 11px"></div>
+    <div class="row" style="gap:8px;justify-content:flex-end;padding:0 16px 14px"><button class="btn" id="promptCancel">Cancel</button><button class="btn accent" id="promptOk">OK</button></div>
+  </div>
+</div>
 <div id="toast"></div>
 
 <script>
@@ -640,7 +689,7 @@ const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[
 
 const state={flows:[],selId:null,detail:null,intercept:{enabled:false,queue:[]},selHeld:null,selRespHeld:null,
   rules:[],scope:[],views:[],inScopeOnly:false,view:{req:'raw',res:'raw'},sort:{key:'id',dir:-1},proxyAddr:'127.0.0.1:8080',
-  filters:{scheme:'',search:'',method:'',status:'',host:'',exclude:[]}};
+  filters:{scheme:'',search:'',method:'',status:'',host:'',exclude:[]},activity:[],actUnseen:0};
 
 function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove('show'),2200);}
 async function api(path,opts){const r=await fetch(path,opts);if(!r.ok){let m=r.statusText;try{m=(await r.json()).error||m}catch(e){}throw new Error(m);}const ct=r.headers.get('content-type')||'';return ct.includes('json')?r.json():r.text();}
@@ -656,6 +705,8 @@ const fmtTime=ms=>{const d=new Date(ms);return d.toLocaleTimeString('en-GB',{hou
 $$('.tab').forEach(t=>t.onclick=()=>{
   $$('.tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');
   $$('.panel').forEach(p=>p.classList.toggle('active',p.dataset.panel===t.dataset.tab));
+  if(t.dataset.tab==='activity'){renderActivity();clearActSeen();}
+  if(t.dataset.tab==='scanner')loadScanTargets();
 });
 /* settings sub-nav */
 $$('#setNav button').forEach(b=>b.onclick=()=>{
@@ -684,8 +735,19 @@ function renderRows(){
   const box=$('#rows');
   const flows=applySort(state.flows);
   $('#rowCount').textContent=state.flows.length;
-  if(!flows.length){box.innerHTML=getStartedCard();
-    const b=document.getElementById('gsMcp');if(b)b.onclick=()=>{document.querySelector('.tab[data-tab="api"]').click();document.querySelector('#apiSub button[data-s="mcp"]').click();};
+  if(!flows.length){
+    if(anyFilter()||state.inScopeOnly){
+      // Traffic exists but nothing matches the active filters — don't show the
+      // "no traffic yet" onboarding (it reads as if capture is broken).
+      box.innerHTML='<div class="empty">No flows match the current filters.<br><button class="btn" id="emptyClear" style="margin-top:12px">Clear filters</button></div>';
+      const c=document.getElementById('emptyClear');if(c)c.onclick=()=>{
+        if(state.inScopeOnly){state.inScopeOnly=false;const st=$('#scopeToggle');if(st){st.classList.remove('accent');st.textContent='◎ in scope';}}
+        clearAllFilters();
+      };
+    }else{
+      box.innerHTML=getStartedCard();
+      const b=document.getElementById('gsMcp');if(b)b.onclick=()=>{document.querySelector('.tab[data-tab="api"]').click();document.querySelector('#apiSub button[data-s="mcp"]').click();};
+    }
     return;}
   box.innerHTML=flows.map(f=>{
     const intercepted=(f.flags&1)!==0;
@@ -748,6 +810,11 @@ async function selectFlow(id){
     if(d.flags&FLAG_WS){
       $('#resStatus').textContent='WebSocket frames';$('#resStatus').style.color='var(--accent)';
       await renderWSFrames(id);
+    }else if(!d.status&&!d.error){
+      // In-flight request: response not back yet. The flow.update handler
+      // re-selects this flow once it lands, filling the pane in automatically.
+      $('#resView').innerHTML='<span class="blink" style="color:var(--fg3)">waiting for response…</span>';
+      $('#resStatus').textContent='pending';$('#resStatus').style.color='var(--fg3)';
     }else{
       await renderSide('res');
       $('#resStatus').textContent=d.status?`${d.status} ${statusText(d.status)}`:(d.error||'');
@@ -858,7 +925,7 @@ $('#fMethod').onchange=e=>setFilter('method',e.target.value);
 $('#fStatus').onchange=e=>setFilter('status',e.target.value);
 $('#fSearch').oninput=e=>{state.filters.search=e.target.value;renderChips();scheduleReload();};
 $('#refreshBtn').onclick=loadFlows;
-$('#exportHar').onclick=()=>{$('#exportHar').href='/api/export/har'+(state.inScopeOnly?'?inScope=1':'');};
+$('#exportHar').onclick=()=>{$('#exportHar').href='/api/export/har'+(state.inScopeOnly?'?inScope=1':'');toast('History exported — .har downloaded');};
 $('#importHarBtn').onclick=()=>$('#importHarFile').click();
 $('#importHarFile').onchange=async e=>{
   const f=e.target.files[0];if(!f)return;
@@ -886,7 +953,7 @@ $('#viewsSelect').onchange=()=>{
   renderChips();loadFlows();
 };
 $('#saveViewBtn').onclick=async()=>{
-  const name=prompt('Save the current filters as a view named:');if(!name)return;
+  const name=await uiPrompt({title:'Save current filters as a view',placeholder:'view name'});if(!name)return;
   const data={...state.filters,inScope:state.inScopeOnly};
   try{await api('/api/views',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name,data})});toast('view saved');loadViews();}catch(e){toast(e.message);}
 };
@@ -1010,7 +1077,7 @@ function showCtx(x,y,f,field){
   if(r.bottom>innerHeight)ctx.style.top=Math.max(4,y-r.height)+'px';
 }
 document.addEventListener('click',e=>{if(!ctx.contains(e.target))hideCtx();});
-document.addEventListener('keydown',e=>{if(e.key==='Escape')hideCtx();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(typeof closeModals==='function'&&closeModals())return;hideCtx();}});
 // Suppress the browser's native context menu app-wide, but keep it where it's
 // genuinely useful: editable fields (paste/cut) and over a live text selection (copy).
 document.addEventListener('contextmenu',e=>{
@@ -1051,7 +1118,7 @@ function renderIntercept(){
   const on=state.intercept.enabled,q=state.intercept.queue||[];
   $('#heldCount').textContent=q.length;
   const badge=$('#heldBadge');badge.style.display=q.length?'inline-block':'none';badge.textContent=q.length;
-  [['#interceptToggle'],['#interceptToggle2']].forEach(([sel])=>{const b=$(sel);if(!b)return;b.classList.toggle('on',on);b.textContent=on?'Intercept is on':'Intercept is off';});
+  {const b=$('#interceptToggle');if(b){b.classList.toggle('on',on);b.textContent=on?'Intercept is on':'Intercept is off';}}
   // conditional-intercept filter (don't clobber fields the user is editing)
   const fo=$('#interceptFilterOn');if(fo&&document.activeElement!==fo)fo.checked=!!state.intercept.filterEnabled;
   const ft=$('#interceptFilterTarget');if(ft&&document.activeElement!==ft)ft.value=state.intercept.filterTarget||'any';
@@ -1303,8 +1370,31 @@ if($('#asClose'))$('#asClose').onclick=()=>$('#activeModal').style.display='none
 if($('#asArm'))$('#asArm').onchange=asArmToggle;
 if($('#asStart'))$('#asStart').onclick=asStartScan;
 if($('#asStop'))$('#asStop').onclick=asStopScan;
-$('#aiModal').onclick=e=>{if(e.target.id==='aiModal')$('#aiModal').style.display='none';};
+/* ---- modals: close on Escape and on backdrop click (consistent across all) ---- */
+const MODAL_IDS=['aiModal','checksModal','activeModal','decModal'];
+function closeModals(){let n=0;MODAL_IDS.forEach(id=>{const m=$('#'+id);if(m&&m.style.display&&m.style.display!=='none'){m.style.display='none';n++;}});return n>0;}
+MODAL_IDS.forEach(id=>{const m=$('#'+id);if(m)m.addEventListener('mousedown',e=>{if(e.target===m)m.style.display='none';});});
 
+// uiPrompt: an in-app replacement for the browser's prompt() — themed, consistent,
+// resolves to the entered string or null (Cancel / Escape / backdrop / empty).
+function uiPrompt(opts){
+  opts=opts||{};
+  return new Promise(resolve=>{
+    const m=$('#promptModal'),inp=$('#promptInput');
+    $('#promptTitle').textContent=opts.title||'Enter a value';
+    inp.placeholder=opts.placeholder||'';inp.value=opts.value||'';
+    m.style.display='flex';setTimeout(()=>{inp.focus();inp.select();},0);
+    let done=false;
+    const finish=v=>{if(done)return;done=true;m.style.display='none';inp.onkeydown=null;m.onmousedown=null;resolve(v);};
+    $('#promptOk').onclick=()=>finish(inp.value.trim()||null);
+    $('#promptCancel').onclick=()=>finish(null);
+    inp.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();finish(inp.value.trim()||null);}else if(e.key==='Escape'){e.preventDefault();finish(null);}};
+    m.onmousedown=e=>{if(e.target===m)finish(null);};
+  });
+}
+
+$('#exportProject').onclick=()=>toast('Project exported — .json downloaded');
+const dlCa=$('#dlCaBtn');if(dlCa)dlCa.onclick=()=>toast('CA certificate downloaded — trust it on the client');
 $('#importProjectBtn').onclick=()=>$('#importProjectFile').click();
 $('#importProjectFile').onchange=async e=>{
   const f=e.target.files[0];if(!f)return;
@@ -1313,6 +1403,26 @@ $('#importProjectFile').onchange=async e=>{
     loadFlows();loadRules();loadScope();loadSettings();}catch(err){toast('import: '+err.message);}
   e.target.value='';
 };
+// ---- project switching (close current, open another / a new path) ----
+async function loadProject(){
+  try{const d=await api('/api/project');
+    const n=$('#projNameHint');if(n)n.textContent=d.current||'default';
+    const dir=$('#projDirHint');if(dir&&d.dir)dir.textContent=d.dir;
+    const sel=$('#projSelect');if(sel)sel.innerHTML=(d.projects||['default']).map(p=>`<option value="${esc(p)}"${p===d.current?' disabled':''}>${esc(p)}${p===d.current?' (current)':''}</option>`).join('');
+    if(!d.canSwitch)['projSwitchBtn','projNewBtn'].forEach(id=>{const b=$('#'+id);if(b){b.disabled=true;b.title='project switching is unavailable in this build';}});
+  }catch(e){}
+}
+async function doSwitchProject(target){
+  if(!target)return;
+  const note=$('#projSwitchNote');if(note){note.style.display='block';note.textContent='Switching to “'+target+'” — restarting & reconnecting…';}
+  try{await api('/api/project/switch',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({target})});}catch(e){}
+  let tries=0;const poll=setInterval(async()=>{tries++;
+    try{await api('/api/version');clearInterval(poll);location.reload();}
+    catch(e){if(tries>60){clearInterval(poll);if(note)note.textContent='Still restarting… reload the page manually if it doesn’t return.';}}
+  },500);
+}
+$('#projSwitchBtn').onclick=()=>{const v=($('#projSelect')||{}).value;if(v)doSwitchProject(v);else toast('no other project to open');};
+$('#projNewBtn').onclick=()=>{const v=(($('#projNew')||{}).value||'').trim();if(v)doSwitchProject(v);else toast('enter a project name or path');};
 $('#saveAddrBtn').onclick=async()=>{
   try{const s=await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({proxyAddr:$('#setAddr').value})});
     $('#proxyAddr').textContent=s.proxyAddr;toast('proxy now on '+s.proxyAddr);}catch(e){toast(e.message);}
@@ -1374,6 +1484,8 @@ async function repSend(){
   repSaveEditor();const t=repCur();if(!t)return;
   if(!(t.url||'').trim()){toast('enter a URL');return;}
   $('#repSend').textContent='Sending…';$('#repSend').disabled=true;
+  $('#repStatus').textContent='sending…';$('#repStatus').style.color='var(--fg3)';
+  $('#repResView').innerHTML='<span class="blink" style="color:var(--fg3)">sending…</span>';
   try{
     const flow=await api('/api/repeater/send',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({method:t.method,url:t.url.trim(),headers:t.headers,body:t.body})});
     t.resId=flow.id;t.status=flow.status?flow.status+' '+statusText(flow.status):(flow.error||'');t.color=statusColor(flow.status);
@@ -1493,9 +1605,22 @@ const scanState={sel:null,issues:[]};
 async function loadIssues(){try{const d=await api('/api/scanner/issues');scanState.issues=d.issues||[];renderScan();}catch(e){}}
 async function runScan(){
   $('#scanRun').textContent='Scanning…';$('#scanRun').disabled=true;
-  try{const d=await api('/api/scanner/run',{method:'POST'});scanState.issues=d.issues||[];renderScan();toast(scanState.issues.length+' issue'+(scanState.issues.length===1?'':'s'));}
+  const host=($('#scanTarget')||{}).value||'',search=(($('#scanFilter')||{}).value||'').trim();
+  const q=new URLSearchParams();if(host)q.set('host',host);if(search)q.set('search',search);
+  try{const d=await api('/api/scanner/run'+(q.toString()?'?'+q:''),{method:'POST'});scanState.issues=d.issues||[];renderScan();
+    toast(scanState.issues.length+' issue'+(scanState.issues.length===1?'':'s')+(host?' · '+host:'')+(search?' · "'+search+'"':''));}
   catch(e){toast(e.message);}
   $('#scanRun').textContent='Run scan ▸';$('#scanRun').disabled=false;
+}
+// Populate the scanner's target dropdown from the hosts seen in history.
+async function loadScanTargets(){
+  const sel=$('#scanTarget');if(!sel)return;
+  try{const d=await api('/api/flows?limit=2000');
+    const hosts=[...new Set((d.flows||[]).map(f=>f.host).filter(Boolean))].sort();
+    const cur=sel.value;
+    sel.innerHTML='<option value="">All in-scope hosts</option>'+hosts.map(h=>`<option value="${esc(h)}">${esc(h)}</option>`).join('');
+    if(hosts.includes(cur))sel.value=cur;
+  }catch(e){}
 }
 function renderScan(){
   const c={};scanState.issues.forEach(i=>c[i.severity]=(c[i.severity]||0)+1);
@@ -1587,6 +1712,7 @@ function connectEvents(){
   es.onmessage=e=>{let m;try{m=JSON.parse(e.data);}catch(err){return;}
     if(m.type==='flow.new')scheduleReload();
     else if(m.type==='flow.update'){scheduleReload();if(m.flow&&m.flow.id===state.selId)selectFlow(state.selId);} // response arrived: refresh the open detail
+    else if(m.type==='activity')onActivity(m.item);
     else if(m.type==='intercept.update'){state.intercept=m.intercept;renderIntercept();}
     else if(m.type==='rules.update')loadRules();
     else if(m.type==='intruder.update')scheduleIntr();
@@ -1606,8 +1732,8 @@ function connectEvents(){
 const cmdk={el:null,input:null,list:null,items:[],sel:0,open:false};
 function cmdkBuild(){
   const o=document.createElement('div');o.id='cmdk';
-  o.style.cssText='position:fixed;inset:0;z-index:300;display:none;align-items:flex-start;justify-content:center;background:rgba(0,0,0,.5)';
-  o.innerHTML='<div style="margin-top:11vh;width:min(680px,92vw);background:var(--bg2,#15151b);border:1px solid var(--line);border-radius:12px;box-shadow:0 24px 70px rgba(0,0,0,.55);overflow:hidden">'
+  o.style.cssText='position:fixed;inset:0;z-index:300;display:none;align-items:flex-start;justify-content:center;background:var(--overlay)';
+  o.innerHTML='<div style="margin-top:11vh;width:min(680px,92vw);background:var(--bg2);border:1px solid var(--line);border-radius:12px;box-shadow:0 24px 70px var(--shadow);overflow:hidden">'
     +'<input id="cmdkInput" placeholder="Search flows · jump to a tab · run a command…" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;padding:14px 16px;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--fg);font-size:15px;outline:none">'
     +'<div id="cmdkList" style="max-height:52vh;overflow:auto;padding:6px"></div>'
     +'<div style="padding:7px 14px;border-top:1px solid var(--line);color:var(--fg3);font-size:10px;display:flex;gap:16px"><span>↑ ↓ navigate</span><span>⏎ run</span><span>esc close</span></div></div>';
@@ -1640,6 +1766,10 @@ function cmdkCommands(){
     c.push({t:'Send selected → Repeater  (Ctrl+R)',run:()=>{const f=state.flows.find(x=>x.id===state.selId);if(f)sendToRepeater(f);}});
     c.push({t:'Send selected → Intruder  (Ctrl+I)',run:()=>{const f=state.flows.find(x=>x.id===state.selId);if(f)sendToIntruder(f);}});
   }
+  if(state.selHeld!=null){
+    c.push({t:'Forward held request  (Ctrl+F)',run:()=>{go('intercept')();const b=$('#forwardBtn');if(b)b.click();}});
+    c.push({t:'Drop held request  (Ctrl+D)',run:()=>{go('intercept')();const b=$('#dropBtn');if(b)b.click();}});
+  }
   return c;
 }
 function cmdkRender(){
@@ -1656,7 +1786,7 @@ function cmdkRender(){
 }
 function cmdkPaint(){
   cmdk.list.innerHTML=cmdk.items.map((it,i)=>
-    '<div class="cmdk-row" data-i="'+i+'" style="display:flex;justify-content:space-between;gap:12px;padding:9px 12px;border-radius:8px;cursor:pointer;'+(i===cmdk.sel?'background:var(--accent);color:#06140e':'')+'">'
+    '<div class="cmdk-row" data-i="'+i+'" style="display:flex;justify-content:space-between;gap:12px;padding:9px 12px;border-radius:8px;cursor:pointer;'+(i===cmdk.sel?'background:var(--accent);color:var(--onAccent)':'')+'">'
     +'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(it.label)+'</span>'
     +'<span style="opacity:.55;font-size:11px;flex:none">'+esc(it.sub||it.kind)+'</span></div>'
   ).join('')||'<div style="padding:14px;color:var(--fg3)">No matches</div>';
@@ -1718,9 +1848,47 @@ function toggleTheme(){const t=currentTheme()==='light'?'dark':'light';try{local
 $('#themeToggle').onclick=toggleTheme;
 applyTheme(currentTheme()); // sync the button icon with the theme applied pre-paint
 
+/* ---- AI activity feed (glass box: watch what the AI is doing, live) ---- */
+const ACT_MAX=300;
+function actTime(ts){const d=new Date(ts);const p=n=>String(n).padStart(2,'0');return p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());}
+function renderActivity(){
+  const box=$('#actFeed');if(!box)return;
+  const a=state.activity;
+  $('#actCount').textContent=a.length?a.length+(a.length===1?' action':' actions'):'';
+  if(!a.length){box.innerHTML='<div class="empty">No AI activity yet.<br>Point your AI assistant at this project over MCP (API → MCP) and its every move shows up here, live.</div>';return;}
+  box.innerHTML=a.map(it=>`<div class="act-row">
+    <span class="ok" style="background:${it.ok?'var(--accent)':'var(--red)'}" title="${it.ok?'ok':'error'}"></span>
+    <span class="act-tool">${esc(it.tool)}</span>
+    <span class="act-sum">${esc(it.summary||'')}</span>
+    <span class="act-res">${esc(it.result||'')}</span>
+    <span class="act-meta">${it.ms}ms · ${actTime(it.ts)}</span>
+  </div>`).join('');
+}
+let aiPulseTimer=null;
+function flashAiPulse(tool){
+  const p=$('#aiPulse');if(!p)return;
+  p.style.display='inline-flex';p.classList.add('live');
+  const lbl=$('#aiPulseLbl');if(lbl)lbl.textContent=tool?('AI · '+tool):'AI active';
+  clearTimeout(aiPulseTimer);
+  aiPulseTimer=setTimeout(()=>{p.classList.remove('live');if(lbl)lbl.textContent='AI active';},2500);
+}
+function onActivity(it){
+  if(!it)return;
+  state.activity.unshift(it);
+  if(state.activity.length>ACT_MAX)state.activity.length=ACT_MAX;
+  const onTab=document.querySelector('.tab[data-tab="activity"]').classList.contains('active');
+  if(onTab)renderActivity();
+  else{state.actUnseen++;const b=$('#actBadge');if(b){b.style.display='inline-block';b.textContent=state.actUnseen;}}
+  flashAiPulse(it.tool);
+}
+async function loadActivity(){try{const d=await api('/api/activity');state.activity=d.activity||[];renderActivity();}catch(e){}}
+function clearActSeen(){state.actUnseen=0;const b=$('#actBadge');if(b)b.style.display='none';}
+$('#actClear').onclick=()=>{state.activity=[];renderActivity();clearActSeen();};
+$('#aiPulse').onclick=()=>document.querySelector('.tab[data-tab="activity"]').click();
+
 /* ---- boot ---- */
 async function refreshIntercept(){try{state.intercept=await api('/api/intercept');renderIntercept();}catch(e){}}
-renderChips();loadSettings();loadSysProxy();loadSession();loadFlows();loadRules();loadScope();loadViews();refreshIntercept();repInit();loadIssues();loadApiKeys();loadReference();loadMCP();loadVersion(true);connectEvents();
+renderChips();loadSettings();loadSysProxy();loadSession();loadFlows();loadRules();loadScope();loadViews();refreshIntercept();repInit();loadIssues();loadApiKeys();loadReference();loadMCP();loadActivity();loadProject();loadVersion(true);connectEvents();
 </script>
 </body>
 </html>
