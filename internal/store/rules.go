@@ -66,15 +66,16 @@ func (s *Store) DeleteRule(id int64) error {
 
 // FlowFilter selects and pages flows. Zero-valued fields are ignored.
 type FlowFilter struct {
-	Limit       int    // max rows (defaults to 200 when <= 0)
-	BeforeID    int64  // cursor: only rows with id < BeforeID (0 = newest)
-	Method      string // exact method match
-	Host        string // case-insensitive substring of host
-	Search      string // case-insensitive substring of path
-	Scheme      string // exact scheme match ("http"/"https")
-	StatusClass int    // 1..5 → 1xx..5xx; 0 = any
-	RequireFlags int64 // only rows with any of these flag bits set
-	ExcludeFlags int64 // only rows with none of these flag bits set
+	Limit        int    // max rows (defaults to 200 when <= 0)
+	BeforeID     int64  // cursor: only rows with id < BeforeID (0 = newest)
+	Method       string // exact method match
+	Host         string // case-insensitive substring of host
+	Search       string // case-insensitive substring of path
+	Scheme       string // exact scheme match ("http"/"https")
+	StatusClass  int    // 1..5 → 1xx..5xx; 0 = any
+	RequireFlags int64  // only rows with any of these flag bits set
+	ExcludeFlags int64  // only rows with none of these flag bits set
+	IncludeFlags int64  // rows with any of these bits are kept even if ExcludeFlags also matches
 
 	// Negative filters — each entry excludes matching rows; multiples are ANDed.
 	NotMethods  []string // exclude these exact methods
@@ -111,9 +112,9 @@ func (s *Store) QueryFlowsFilter(f FlowFilter) ([]*Flow, error) {
 		args = append(args, f.Host)
 	}
 	if f.Search != "" {
-		// Match the term against method, host, or path (cheap metadata search).
-		where = append(where, "(instr(lower(path), lower(?)) > 0 OR instr(lower(host), lower(?)) > 0 OR instr(lower(method), lower(?)) > 0)")
-		args = append(args, f.Search, f.Search, f.Search)
+		// Match the term against method, host, path, or the operator's note.
+		where = append(where, "(instr(lower(path), lower(?)) > 0 OR instr(lower(host), lower(?)) > 0 OR instr(lower(method), lower(?)) > 0 OR instr(lower(note), lower(?)) > 0)")
+		args = append(args, f.Search, f.Search, f.Search, f.Search)
 	}
 	if f.StatusClass >= 1 && f.StatusClass <= 5 {
 		lo := f.StatusClass * 100
@@ -125,8 +126,16 @@ func (s *Store) QueryFlowsFilter(f FlowFilter) ([]*Flow, error) {
 		args = append(args, f.RequireFlags)
 	}
 	if f.ExcludeFlags != 0 {
-		where = append(where, "(flags & ?) = 0")
-		args = append(args, f.ExcludeFlags)
+		// A row is hidden if it carries an ExcludeFlags bit — unless it also
+		// carries an IncludeFlags bit, which exempts it (e.g. AI traffic shown
+		// in History despite the Repeater/Intruder/ActiveScan exclusion).
+		if f.IncludeFlags != 0 {
+			where = append(where, "((flags & ?) = 0 OR (flags & ?) != 0)")
+			args = append(args, f.ExcludeFlags, f.IncludeFlags)
+		} else {
+			where = append(where, "(flags & ?) = 0")
+			args = append(args, f.ExcludeFlags)
+		}
 	}
 	for _, m := range f.NotMethods {
 		where = append(where, "method <> ?")

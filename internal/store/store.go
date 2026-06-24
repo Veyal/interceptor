@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -40,6 +41,7 @@ type Flow struct {
 	ClientAddr  string
 	Error       string
 	Flags       int64
+	Note        string // free-text annotation an operator (or the AI) attaches to the flow
 }
 
 // Flow flag bits, OR'd into Flow.Flags.
@@ -54,12 +56,13 @@ const (
 	FlagIntruder                       // a request sent from the Intruder module
 	FlagImported                       // a flow imported from a HAR file (not proxied)
 	FlagActiveScan                     // a probe sent by the active scanner
+	FlagAI                             // request originated from the AI assistant (over MCP)
 )
 
 // flowColumns is the canonical SELECT column order; scanFlow consumes it.
 const flowColumns = `id, ts, method, scheme, host, port, path, http_version, status,
 	req_headers, res_headers, req_body_hash, res_body_hash,
-	req_len, res_len, mime, duration_ms, client_addr, error, flags`
+	req_len, res_len, mime, duration_ms, client_addr, error, flags, note`
 
 const schema = `
 CREATE TABLE IF NOT EXISTS flows (
@@ -71,7 +74,8 @@ CREATE TABLE IF NOT EXISTS flows (
   req_body_hash TEXT, res_body_hash TEXT,
   req_len INTEGER, res_len INTEGER,
   mime TEXT, duration_ms INTEGER, client_addr TEXT, error TEXT,
-  flags INTEGER NOT NULL DEFAULT 0
+  flags INTEGER NOT NULL DEFAULT 0,
+  note TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_flows_host ON flows(host);
 CREATE INDEX IF NOT EXISTS idx_flows_status ON flows(status);
@@ -164,6 +168,18 @@ func Open(dir string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	// Additive column migrations: CREATE TABLE IF NOT EXISTS never alters an
+	// existing table, so add later columns here. The ADD COLUMN errors with
+	// "duplicate column" once present (including on a freshly-created schema),
+	// which is the idempotent no-op we want to ignore.
+	for _, mig := range []string{
+		`ALTER TABLE flows ADD COLUMN note TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err := db.Exec(mig); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			db.Close()
+			return nil, err
+		}
+	}
 	return &Store{db: db, bodiesDir: bodiesDir}, nil
 }
 
@@ -212,6 +228,32 @@ func (s *Store) UpdateFlow(f *Flow) error {
 	return err
 }
 
+// SetFlowNote sets (or clears, with "") the free-text note attached to a flow.
+func (s *Store) SetFlowNote(id int64, note string) error {
+	_, err := s.db.Exec(`UPDATE flows SET note=? WHERE id=?`, note, id)
+	return err
+}
+
+// DeleteFlows removes the given flows and returns how many rows were deleted.
+// An empty id list is a no-op. Content-addressed body files are left in place
+// (they are shared/deduplicated across flows); the metadata rows are what go.
+func (s *Store) DeleteFlows(ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	ph := strings.TrimRight(strings.Repeat("?,", len(ids)), ",")
+	res, err := s.db.Exec(`DELETE FROM flows WHERE id IN (`+ph+`)`, args...)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
 // GetFlow loads a single flow by id.
 func (s *Store) GetFlow(id int64) (*Flow, error) {
 	row := s.db.QueryRow(`SELECT `+flowColumns+` FROM flows WHERE id = ?`, id)
@@ -231,7 +273,7 @@ func scanFlow(row scanner) (*Flow, error) {
 	if err := row.Scan(
 		&f.ID, &tsMillis, &f.Method, &f.Scheme, &f.Host, &f.Port, &f.Path, &f.HTTPVersion, &f.Status,
 		&reqH, &resH, &f.ReqBodyHash, &f.ResBodyHash,
-		&f.ReqLen, &f.ResLen, &f.Mime, &f.DurationMs, &f.ClientAddr, &f.Error, &f.Flags,
+		&f.ReqLen, &f.ResLen, &f.Mime, &f.DurationMs, &f.ClientAddr, &f.Error, &f.Flags, &f.Note,
 	); err != nil {
 		return nil, err
 	}
