@@ -138,6 +138,12 @@ CREATE TABLE IF NOT EXISTS saved_views (
   name TEXT NOT NULL,
   data TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS activity (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  tool TEXT NOT NULL, summary TEXT, ok INTEGER, result TEXT, ms INTEGER
+);
 `
 
 // Open creates (or opens) the database and body store under dir.

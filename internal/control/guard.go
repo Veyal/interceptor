@@ -31,8 +31,44 @@ func (h *Hub) securityGuard(next http.Handler) http.Handler {
 			http.Error(w, "forbidden: cross-origin request rejected", http.StatusForbidden)
 			return
 		}
+		// Optional API-key auth for the remote-agent surface: once the operator has
+		// created at least one key, the Streamable-HTTP MCP endpoint requires a valid
+		// bearer token. Keyless installs stay open (loopback trust); the /api surface
+		// and embedded UI remain loopback-only and are not gated here.
+		if r.URL.Path == "/mcp" && !h.mcpAuthorized(r) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="interceptor"`)
+			http.Error(w, "unauthorized: the MCP endpoint requires Authorization: Bearer <api key> — create one in the API tab, or remove all keys to disable auth", http.StatusUnauthorized)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// mcpAuthorized reports whether a request to /mcp may proceed. Auth is opt-in:
+// with no API keys the endpoint is open (loopback trust); once any key exists a
+// valid bearer token is required. A store error fails open so a transient DB
+// hiccup can't lock out the keyless common case.
+func (h *Hub) mcpAuthorized(r *http.Request) bool {
+	has, err := h.st.HasAPIKeys()
+	if err != nil || !has {
+		return true
+	}
+	tok := bearerToken(r)
+	if tok == "" {
+		return false
+	}
+	ok, _ := h.st.VerifyAPIKey(tok)
+	return ok
+}
+
+// bearerToken extracts the token from an "Authorization: Bearer <token>" header.
+func bearerToken(r *http.Request) string {
+	const pfx = "Bearer "
+	v := r.Header.Get("Authorization")
+	if len(v) >= len(pfx) && strings.EqualFold(v[:len(pfx)], pfx) {
+		return strings.TrimSpace(v[len(pfx):])
+	}
+	return ""
 }
 
 // isLoopbackHost reports whether a Host header (host or host:port) names the

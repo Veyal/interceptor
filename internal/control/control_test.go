@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Veyal/interceptor/internal/intercept"
+	"github.com/Veyal/interceptor/internal/mcp"
 	"github.com/Veyal/interceptor/internal/store"
 )
 
@@ -30,6 +31,124 @@ func newHub(t *testing.T) (*Hub, *store.Store, *intercept.Engine) {
 	eng := intercept.New()
 	h := New(s, eng, nil, nil, nil)
 	return h, s, eng
+}
+
+// A loopback request must not be able to relocate the process to an arbitrary
+// path via /api/project/switch — only plain project names are accepted.
+func TestSwitchProjectRejectsPaths(t *testing.T) {
+	h, _, _ := newHub(t)
+	h.SwitchProject = func(string) error { return nil } // stub; the real one re-execs
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	post := func(target string) int {
+		body, _ := json.Marshal(map[string]string{"target": target})
+		resp, err := http.Post(ts.URL+"/api/project/switch", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("post %q: %v", target, err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	for _, bad := range []string{"/tmp/evil", "../../etc", "~/x", `..\..\x`, "-rf", ".", ".."} {
+		if code := post(bad); code != http.StatusBadRequest {
+			t.Fatalf("path-like target %q: expected 400, got %d", bad, code)
+		}
+	}
+	if code := post("clientA"); code != http.StatusAccepted {
+		t.Fatalf("plain name: expected 202, got %d", code)
+	}
+}
+
+// Clearing the activity feed must delete the persisted rows, not just the client
+// copy — otherwise it reappears on reload now that the feed is stored.
+func TestClearActivityEndpoint(t *testing.T) {
+	h, s, _ := newHub(t)
+	s.InsertActivity(&store.Activity{TS: 1, Tool: "list_flows", OK: true})
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/activity", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", resp.StatusCode)
+	}
+	if got, _ := s.ListActivity(50); len(got) != 0 {
+		t.Fatalf("after clear: got %d, want 0", len(got))
+	}
+}
+
+// API-key auth is opt-in: the /mcp endpoint is open until a key exists, then it
+// requires a valid bearer token. The /api surface stays loopback-trust regardless.
+func TestMCPEndpointAuth(t *testing.T) {
+	h, s, _ := newHub(t)
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	post := func(auth string) int {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp",
+			strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
+		req.Header.Set("Content-Type", "application/json")
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("post: %v", err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if code := post(""); code == http.StatusUnauthorized {
+		t.Fatalf("keyless: /mcp should be open, got 401")
+	}
+	token, _, err := s.CreateAPIKey("agent")
+	if err != nil {
+		t.Fatalf("CreateAPIKey: %v", err)
+	}
+	if code := post(""); code != http.StatusUnauthorized {
+		t.Fatalf("with a key, no token: expected 401, got %d", code)
+	}
+	if code := post("Bearer nope_" + token[4:]); code != http.StatusUnauthorized {
+		t.Fatalf("bad token: expected 401, got %d", code)
+	}
+	if code := post("Bearer " + token); code == http.StatusUnauthorized {
+		t.Fatalf("valid token: should pass the guard, got 401")
+	}
+	// /api stays open on loopback trust even with a key present.
+	resp, err := http.Get(ts.URL + "/api/flows")
+	if err != nil {
+		t.Fatalf("GET flows: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		t.Fatalf("/api should remain loopback-trust, got 401")
+	}
+}
+
+// The UI's MCP descriptor (api.go) must list exactly the tools the MCP server
+// registers — a guard against the "24 vs 36 tools" drift recurring.
+func TestMCPDescriptorMatchesRegistry(t *testing.T) {
+	registered := mcp.New("http://127.0.0.1:1").ToolNames()
+	tools, _ := mcpDescriptor["tools"].([]map[string]string)
+	listed := map[string]bool{}
+	for _, tt := range tools {
+		listed[tt["name"]] = true
+	}
+	if len(tools) != len(registered) {
+		t.Fatalf("descriptor lists %d tools, registry registers %d — sync internal/control/api.go", len(tools), len(registered))
+	}
+	for _, name := range registered {
+		if !listed[name] {
+			t.Fatalf("tool %q is registered but missing from the UI descriptor (internal/control/api.go)", name)
+		}
+	}
 }
 
 func TestListFlowsJSON(t *testing.T) {
@@ -82,7 +201,7 @@ func TestActivityFeed(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	var out struct {
-		Activity []activityItem `json:"activity"`
+		Activity []store.Activity `json:"activity"`
 	}
 	json.NewDecoder(resp.Body).Decode(&out)
 	if len(out.Activity) != 2 {

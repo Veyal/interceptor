@@ -147,9 +147,24 @@ func (h *Hub) availableProjects() []string {
 	return append(out, named...)
 }
 
-// switchProject relaunches Interceptor pointed at another project (by name or
-// path). It answers first, then the process re-execs; the UI reconnects once the
-// listeners are back.
+// safeProjectTarget reports whether a project target from the network API is a
+// bare name safe to hand to the re-exec — never a filesystem path. A path-like
+// target (separators, "~", "."/"..") would let a single loopback request
+// relocate the running process to an arbitrary directory (MkdirAll + re-exec),
+// and a leading "-" could be mis-read as a flag. The local --project CLI flag
+// still accepts paths; only the remote switch is restricted to plain names.
+func safeProjectTarget(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	return !strings.ContainsAny(name, `/\`) && !strings.HasPrefix(name, "~") && !strings.HasPrefix(name, "-")
+}
+
+// switchProject relaunches Interceptor pointed at another named project. It
+// answers first, then the process re-execs; the UI reconnects once the listeners
+// are back. The target is restricted to a plain project name (see
+// safeProjectTarget) so a loopback request can't relocate the process to an
+// arbitrary path.
 func (h *Hub) switchProject(w http.ResponseWriter, r *http.Request) {
 	if h.SwitchProject == nil {
 		httpErr(w, http.StatusNotImplemented, "project switching unavailable")
@@ -162,6 +177,10 @@ func (h *Hub) switchProject(w http.ResponseWriter, r *http.Request) {
 	target := strings.TrimSpace(in.Target)
 	if target == "" {
 		httpErr(w, http.StatusBadRequest, "target required")
+		return
+	}
+	if !safeProjectTarget(target) {
+		httpErr(w, http.StatusBadRequest, "invalid project: use a plain name, not a path")
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"switching": target})

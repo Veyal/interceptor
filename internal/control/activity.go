@@ -4,40 +4,21 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/Veyal/interceptor/internal/store"
 )
 
-// activityMax bounds the in-memory AI-activity feed (a session-scoped ring).
-const activityMax = 300
-
-// activityItem is one recorded AI (MCP) tool call, surfaced live in the UI so a
-// human can watch what the AI is doing as it happens.
-type activityItem struct {
-	ID      int64  `json:"id"`
-	TS      int64  `json:"ts"` // unix millis (server clock)
-	Tool    string `json:"tool"`
-	Summary string `json:"summary"`
-	OK      bool   `json:"ok"`
-	Result  string `json:"result"`
-	Ms      int64  `json:"ms"`
-}
-
-// recordActivity appends an item to the ring and returns it with its assigned
-// id/timestamp. Caller broadcasts outside the lock.
-func (h *Hub) recordActivity(it activityItem) activityItem {
-	h.actMu.Lock()
-	defer h.actMu.Unlock()
-	h.actSeq++
-	it.ID = h.actSeq
-	it.TS = time.Now().UnixMilli()
-	h.actLog = append(h.actLog, it)
-	if len(h.actLog) > activityMax {
-		h.actLog = h.actLog[len(h.actLog)-activityMax:]
-	}
-	return it
+// recordActivity persists one AI (MCP) tool call (stamped with the server clock)
+// and returns it with its assigned id. Persisted per-project so the glass-box
+// feed survives restarts; the caller broadcasts it live.
+func (h *Hub) recordActivity(a store.Activity) store.Activity {
+	a.TS = time.Now().UnixMilli()
+	_, _ = h.st.InsertActivity(&a)
+	return a
 }
 
 // postActivity records one AI tool call (POSTed by the MCP server after every
-// call) and pushes it to all live UI subscribers.
+// call), persists it, and pushes it to all live UI subscribers.
 func (h *Hub) postActivity(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Tool    string `json:"tool"`
@@ -50,18 +31,32 @@ func (h *Hub) postActivity(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "tool required")
 		return
 	}
-	it := h.recordActivity(activityItem{Tool: in.Tool, Summary: in.Summary, OK: in.OK, Result: in.Result, Ms: in.Ms})
+	it := h.recordActivity(store.Activity{Tool: in.Tool, Summary: in.Summary, OK: in.OK, Result: in.Result, Ms: in.Ms})
 	h.broadcast(map[string]any{"type": "activity", "item": it})
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// listActivity returns the recorded AI activity, newest first.
+// listActivity returns the persisted AI activity, newest first.
 func (h *Hub) listActivity(w http.ResponseWriter, r *http.Request) {
-	h.actMu.Lock()
-	out := make([]activityItem, len(h.actLog))
-	for i, it := range h.actLog {
-		out[len(h.actLog)-1-i] = it // reverse → newest first
+	items, err := h.st.ListActivity(atoiOr(r.URL.Query().Get("limit"), 300))
+	if err != nil {
+		httpErr(w, http.StatusInternalServerError, err.Error())
+		return
 	}
-	h.actMu.Unlock()
-	writeJSON(w, http.StatusOK, map[string]any{"activity": out})
+	if items == nil {
+		items = []store.Activity{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"activity": items})
+}
+
+// clearActivity wipes the persisted AI activity feed (the user pressed Clear).
+// Because the feed is now stored, a client-only clear would reappear on reload —
+// this deletes the rows and tells live clients to drop their copy.
+func (h *Hub) clearActivity(w http.ResponseWriter, r *http.Request) {
+	if err := h.st.DeleteActivity(); err != nil {
+		httpErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.broadcast(map[string]any{"type": "activity.clear"})
+	w.WriteHeader(http.StatusNoContent)
 }

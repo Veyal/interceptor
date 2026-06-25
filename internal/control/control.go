@@ -77,10 +77,6 @@ type Hub struct {
 	updLatest string
 	updAvail  bool
 
-	actMu  sync.Mutex // live AI-activity feed (MCP tool calls); ring buffer
-	actLog []activityItem
-	actSeq int64
-
 	mu      sync.Mutex
 	clients map[chan string]struct{}
 }
@@ -188,6 +184,7 @@ func (h *Hub) routes() {
 	h.mux.HandleFunc("GET /api/version", h.apiVersion)
 	h.mux.HandleFunc("GET /api/activity", h.listActivity)
 	h.mux.HandleFunc("POST /api/activity", h.postActivity)
+	h.mux.HandleFunc("DELETE /api/activity", h.clearActivity)
 	h.mux.HandleFunc("GET /api/project", h.apiProject)
 	h.mux.HandleFunc("POST /api/project/switch", h.switchProject)
 	h.mux.HandleFunc("GET /api/reference", h.apiReference)

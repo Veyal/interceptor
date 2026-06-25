@@ -63,6 +63,17 @@ func (s *Store) DeleteAPIKey(id int64) error {
 	return err
 }
 
+// HasAPIKeys reports whether any control-API key exists. Auth is opt-in: while
+// this is false the MCP endpoint stays open (loopback trust); once the operator
+// creates a key, a valid bearer token is required.
+func (s *Store) HasAPIKeys() (bool, error) {
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(1) FROM api_keys`).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 // VerifyAPIKey reports whether token matches a stored key (constant work via the
 // hash index). Intended for gating remote control-API access.
 func (s *Store) VerifyAPIKey(token string) (bool, error) {
