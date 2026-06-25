@@ -50,7 +50,7 @@ func Build(method, url string, headers http.Header, body []byte) string {
 }
 
 // shellEscape makes s safe inside single quotes by closing the quote, emitting
-// an escaped quote, and reopening: ' → '\''.
+// an escaped quote, and reopening: ' → '\”.
 func shellEscape(s string) string {
 	return strings.ReplaceAll(s, "'", `'\''`)
 }

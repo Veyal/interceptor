@@ -53,7 +53,9 @@ func TestXSSDetector(t *testing.T) {
 		t.Fatal("expected XSS hit when payload reflects unencoded")
 	}
 	// encoded reflection → no hit
-	enc := func(payload string) Response { return Response{Status: 200, Body: "<div>" + html.EscapeString(payload) + "</div>"} }
+	enc := func(payload string) Response {
+		return Response{Status: 200, Body: "<div>" + html.EscapeString(payload) + "</div>"}
+	}
 	if xssCheck.Run(Point{}, Response{Body: "<html></html>"}, enc) != nil {
 		t.Fatal("encoded reflection must not be flagged")
 	}

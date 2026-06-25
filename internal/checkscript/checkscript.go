@@ -233,7 +233,9 @@ func reSearchBuiltin(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tupl
 
 type flowValue struct{ f Flow }
 
-func (v *flowValue) String() string        { return fmt.Sprintf("flow(%s %s%s)", v.f.Method, v.f.Host, v.f.Path) }
+func (v *flowValue) String() string {
+	return fmt.Sprintf("flow(%s %s%s)", v.f.Method, v.f.Host, v.f.Path)
+}
 func (v *flowValue) Type() string          { return "flow" }
 func (v *flowValue) Freeze()               {}
 func (v *flowValue) Truth() starlark.Bool  { return starlark.True }
