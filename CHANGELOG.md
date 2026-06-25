@@ -6,6 +6,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-06-25
+
+### Added
+- **Optional API-key auth for the MCP endpoint.** Opt-in: with no keys the control
+  plane stays loopback-only (unchanged); once you create a key (**API** tab), the
+  Streamable-HTTP **`/mcp`** endpoint requires `Authorization: Bearer <key>`, so a
+  hosted/remote agent must authenticate. `/api` stays loopback-trust. This wires up
+  the previously-dormant key verification.
+
+### Changed
+- **The open tab is remembered across refreshes.** Reloading the UI no longer
+  bounces you back to **Proxy** — it reopens whichever tab you were on (Map, Notes,
+  Scanner, …), persisted in `localStorage`.
+- **Map "All domains" view is now an overview, not a wall.** Selecting *All domains*
+  collapses every host to a single node tagged with its endpoint count (`+N`); click a
+  host to drill in. Picking a specific domain still shows its tree fully expanded —
+  keeping the graph readable across dozens of hosts instead of cramming hundreds of nodes.
+- **Map: click an endpoint to pop up its request/response.** Clicking an endpoint
+  node (graph or tree) now opens a quick Raw/Pretty request+response viewer in a
+  modal — with an **All in Proxy ↗** button that filters History to *every* request
+  to that endpoint (host + method + path) — instead of yanking you to the Proxy tab.
+- **The UI no longer auto-opens by default.** A plain `interceptor` start is now
+  quiet — friendlier for restarts and headless/daemon use. Pass **`--open`** (or set
+  `INTERCEPTOR_OPEN_BROWSER`) to launch the browser; `INTERCEPTOR_NO_BROWSER` still
+  hard-disables it. The UI URL is printed on startup.
+- **AI activity is persisted (survives restart).** The glass-box Activity feed was
+  an in-memory session ring — lost on restart and not per-project. It's now stored
+  in the project database (an `activity` table, capped at ~5000 rows) and reloads
+  with the project. Backed by `store.InsertActivity` / `ListActivity`.
+- **Endpoint map filters match the Proxy bar.** The Map's status filter is now a
+  dropdown (`status / 2xx / 3xx / 4xx / 5xx`) like Proxy's, next to the method and
+  search controls — replacing the bespoke toggle buttons.
+- **Endpoint map is now a node-link graph.** The Map tab defaults to a visual
+  `domain → path → endpoint` graph (hierarchical tidy-tree layout in SVG) you can
+  **pan** (drag), **zoom** (wheel), **Fit**, and **collapse** node-by-node; nodes
+  are coloured by host/path/endpoint with status-coloured endpoint markers, and
+  clicking an endpoint jumps to its flow in Proxy. It opens focused on **one
+  domain** (the busiest) chosen via a **Domain** picker — switch domains or pick
+  *All* — so a large attack surface stays readable instead of cramming every host
+  on screen. A **Tree / Graph** toggle keeps the compact accordion list available;
+  the domain/status/method/search filters apply to both.
+
+### Fixed
+- **MCP `intruder_state` / `list_ws_frames` / `active_scan_state` now return valid,
+  bounded JSON.** They byte-truncated the JSON payload mid-structure — output an agent
+  couldn't parse, exactly when results were large and interesting. They now cap the
+  result rows and stay parseable, with `_truncated` / `_total` markers.
+- **The Activity "Clear" button actually clears.** Now that the feed is persisted, a
+  client-only clear reappeared on reload; Clear now deletes the rows
+  (`DELETE /api/activity`) and tells live clients to drop their copy.
+- **Quote-safe HTML attribute escaping.** A `"` or `'` in a match-&-replace regex, a
+  scope rule, or a captured host/path can no longer break out of the surrounding
+  attribute — a new `escAttr()` escapes quotes in attribute slots (the JSON/HTTP body
+  highlighters keep the quote-preserving `esc()`).
+- **Docs match reality:** the MCP toolset is **36 tools** (was mislabelled 24) across
+  the README, roadmap, and the in-app **API → MCP** descriptor — now covered by a test
+  so it can't drift again; PRD-0002 (active scanning) is marked **shipped**.
+- `gofmt` brought clean across the tree (three long-standing files).
+
+### Security
+- **`/api/project/switch` is restricted to plain project names.** A loopback request
+  could previously pass a filesystem path (`/tmp/…`, `~/…`, `../…`) that the re-exec
+  turned into `MkdirAll` + a process relocation to an arbitrary directory. The network
+  switch now rejects anything but a bare name; the local `--project` CLI flag still
+  accepts paths.
+
 ## [0.5.0] — 2026-06-24
 
 ### Added
