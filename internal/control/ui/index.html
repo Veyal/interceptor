@@ -234,7 +234,14 @@ textarea.raw{width:100%;height:200px;resize:vertical;background:var(--bg);color:
 .map-p{font-family:var(--mono);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .map-sts{font-family:var(--mono);font-size:10.5px}
 .map-hits{font-size:10px;color:var(--fg3);min-width:28px;text-align:right}
-.mapsev{opacity:.4}.mapsev.on{opacity:1}
+#mapGraphSvg text{font-family:var(--mono);font-size:11px;dominant-baseline:central;user-select:none}
+.g-host{fill:var(--fg);font-weight:700}
+.g-folder{fill:var(--blue)}
+.g-ep{fill:var(--fg2)}
+.g-dim{fill:var(--fg3)}
+.g-edge{fill:none;stroke:var(--line2);stroke-width:1.2}
+.g-node.g-click{cursor:pointer}
+.g-node.g-click:hover text{fill:var(--accent)}
 .md{font-size:13.5px;line-height:1.65;color:var(--fg)}
 .md h1{font-size:20px;margin:18px 0 10px;border-bottom:1px solid var(--line);padding-bottom:5px}
 .md h2{font-size:16px;margin:16px 0 8px}
@@ -511,20 +518,20 @@ changeme</textarea>
   <div class="panel" data-panel="map">
     <div class="toolbar">
       <span style="font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--fg2)">ENDPOINT MAP</span>
-      <input id="mapSearch" class="btn" style="background:var(--bg3);width:170px" placeholder="filter path / host">
-      <select id="mapMethod" class="btn" style="background:var(--bg3)"><option value="">All methods</option></select>
-      <span style="color:var(--fg3);font-size:11px">status:</span>
-      <button class="btn mapsev on" data-sev="2" title="toggle 2xx">2xx</button>
-      <button class="btn mapsev on" data-sev="3" title="toggle 3xx">3xx</button>
-      <button class="btn mapsev on" data-sev="4" title="toggle 4xx (e.g. 404 noise)">4xx</button>
-      <button class="btn mapsev on" data-sev="5" title="toggle 5xx">5xx</button>
-      <button class="btn" id="mapExpand">Expand all</button>
+      <select id="mapDomain" class="btn" style="background:var(--bg3);max-width:240px" title="Domain to map (showing one at a time keeps the graph readable)"><option value="">All domains</option></select>
+      <input id="mapSearch" class="btn" style="background:var(--bg3);width:170px" placeholder="Search host / path…">
+      <select id="mapMethod" class="btn" style="background:var(--bg3)"><option value="">method</option></select>
+      <select id="mapStatus" class="btn" style="background:var(--bg3)"><option value="">status</option><option value="2">2xx</option><option value="3">3xx</option><option value="4">4xx</option><option value="5">5xx</option></select>
+      <div class="seg" id="mapViewSeg"><button data-v="graph" class="on">Graph</button><button data-v="tree">Tree</button></div>
+      <button class="btn" id="mapExpand" style="display:none">Expand all</button>
+      <button class="btn" id="mapFit" title="Fit graph to view">⤢ Fit</button>
       <button class="btn" id="mapRefresh" title="Rebuild from history">↻</button>
       <span id="mapCount" class="count"></span>
       <div class="spacer"></div>
       <span class="hint" style="font-size:11px">Unique endpoints from captured traffic — your attack surface</span>
     </div>
-    <div id="mapTree" style="flex:1;overflow:auto;padding:10px 14px;font-size:12.5px"><div class="hint" style="padding:12px">Capture some traffic, then open this tab to map the app.</div></div>
+    <div id="mapTree" style="display:none;flex:1;overflow:auto;padding:10px 14px;font-size:12.5px"></div>
+    <svg id="mapGraphSvg" style="flex:1;min-height:0;background:var(--bg1);cursor:grab" xmlns="http://www.w3.org/2000/svg"><g id="mapGraphG"></g></svg>
   </div>
 
   <!-- Project notes (markdown notebook) -->
@@ -689,6 +696,20 @@ changeme</textarea>
 </div>
 
 <div id="ctxmenu"></div>
+<div id="flowModal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:200;align-items:center;justify-content:center">
+  <div style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;width:min(1100px,94vw);height:min(82vh,820px);display:flex;flex-direction:column;box-shadow:0 20px 60px var(--shadow);overflow:hidden">
+    <div class="row" style="padding:10px 14px;border-bottom:1px solid var(--line);gap:10px">
+      <div id="fmTitle" style="flex:1;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+      <div class="seg" id="fmSeg"><button class="on" data-v="raw">Raw</button><button data-v="pretty">Pretty</button></div>
+      <button class="btn" id="fmProxy" title="Filter the Proxy history to every request to this endpoint">All in Proxy ↗</button>
+      <button class="btn" id="fmClose">✕</button>
+    </div>
+    <div style="flex:1;display:flex;min-height:0">
+      <div class="pane" style="flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--line)"><div class="pane-head"><span class="lbl">REQUEST</span></div><pre id="fmReq"></pre></div>
+      <div class="pane" style="flex:1;min-width:0;display:flex;flex-direction:column"><div class="pane-head"><span class="lbl">RESPONSE</span><span id="fmStatus" class="statusline"></span></div><pre id="fmRes"></pre></div>
+    </div>
+  </div>
+</div>
 <div id="aiModal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:200;align-items:center;justify-content:center">
   <div style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;max-width:700px;max-height:80vh;width:90%;display:flex;flex-direction:column;box-shadow:0 20px 60px var(--shadow)">
     <div class="row" style="padding:12px 16px;border-bottom:1px solid var(--line)">
@@ -781,6 +802,11 @@ changeme</textarea>
 const $=s=>document.querySelector(s);
 const $$=s=>Array.from(document.querySelectorAll(s));
 const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+// escAttr also escapes quotes — use it for a value interpolated INTO an attribute
+// ("${escAttr(x)}"), where a raw " or ' in user-authored rules or captured traffic
+// (hosts, paths) would otherwise break out of the attribute. Plain esc() (which
+// deliberately keeps quotes) stays for text and the JSON/HTTP highlighters.
+const escAttr=s=>esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 
 const state={flows:[],selId:null,detail:null,intercept:{enabled:false,queue:[]},selHeld:null,selRespHeld:null,
   rules:[],scope:[],views:[],inScopeOnly:false,showAI:true,selected:new Set(),lastSelIdx:-1,aiIds:[],view:{req:'raw',res:'raw'},sort:{key:'id',dir:-1},proxyAddr:'127.0.0.1:8080',
@@ -801,11 +827,18 @@ const fmtDur=ms=>ms<1000?ms+' ms':(ms/1000).toFixed(ms<10000?2:1)+' s';
 $$('.tab').forEach(t=>t.onclick=()=>{
   $$('.tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');
   $$('.panel').forEach(p=>p.classList.toggle('active',p.dataset.panel===t.dataset.tab));
+  try{localStorage.setItem('tab',t.dataset.tab);}catch(e){} // remember the open tab across refresh
   if(t.dataset.tab==='activity'){renderActivity();clearActSeen();}
   if(t.dataset.tab==='scanner')loadScanTargets();
   if(t.dataset.tab==='map')loadEndpoints();
   if(t.dataset.tab==='notes')loadNotes();
 });
+// Re-open whichever tab was active before a refresh (default stays Proxy).
+function restoreTab(){
+  try{const id=localStorage.getItem('tab');if(!id||id==='proxy')return;
+    const b=document.querySelector('.tab[data-tab="'+id+'"]');if(b)b.click();
+  }catch(e){}
+}
 /* settings sub-nav */
 $$('#setNav button').forEach(b=>b.onclick=()=>{
   $$('#setNav button').forEach(x=>x.classList.toggle('on',x===b));
@@ -951,7 +984,7 @@ async function renderWSFrames(id){
     const d=await api('/api/flows/'+id+'/ws');const frames=d.frames||[];
     const url=flowWsURL(state.detail||{});
     const box=`<div style="display:flex;gap:6px;margin-bottom:10px">
-        <input id="wsMsg" placeholder="Replay a frame to ${esc(url)}" style="flex:1;font-family:var(--mono)">
+        <input id="wsMsg" placeholder="Replay a frame to ${escAttr(url)}" style="flex:1;font-family:var(--mono)">
         <button class="btn accent" id="wsSendBtn">▲ Send</button></div>
       <div id="wsReplayOut" style="margin-bottom:10px"></div>`;
     const list=frames.length?frames.map(f=>wsFrameRow(f.dir,f.opcode,f.length,f.preview)).join('')
@@ -1127,9 +1160,9 @@ function renderScope(){
   body.innerHTML=state.scope.map(r=>`<tr data-id="${r.id}">
     <td><input type="checkbox" ${r.enabled?'checked':''} data-k="enabled"></td>
     <td><select data-k="action"><option value="include" ${r.action==='include'?'selected':''}>include</option><option value="exclude" ${r.action==='exclude'?'selected':''}>exclude</option></select></td>
-    <td><input type="text" data-k="host" value="${esc(r.host)}" placeholder="*.acme.com"></td>
-    <td><input type="text" data-k="path" value="${esc(r.path)}" placeholder="/"></td>
-    <td><input type="text" data-k="scheme" value="${esc(r.scheme)}" placeholder="any"></td>
+    <td><input type="text" data-k="host" value="${escAttr(r.host)}" placeholder="*.acme.com"></td>
+    <td><input type="text" data-k="path" value="${escAttr(r.path)}" placeholder="/"></td>
+    <td><input type="text" data-k="scheme" value="${escAttr(r.scheme)}" placeholder="any"></td>
     <td><button class="btn danger" data-del="${r.id}">Delete</button></td></tr>`).join('');
   body.querySelectorAll('tr').forEach(tr=>{const id=Number(tr.dataset.id);
     tr.querySelectorAll('[data-k]').forEach(inp=>inp.addEventListener('change',()=>updateScope(id,tr)));});
@@ -1347,8 +1380,8 @@ function renderRules(){
   body.innerHTML=state.rules.map(r=>`<tr data-id="${r.id}">
     <td><input type="checkbox" ${r.enabled?'checked':''} data-k="enabled"></td>
     <td><select data-k="type">${['req-header','req-body','res-header','res-body'].map(tp=>`<option value="${tp}" ${r.type===tp?'selected':''}>${tp}</option>`).join('')}</select></td>
-    <td><input type="text" data-k="match" value="${esc(r.match)}"></td>
-    <td><input type="text" data-k="replace" value="${esc(r.replace)}"></td>
+    <td><input type="text" data-k="match" value="${escAttr(r.match)}"></td>
+    <td><input type="text" data-k="replace" value="${escAttr(r.replace)}"></td>
     <td><button class="btn danger" data-del="${r.id}">Delete</button></td></tr>`).join('');
   body.querySelectorAll('tr').forEach(tr=>{
     const id=Number(tr.dataset.id);
@@ -1463,7 +1496,7 @@ $('#selDelete').onclick=async()=>{
 async function loadChecksList(){
   try{const d=await api('/api/checks');const box=$('#checksList');const cs=d.checks||[];
     if(!cs.length){box.innerHTML='<div class="hint" style="padding:10px">No custom checks yet — click <b>+ New check</b>.</div>';return;}
-    box.innerHTML=cs.map(c=>`<div data-id="${esc(c.id)}" title="${c.error?esc(c.error):''}" style="padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer;font-size:11.5px;font-weight:700;color:${c.error?'var(--red)':'var(--fg)'}">${esc(c.id)}${c.error?' ⚠':''}</div>`).join('');
+    box.innerHTML=cs.map(c=>`<div data-id="${escAttr(c.id)}" title="${c.error?esc(c.error):''}" style="padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer;font-size:11.5px;font-weight:700;color:${c.error?'var(--red)':'var(--fg)'}">${esc(c.id)}${c.error?' ⚠':''}</div>`).join('');
     box.querySelectorAll('[data-id]').forEach(el=>el.onclick=()=>loadCheck(el.dataset.id));
   }catch(e){}
 }
@@ -1479,7 +1512,7 @@ async function checkTest(){
     if(r.error){out.innerHTML='<span style="color:var(--red);white-space:pre-wrap">'+esc(r.error)+'</span>';return;}
     const fs=r.findings||[];
     out.innerHTML=(r.note?'<div class="hint" style="margin-bottom:6px">'+esc(r.note)+'</div>':'')+
-      (fs.length?fs.map(f=>`<div style="padding:3px 0"><span class="sev ${esc(f.severity)}">${esc(f.severity)}</span> ${esc(f.title)}${f.fix?' <span class="hint">— '+esc(f.fix)+'</span>':''}</div>`).join('')
+      (fs.length?fs.map(f=>`<div style="padding:3px 0"><span class="sev ${escAttr(f.severity)}">${esc(f.severity)}</span> ${esc(f.title)}${f.fix?' <span class="hint">— '+esc(f.fix)+'</span>':''}</div>`).join('')
         :'<span class="hint">No findings on flow #'+(r.flowId||'?')+' (check compiles & runs).</span>');
   }catch(e){out.innerHTML='<span style="color:var(--red)">'+esc(e.message)+'</span>';}
 }
@@ -1534,7 +1567,7 @@ function renderActive(d){
   }
   const box=$('#asFindings');if(!box)return;
   box.innerHTML=fs.length?fs.map(f=>`<div data-flow="${f.flowId}" style="padding:7px 0;border-bottom:1px solid var(--line);cursor:pointer">
-    <span class="sev ${esc(f.severity)}">${esc(f.severity)}</span> <b>${esc(f.title)}</b>
+    <span class="sev ${escAttr(f.severity)}">${esc(f.severity)}</span> <b>${esc(f.title)}</b>
     <div class="hint" style="margin-top:2px">${esc(f.class)} · ${esc(f.point.kind)}:${esc(f.point.name)} — ${esc(f.evidence)} <span style="color:var(--blue)">→ flow #${f.flowId}</span></div></div>`).join('')
     :'<div class="hint">No active findings yet.</div>';
   box.querySelectorAll('[data-flow]').forEach(el=>el.onclick=()=>{$('#activeModal').style.display='none';document.querySelector('.tab[data-tab="proxy"]').click();selectFlow(Number(el.dataset.flow));});
@@ -1564,7 +1597,7 @@ if($('#asArm'))$('#asArm').onchange=asArmToggle;
 if($('#asStart'))$('#asStart').onclick=asStartScan;
 if($('#asStop'))$('#asStop').onclick=asStopScan;
 /* ---- modals: close on Escape and on backdrop click (consistent across all) ---- */
-const MODAL_IDS=['aiModal','checksModal','activeModal','decModal'];
+const MODAL_IDS=['aiModal','checksModal','activeModal','decModal','flowModal'];
 function closeModals(){let n=0;MODAL_IDS.forEach(id=>{const m=$('#'+id);if(m&&m.style.display&&m.style.display!=='none'){m.style.display='none';n++;}});return n>0;}
 MODAL_IDS.forEach(id=>{const m=$('#'+id);if(m)m.addEventListener('mousedown',e=>{if(e.target===m)m.style.display='none';});});
 
@@ -1623,7 +1656,7 @@ async function loadProject(){
   try{const d=await api('/api/project');
     const n=$('#projNameHint');if(n)n.textContent=d.current||'default';
     const dir=$('#projDirHint');if(dir&&d.dir)dir.textContent=d.dir;
-    const sel=$('#projSelect');if(sel)sel.innerHTML=(d.projects||['default']).map(p=>`<option value="${esc(p)}"${p===d.current?' disabled':''}>${esc(p)}${p===d.current?' (current)':''}</option>`).join('');
+    const sel=$('#projSelect');if(sel)sel.innerHTML=(d.projects||['default']).map(p=>`<option value="${escAttr(p)}"${p===d.current?' disabled':''}>${esc(p)}${p===d.current?' (current)':''}</option>`).join('');
     if(!d.canSwitch)['projSwitchBtn','projNewBtn'].forEach(id=>{const b=$('#'+id);if(b){b.disabled=true;b.title='project switching is unavailable in this build';}});
   }catch(e){}
 }
@@ -1669,7 +1702,7 @@ function headersToText(h){if(!h)return'';const out=[];(h.Host||[]).forEach(v=>ou
 
 function renderRepTabs(){
   const bar=$('#repTabs');if(!bar)return;
-  bar.innerHTML=repTabs.map(t=>`<div class="rep-tab${t.tid===repActive?' on':''}" data-tid="${t.tid}" title="${esc(t.title||'new tab')}">
+  bar.innerHTML=repTabs.map(t=>`<div class="rep-tab${t.tid===repActive?' on':''}" data-tid="${t.tid}" title="${escAttr(t.title||'new tab')}">
     <span class="rt-label" style="color:${t.tid===repActive?methodColor(t.method):'inherit'}">${esc(t.title||'new tab')}</span>
     <span class="rt-close" data-close="${t.tid}" title="close tab">✕</span></div>`).join('')
     +`<button class="rep-tab-add" id="repTabAdd" title="New tab">＋</button>`;
@@ -1833,7 +1866,7 @@ async function loadScanTargets(){
   try{const d=await api('/api/flows?limit=2000');
     const hosts=[...new Set((d.flows||[]).map(f=>f.host).filter(Boolean))].sort();
     const cur=sel.value;
-    sel.innerHTML='<option value="">All in-scope hosts</option>'+hosts.map(h=>`<option value="${esc(h)}">${esc(h)}</option>`).join('');
+    sel.innerHTML='<option value="">All in-scope hosts</option>'+hosts.map(h=>`<option value="${escAttr(h)}">${esc(h)}</option>`).join('');
     if(hosts.includes(cur))sel.value=cur;
   }catch(e){}
 }
@@ -1859,7 +1892,7 @@ function renderScan(){
   $('#scanCount').textContent=`${groups.length} finding${groups.length===1?'':'s'} · ${scanState.issues.length} target${scanState.issues.length===1?'':'s'} · ${c.High||0}H ${c.Medium||0}M ${c.Low||0}L`;
   if(scanState.sel==null||scanState.sel>=groups.length)scanState.sel=0;
   list.innerHTML=groups.map((g,idx)=>`<div class="scan-item ${idx===scanState.sel?'sel':''}" data-i="${idx}">
-    <span class="sev ${esc(g.severity)}">${esc(g.severity)}</span>
+    <span class="sev ${escAttr(g.severity)}">${esc(g.severity)}</span>
     <div class="t">${esc(g.title)}</div><div class="tg">${g.items.length} target${g.items.length===1?'':'s'}</div></div>`).join('');
   list.querySelectorAll('.scan-item').forEach(el=>el.onclick=()=>{scanState.sel=Number(el.dataset.i);renderScan();});
   renderScanDetail();
@@ -1873,7 +1906,7 @@ function renderScanDetail(){
     ${(!shared&&i.detail)?`<div style="font-size:12px;color:var(--fg2);margin-top:5px;line-height:1.5">${esc(i.detail)}</div>`:''}
     ${i.evidence?`<div class="evidence" style="margin-top:6px">${esc(i.evidence)}</div>`:''}</div>`).join('');
   $('#scanDetail').innerHTML=`<div class="scan-wrap">
-    <span class="sev ${esc(g.severity)}">${esc(g.severity)}</span>
+    <span class="sev ${escAttr(g.severity)}">${esc(g.severity)}</span>
     <h1 style="font-size:17px;font-weight:700;margin:12px 0 6px;line-height:1.3">${esc(g.title)}</h1>
     ${(shared&&first.detail)?`<p style="font-size:13px;color:var(--fg2);line-height:1.6">${esc(first.detail)}</p>`:''}
     <div style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3);margin:14px 0 6px">AFFECTED TARGETS (${g.items.length})</div>
@@ -1885,22 +1918,40 @@ $('#scanRun').onclick=runScan;
 $('#scanReport').onclick=()=>{if(!scanState.issues.length){toast('no findings yet — run a scan first');return;}const a=document.createElement('a');a.href='/api/scanner/report';a.download='interceptor-findings.md';document.body.appendChild(a);a.click();a.remove();toast('report downloaded');};
 
 /* ---- endpoint map ---- */
-const mapState={eps:[],method:'',search:'',hideSev:new Set(),expandAll:false};
+const mapState={eps:[],domain:null,method:'',search:'',statusClass:0,expandAll:false,view:'graph',collapsed:new Set(),zoom:{k:1,x:12,y:12},_needFit:true};
 async function loadEndpoints(){
-  try{const d=await api('/api/endpoints');mapState.eps=d.endpoints||[];fillMapMethods();renderMap();}
+  try{const d=await api('/api/endpoints');mapState.eps=d.endpoints||[];mapState._needFit=true;fillMapDomains();fillMapMethods();renderMap();}
   catch(e){toast('map: '+e.message);}
+}
+// Populate the domain picker and default to the busiest domain — showing one app
+// at a time keeps the graph readable instead of cramming every host on screen.
+function fillMapDomains(){
+  const sel=$('#mapDomain');if(!sel)return;
+  const counts={};mapState.eps.forEach(e=>{counts[e.host]=(counts[e.host]||0)+1;});
+  const hosts=Object.keys(counts).sort((a,b)=>counts[b]-counts[a]||a.localeCompare(b));
+  if(mapState.domain===null)mapState.domain=hosts[0]||'';            // first open: biggest domain
+  else if(mapState.domain&&!counts[mapState.domain])mapState.domain=hosts[0]||''; // host gone → fall back
+  sel.innerHTML=`<option value="">All domains (${mapState.eps.length})</option>`+hosts.map(h=>`<option value="${escAttr(h)}">${esc(h)} (${counts[h]})</option>`).join('');
+  sel.value=mapState.domain;
+}
+// Collapse every host node — used for the "All domains" overview so you see the
+// hosts (each with an endpoint count) and drill in by click, not 500 crammed rows.
+function mapCollapseHosts(){
+  mapState.collapsed.clear();
+  [...new Set(mapState.eps.map(e=>e.host))].forEach(h=>mapState.collapsed.add('/'+h));
 }
 function fillMapMethods(){
   const sel=$('#mapMethod');if(!sel)return;
   const methods=[...new Set(mapState.eps.map(e=>e.method))].sort();const cur=sel.value;
-  sel.innerHTML='<option value="">All methods</option>'+methods.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('');
+  sel.innerHTML='<option value="">method</option>'+methods.map(m=>`<option value="${escAttr(m)}">${esc(m)}</option>`).join('');
   if(methods.includes(cur))sel.value=cur;
 }
 function mapFiltered(){
   const q=mapState.search.toLowerCase();
   return mapState.eps.filter(e=>{
+    if(mapState.domain&&e.host!==mapState.domain)return false;
     if(mapState.method&&e.method!==mapState.method)return false;
-    if(mapState.hideSev.has(Math.floor((e.lastStatus||0)/100)))return false;
+    if(mapState.statusClass&&Math.floor((e.lastStatus||0)/100)!==mapState.statusClass)return false;
     if(q&&!((e.path||'').toLowerCase().includes(q)||(e.host||'').toLowerCase().includes(q)))return false;
     return true;
   });
@@ -1920,7 +1971,7 @@ function buildMapTree(eps){
 function mapEpRow(e){
   const sts=(e.statuses||[]).map(s=>`<span style="color:${statusColor(s)}">${s}</span>`).join(' ');
   const path=e.path||'/';
-  return `<div class="map-ep"${e.lastFlowId?` data-flow="${e.lastFlowId}"`:''} title="${esc(e.method+' '+(e.scheme||'http')+'://'+e.host+path)}">
+  return `<div class="map-ep"${e.lastFlowId?` data-flow="${e.lastFlowId}"`:''} title="${escAttr(e.method+' '+(e.scheme||'http')+'://'+e.host+path)}">
     <span class="map-m" style="color:${methodColor(e.method)}">${esc(e.method)}</span>
     <span class="map-p">${esc(path)}</span><span class="map-sts">${sts}</span>
     <span class="map-hits">${e.hits>1?e.hits+'×':''}</span></div>`;
@@ -1934,22 +1985,128 @@ function mapRenderNode(node,open){
   return html;
 }
 function renderMap(){
-  const box=$('#mapTree');if(!box)return;
   const eps=mapFiltered();
   const hostN=new Set(eps.map(e=>e.host)).size;
   $('#mapCount').textContent=eps.length?`${eps.length} endpoint${eps.length===1?'':'s'} · ${hostN} host${hostN===1?'':'s'}`:'';
+  if(mapState.view==='graph')renderMapGraph(eps); else renderMapTree(eps);
+}
+function renderMapTree(eps){
+  const box=$('#mapTree');if(!box)return;
   if(!eps.length){box.innerHTML='<div class="hint" style="padding:12px">No endpoints match — capture traffic or relax the filters.</div>';return;}
   const open=mapState.expandAll||!!mapState.search; // a search auto-expands so matches are visible
   const hosts=buildMapTree(eps);
   box.innerHTML=[...hosts.values()].sort((a,b)=>a.name.localeCompare(b.name)).map(h=>
     `<details class="map-host" open><summary>🌐 ${esc(h.name)}<span class="map-c">${mapCount(h)}</span></summary><div class="map-body">${mapRenderNode(h,open)}</div></details>`).join('');
-  box.querySelectorAll('.map-ep[data-flow]').forEach(el=>el.onclick=()=>{document.querySelector('.tab[data-tab="proxy"]').click();selectFlow(Number(el.dataset.flow));});
+  box.querySelectorAll('.map-ep[data-flow]').forEach(el=>el.onclick=()=>flowPopup(Number(el.dataset.flow)));
 }
 $('#mapSearch').oninput=e=>{mapState.search=e.target.value.trim();renderMap();};
+$('#mapDomain')&&($('#mapDomain').onchange=e=>{mapState.domain=e.target.value;
+  // A specific domain shows its tree expanded; "All domains" collapses every host.
+  if(mapState.domain)mapState.collapsed.clear();else mapCollapseHosts();
+  mapState._needFit=true;renderMap();});
 $('#mapMethod').onchange=e=>{mapState.method=e.target.value;renderMap();};
 $('#mapRefresh').onclick=loadEndpoints;
 $('#mapExpand').onclick=()=>{mapState.expandAll=!mapState.expandAll;$('#mapExpand').textContent=mapState.expandAll?'Collapse all':'Expand all';renderMap();};
-$$('.mapsev').forEach(b=>b.onclick=()=>{const s=Number(b.dataset.sev);if(mapState.hideSev.has(s)){mapState.hideSev.delete(s);b.classList.add('on');}else{mapState.hideSev.add(s);b.classList.remove('on');}renderMap();});
+$('#mapStatus')&&($('#mapStatus').onchange=e=>{mapState.statusClass=Number(e.target.value)||0;renderMap();});
+
+/* ---- map: node-link graph (hierarchical tidy tree) ---- */
+function gTrunc(s,n){return s.length>n?s.slice(0,n-1)+'…':s;}
+function gCount(n){if(n.type==='ep')return 1;let c=0;n.children.forEach(k=>c+=gCount(k));return c;}
+function buildGraphTree(eps){
+  const root={key:'',type:'root',children:[],cm:new Map()};
+  const child=(p,k,label,type)=>{let c=p.cm.get(k);if(!c){c={key:p.key+'/'+k,label,type,children:[],cm:new Map(),ep:null};p.cm.set(k,c);p.children.push(c);}return c;};
+  eps.forEach(e=>{const host=child(root,e.host,e.host,'host');let node=host;
+    (e.path||'/').split('?')[0].split('/').filter(Boolean).forEach(seg=>{node=child(node,seg,'/'+seg,'folder');});
+    child(node,'ep|'+e.method,e.method,'ep').ep=e;});
+  return root;
+}
+function graphLayout(hosts){
+  const COL=160,ROW=22,PAD=20;let leaf=0,maxD=0;
+  function place(n,d){n.depth=d;maxD=Math.max(maxD,d);n._col=mapState.collapsed.has(n.key)&&n.children.length>0;
+    if(n._col||!n.children.length){n.row=leaf++;return;}
+    n.children.forEach(c=>place(c,d+1));n.row=(n.children[0].row+n.children[n.children.length-1].row)/2;}
+  hosts.forEach(h=>place(h,0));
+  const nodes=[],edges=[];
+  function collect(n){n.px=PAD+n.depth*COL;n.py=PAD+n.row*ROW;nodes.push(n);
+    if(!n._col)n.children.forEach(c=>{edges.push([n,c]);collect(c);});}
+  hosts.forEach(collect);
+  return {nodes,edges,w:PAD*2+maxD*COL+180,h:PAD*2+Math.max(1,leaf)*ROW};
+}
+function gNode(n){
+  const x=n.px,y=n.py;let mk,lb,title=esc(n.label||''),extra='';
+  if(n.type==='host'){mk=`<circle cx="${x}" cy="${y}" r="5" fill="var(--accent)"/>`;lb=`<text class="g-host" x="${x+9}" y="${y}">${esc(gTrunc(n.label,26))}${n._col?` <tspan class="g-dim">+${gCount(n)}</tspan>`:''}</text>`;}
+  else if(n.type==='ep'){const e=n.ep,col=statusColor(e.lastStatus);title=esc(e.method+' '+(e.scheme||'http')+'://'+e.host+(e.path||'/'));
+    mk=`<rect x="${x-4}" y="${y-4}" width="8" height="8" rx="2" fill="${col}"/>`;
+    lb=`<text class="g-ep" x="${x+9}" y="${y}"><tspan fill="${methodColor(e.method)}" font-weight="700">${esc(e.method)}</tspan> <tspan class="g-dim">${esc((e.statuses||[]).join(','))}${e.hits>1?' · '+e.hits+'×':''}</tspan></text>`;
+    extra=` data-flow="${e.lastFlowId||''}"`;}
+  else{mk=`<circle cx="${x}" cy="${y}" r="4" fill="${n._col?'var(--blue)':'var(--bg3)'}" stroke="var(--blue)" stroke-width="1.4"/>`;
+    lb=`<text class="g-folder" x="${x+9}" y="${y}">${esc(gTrunc(n.label,22))}${n._col?` <tspan class="g-dim">+${gCount(n)}</tspan>`:''}</text>`;}
+  const click=n.type==='ep'||n.children.length>0;
+  return `<g class="g-node${click?' g-click':''}" data-key="${escAttr(n.key)}" data-kind="${n.type}"${extra}><title>${title}</title>${mk}${lb}</g>`;
+}
+function renderMapGraph(eps){
+  const g=$('#mapGraphG');if(!g)return;
+  if(!eps.length){g.innerHTML='<text class="g-dim" x="20" y="28">No endpoints match — capture traffic or relax the filters.</text>';return;}
+  const lay=graphLayout(buildGraphTree(eps).children);mapState._g=lay;
+  let h='';
+  lay.edges.forEach(([a,b])=>{const x1=a.px+7,y1=a.py,x2=b.px-3,y2=b.py,mx=(x1+x2)/2;h+=`<path class="g-edge" d="M${x1} ${y1} C ${mx} ${y1} ${mx} ${y2} ${x2} ${y2}"/>`;});
+  lay.nodes.forEach(n=>h+=gNode(n));
+  g.innerHTML=h;
+  g.querySelectorAll('.g-node').forEach(el=>el.onclick=ev=>{ev.stopPropagation();
+    if(el.dataset.kind==='ep'){const f=el.dataset.flow;if(f)flowPopup(Number(f));return;}
+    const k=el.dataset.key;mapState.collapsed.has(k)?mapState.collapsed.delete(k):mapState.collapsed.add(k);renderMap();});
+  if(mapState._needFit){mapState._needFit=false;mapFitNow();}else mapApplyZoom();
+}
+function mapApplyZoom(){const z=mapState.zoom;$('#mapGraphG').setAttribute('transform',`translate(${z.x} ${z.y}) scale(${z.k})`);}
+function mapFitNow(){const svg=$('#mapGraphSvg'),gr=mapState._g;if(!gr)return;
+  const vw=svg.clientWidth||820,vh=svg.clientHeight||520;
+  const k=Math.max(0.45,Math.min(1.4,vw/gr.w,vh/gr.h)); // keep labels legible; pan if it overflows
+  mapState.zoom={k,x:14,y:Math.max(10,(vh-gr.h*k)/2)};mapApplyZoom();}
+$('#mapViewSeg')&&$('#mapViewSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  mapState.view=b.dataset.v;$('#mapViewSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+  $('#mapTree').style.display=mapState.view==='tree'?'block':'none';$('#mapGraphSvg').style.display=mapState.view==='graph'?'block':'none';
+  $('#mapExpand').style.display=mapState.view==='tree'?'':'none';$('#mapFit').style.display=mapState.view==='graph'?'':'none';
+  mapState._needFit=true;renderMap();});
+$('#mapFit')&&($('#mapFit').onclick=mapFitNow);
+(function(){const svg=$('#mapGraphSvg');if(!svg)return;let drag=null;
+  svg.addEventListener('wheel',e=>{e.preventDefault();const z=mapState.zoom,r=svg.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top,f=e.deltaY<0?1.1:1/1.1,nk=Math.max(0.1,Math.min(4,z.k*f));z.x=mx-(mx-z.x)*(nk/z.k);z.y=my-(my-z.y)*(nk/z.k);z.k=nk;mapApplyZoom();},{passive:false});
+  svg.addEventListener('mousedown',e=>{if(e.target.closest('.g-click'))return;drag={x:e.clientX,y:e.clientY,ox:mapState.zoom.x,oy:mapState.zoom.y};svg.style.cursor='grabbing';});
+  window.addEventListener('mousemove',e=>{if(!drag)return;mapState.zoom.x=drag.ox+(e.clientX-drag.x);mapState.zoom.y=drag.oy+(e.clientY-drag.y);mapApplyZoom();});
+  window.addEventListener('mouseup',()=>{if(drag){drag=null;svg.style.cursor='grab';}});
+})();
+
+/* ---- flow popup (quick request/response view, e.g. from the Map) ---- */
+async function flowPopup(id){
+  let d;
+  try{d=await api('/api/flows/'+id);}catch(e){toast('flow: '+e.message);return;}
+  state.fm={id,detail:d,pretty:false};
+  $('#fmTitle').innerHTML=`<span style="color:${methodColor(d.method)};font-weight:700">${esc(d.method)}</span> <span style="font-family:var(--mono);color:var(--fg2)">${esc((d.scheme||'http')+'://'+d.host+d.path)}</span>`;
+  $('#fmStatus').textContent=d.status?`${d.status} ${statusText(d.status)}`+(d.durationMs?` · ${fmtDur(d.durationMs)}`:''):(d.error||'');
+  $('#fmStatus').style.color=statusColor(d.status);
+  $('#fmSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.v==='raw'));
+  $('#flowModal').style.display='flex';
+  fmRenderSide('req');fmRenderSide('res');
+}
+async function fmRenderSide(side){
+  const el=side==='req'?$('#fmReq'):$('#fmRes');const d=state.fm.detail;
+  const len=side==='req'?d.reqLen:d.resLen;
+  if(len>RENDER_CAP){el.innerHTML=`<div class="hint" style="padding:14px;line-height:1.7">${side==='req'?'Request':'Response'} body is <b>${fmtSize(len)}</b> — not rendered.<br><a class="btn" style="margin-top:8px;display:inline-block" href="/api/flows/${state.fm.id}/raw?side=${side}" download="flow-${state.fm.id}-${side}.txt">⤓ Download raw</a></div>`;return;}
+  el.innerHTML='<span class="hint" style="padding:12px">loading…</span>';
+  try{const raw=await api('/api/flows/'+state.fm.id+'/raw?side='+side);
+    el.innerHTML=highlightHTTP(state.fm.pretty?prettify(raw):raw,state.fm.pretty);}
+  catch(e){el.textContent='(error: '+e.message+')';}
+}
+$('#fmClose')&&($('#fmClose').onclick=()=>$('#flowModal').style.display='none');
+$('#fmProxy')&&($('#fmProxy').onclick=()=>{
+  const d=state.fm&&state.fm.detail,id=state.fm&&state.fm.id;
+  $('#flowModal').style.display='none';if(!d)return;
+  document.querySelector('.tab[data-tab="proxy"]').click();
+  // Filter History to every request to this endpoint (host + method + path).
+  state.filters={scheme:'',method:d.method||'',status:'',host:d.host||'',search:(d.path||'').split('?')[0],exclude:[]};
+  syncControls();renderChips();loadFlows();
+  if(id)selectFlow(id);
+});
+$('#fmSeg')&&$('#fmSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{state.fm.pretty=b.dataset.v==='pretty';$('#fmSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));fmRenderSide('req');fmRenderSide('res');});
 
 /* ---- project notes ---- */
 const notesState={loaded:'',mode:'edit'};
@@ -2081,6 +2238,7 @@ function connectEvents(){
     if(m.type==='flow.new')scheduleReload();
     else if(m.type==='flow.update'){scheduleReload();if(m.flow&&m.flow.id===state.selId)selectFlow(state.selId);} // response arrived: refresh the open detail
     else if(m.type==='activity')onActivity(m.item);
+    else if(m.type==='activity.clear'){state.activity=[];if(document.querySelector('.tab[data-tab="activity"]').classList.contains('active'))renderActivity();clearActSeen();}
     else if(m.type==='intercept.update'){state.intercept=m.intercept;renderIntercept();}
     else if(m.type==='rules.update')loadRules();
     else if(m.type==='intruder.update')scheduleIntr();
@@ -2252,12 +2410,12 @@ function onActivity(it){
 }
 async function loadActivity(){try{const d=await api('/api/activity');state.activity=d.activity||[];renderActivity();}catch(e){}}
 function clearActSeen(){state.actUnseen=0;const b=$('#actBadge');if(b)b.style.display='none';}
-$('#actClear').onclick=()=>{state.activity=[];renderActivity();clearActSeen();};
+$('#actClear').onclick=async()=>{try{await api('/api/activity',{method:'DELETE'});}catch(e){}state.activity=[];renderActivity();clearActSeen();};
 $('#aiPulse').onclick=()=>document.querySelector('.tab[data-tab="activity"]').click();
 
 /* ---- boot ---- */
 async function refreshIntercept(){try{state.intercept=await api('/api/intercept');renderIntercept();}catch(e){}}
-renderChips();loadSettings();loadSysProxy();loadSession();loadFlows();loadRules();loadScope();loadViews();refreshIntercept();repInit();loadIssues();loadApiKeys();loadReference();loadMCP();loadActivity();loadProject();loadVersion(true);connectEvents();
+renderChips();loadSettings();loadSysProxy();loadSession();loadFlows();loadRules();loadScope();loadViews();refreshIntercept();repInit();loadIssues();loadApiKeys();loadReference();loadMCP();loadActivity();loadProject();loadVersion(true);connectEvents();restoreTab();
 </script>
 </body>
 </html>
