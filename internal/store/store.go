@@ -146,6 +146,13 @@ CREATE TABLE IF NOT EXISTS activity (
   ts INTEGER NOT NULL,
   tool TEXT NOT NULL, summary TEXT, ok INTEGER, result TEXT, ms INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS notes_images (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  mime TEXT NOT NULL,
+  data BLOB NOT NULL
+);
 `
 
 // Open creates (or opens) the database and body store under dir.
@@ -172,6 +179,7 @@ func Open(dir string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	db.SetMaxOpenConns(4)
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, err
@@ -188,7 +196,12 @@ func Open(dir string) (*Store, error) {
 			return nil, err
 		}
 	}
-	return &Store{db: db, bodiesDir: bodiesDir}, nil
+	s := &Store{db: db, bodiesDir: bodiesDir}
+	if err := s.ensureFlowsFTS(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return s, nil
 }
 
 // Close closes the underlying database.
@@ -215,6 +228,9 @@ func (s *Store) InsertFlow(f *Flow) (int64, error) {
 		return 0, err
 	}
 	f.ID = id
+	if err := s.indexFlowFTS(id, f.Host, f.Path, f.Method, f.Note); err != nil {
+		return 0, err
+	}
 	return id, nil
 }
 
@@ -222,6 +238,10 @@ func (s *Store) InsertFlow(f *Flow) (int64, error) {
 // that was first inserted at request time, keyed by f.ID. The immutable request
 // identity (ts, scheme, host, port, version, client) is left untouched.
 func (s *Store) UpdateFlow(f *Flow) error {
+	var oh, op, om, on string
+	if err := s.db.QueryRow(`SELECT host, path, method, note FROM flows WHERE id=?`, f.ID).Scan(&oh, &op, &om, &on); err != nil {
+		return err
+	}
 	rh, _ := json.Marshal(f.ReqHeaders)
 	sh, _ := json.Marshal(f.ResHeaders)
 	_, err := s.db.Exec(
@@ -233,13 +253,22 @@ func (s *Store) UpdateFlow(f *Flow) error {
 		f.Method, f.Path, f.Status, string(rh), string(sh),
 		f.ReqBodyHash, f.ResBodyHash, f.ReqLen, f.ResLen,
 		f.Mime, f.DurationMs, f.Error, f.Flags, f.ID)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.replaceFlowFTS(f.ID, oh, op, om, on, f.Host, f.Path, f.Method, on)
 }
 
 // SetFlowNote sets (or clears, with "") the free-text note attached to a flow.
 func (s *Store) SetFlowNote(id int64, note string) error {
-	_, err := s.db.Exec(`UPDATE flows SET note=? WHERE id=?`, note, id)
-	return err
+	var host, path, method, oldNote string
+	if err := s.db.QueryRow(`SELECT host, path, method, note FROM flows WHERE id=?`, id).Scan(&host, &path, &method, &oldNote); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`UPDATE flows SET note=? WHERE id=?`, note, id); err != nil {
+		return err
+	}
+	return s.replaceFlowFTS(id, host, path, method, oldNote, host, path, method, note)
 }
 
 // DeleteFlows removes the given flows and returns how many rows were deleted.
@@ -248,6 +277,13 @@ func (s *Store) SetFlowNote(id int64, note string) error {
 func (s *Store) DeleteFlows(ids []int64) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
+	}
+	for _, id := range ids {
+		var host, path, method, note string
+		if err := s.db.QueryRow(`SELECT host, path, method, note FROM flows WHERE id=?`, id).Scan(&host, &path, &method, &note); err != nil {
+			continue
+		}
+		_ = s.unindexFlowFTS(id, host, path, method, note)
 	}
 	args := make([]any, len(ids))
 	for i, id := range ids {

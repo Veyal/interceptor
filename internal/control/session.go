@@ -2,20 +2,14 @@ package control
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/Veyal/interceptor/internal/sender"
 )
 
-// Session/auth handling (scoped slice): a set of headers — typically an
-// Authorization bearer token or a Cookie — auto-applied to every Repeater and
-// Intruder send so the tester (or the AI) need not re-paste a token on each
-// request. Stored in settings; applied to the shared sender. The fuller bets
-// (login-macro recording, automatic re-auth on 401) remain on the roadmap.
-
 // parseSessionHeaders turns "Key: Value" lines into sender.Header entries.
-// Blank lines and lines beginning with '#' are ignored.
 func parseSessionHeaders(text string) []sender.Header {
 	var out []sender.Header
 	for _, line := range strings.Split(text, "\n") {
@@ -46,25 +40,61 @@ func (h *Hub) loadMacro() sender.Macro {
 	return m
 }
 
-// applySessionFromStore loads persisted session config + macro and applies both.
+// loadLoginMacro reads the persisted login macro ("" → disabled).
+func (h *Hub) loadLoginMacro() sender.LoginMacro {
+	raw, _, _ := h.st.GetSetting("session.loginMacro")
+	var m sender.LoginMacro
+	if raw != "" {
+		_ = json.Unmarshal([]byte(raw), &m)
+	}
+	return m
+}
+
+// persistSessionHeaders saves session header lines from sender.Header slice.
+func persistSessionHeaders(hdrs []sender.Header) string {
+	var lines []string
+	for _, h := range hdrs {
+		if h.Key != "" {
+			lines = append(lines, h.Key+": "+h.Value)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// applySessionFromStore loads persisted session config, macros, and login macro.
 func (h *Hub) applySessionFromStore() {
 	enabled, _, _ := h.st.GetSetting("session.enabled")
 	text, _, _ := h.st.GetSetting("session.headers")
 	h.snd.SetSession(enabled == "1", parseSessionHeaders(text))
 	h.snd.SetMacro(h.loadMacro())
+	h.snd.SetLoginMacro(h.loadLoginMacro())
+}
+// wireSessionRefresh connects login-macro output to persisted session headers.
+func (h *Hub) wireSessionRefresh() {
+	h.snd.SetSessionRefresh(func(hdrs []sender.Header) {
+		text := persistSessionHeaders(hdrs)
+		_ = h.st.SetSetting("session.enabled", "1")
+		_ = h.st.SetSetting("session.headers", text)
+		h.snd.SetSession(true, hdrs)
+		h.broadcast(map[string]any{"type": "session.update"})
+	})
 }
 
 func (h *Hub) getSession(w http.ResponseWriter, r *http.Request) {
 	enabled, _, _ := h.st.GetSetting("session.enabled")
 	text, _, _ := h.st.GetSetting("session.headers")
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": enabled == "1", "headers": text, "macro": h.loadMacro()})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled": enabled == "1", "headers": text,
+		"macro": h.loadMacro(), "loginMacro": h.loadLoginMacro(),
+	})
 }
 
 func (h *Hub) setSession(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Enabled bool          `json:"enabled"`
-		Headers string        `json:"headers"`
-		Macro   *sender.Macro `json:"macro"`
+		Enabled    bool               `json:"enabled"`
+		Headers    string             `json:"headers"`
+		Macro      *sender.Macro      `json:"macro"`
+		LoginMacro *sender.LoginMacro `json:"loginMacro"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		httpErr(w, http.StatusBadRequest, "bad json")
@@ -82,6 +112,54 @@ func (h *Hub) setSession(w http.ResponseWriter, r *http.Request) {
 		_ = h.st.SetSetting("session.macro", string(b))
 		h.snd.SetMacro(*in.Macro)
 	}
+	if in.LoginMacro != nil {
+		b, _ := json.Marshal(*in.LoginMacro)
+		_ = h.st.SetSetting("session.loginMacro", string(b))
+		h.snd.SetLoginMacro(*in.LoginMacro)
+	}
 	h.broadcast(map[string]any{"type": "session.update"})
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": in.Enabled, "headers": in.Headers, "macro": h.loadMacro()})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled": in.Enabled, "headers": in.Headers,
+		"macro": h.loadMacro(), "loginMacro": h.loadLoginMacro(),
+	})
+}
+
+// runLoginMacro executes the recorded login request now and refreshes session headers.
+func (h *Hub) runLoginMacro(w http.ResponseWriter, r *http.Request) {
+	h.snd.SetLoginMacro(h.loadLoginMacro())
+	hdrs, err := h.snd.RunLoginMacroNow()
+	if err != nil {
+		httpErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if len(hdrs) == 0 {
+		httpErr(w, http.StatusBadRequest, "login macro produced no session headers — check the macro is enabled and the login response sets Cookie or Authorization")
+		return
+	}
+	text, _, _ := h.st.GetSetting("session.headers")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "headers": text, "applied": len(hdrs),
+	})
+}
+
+// loginMacroFromFlow captures a flow's request as the login macro.
+func (h *Hub) loginMacroFromFlow(w http.ResponseWriter, r *http.Request) {
+	f, ok := h.loadFlow(w, r)
+	if !ok {
+		return
+	}
+	def := (f.Scheme == "https" && f.Port == 443) || (f.Scheme == "http" && f.Port == 80)
+	target := fmt.Sprintf("%s://%s", f.Scheme, f.Host)
+	if !def {
+		target = fmt.Sprintf("%s://%s:%d", f.Scheme, f.Host, f.Port)
+	}
+	raw := string(h.rawRequest(f))
+	m := sender.LoginMacro{
+		Enabled: true, Target: target, Request: raw, ReauthOn401: true,
+	}
+	b, _ := json.Marshal(m)
+	_ = h.st.SetSetting("session.loginMacro", string(b))
+	h.snd.SetLoginMacro(m)
+	h.broadcast(map[string]any{"type": "session.update"})
+	writeJSON(w, http.StatusOK, map[string]any{"loginMacro": m})
 }

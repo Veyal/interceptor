@@ -17,7 +17,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/Veyal/interceptor/internal/aiassist"
 	"github.com/Veyal/interceptor/internal/capture"
 	"github.com/Veyal/interceptor/internal/discovery"
 	"github.com/Veyal/interceptor/internal/intercept"
@@ -88,6 +90,11 @@ type Hub struct {
 
 	mu      sync.Mutex
 	clients map[chan string]struct{}
+
+	epsCache endpointsCache
+
+	wsMu     sync.Mutex
+	wsTimers map[int64]*time.Timer // debounce ws.frame SSE per flow
 }
 
 // New builds a Hub. eng, ca, and rebind may be nil. If eng is non-nil, the
@@ -115,6 +122,7 @@ func New(st *store.Store, eng *intercept.Engine, ca *tlsca.CA, rebind Rebinder, 
 	h.disc.SetProbe(h.probeFor())
 	h.disc.SetScope(h.discInScope)
 	h.disc.SetNotifier(h.onDiscoveryUpdate)
+	h.wireSessionRefresh()
 	h.refreshScope()
 	h.applySessionFromStore()
 	h.routes()
@@ -159,11 +167,14 @@ func (h *Hub) routes() {
 	h.mux.HandleFunc("GET /api/endpoints", h.listEndpoints)
 	h.mux.HandleFunc("GET /api/notes", h.getNotes)
 	h.mux.HandleFunc("PUT /api/notes", h.putNotes)
+	h.mux.HandleFunc("POST /api/notes/images", h.postNotesImage)
+	h.mux.HandleFunc("GET /api/notes/images/{id}", h.getNotesImage)
 	h.mux.HandleFunc("GET /api/rules", h.listRules)
 	h.mux.HandleFunc("POST /api/rules", h.createRule)
 	h.mux.HandleFunc("PUT /api/rules/{id}", h.updateRule)
 	h.mux.HandleFunc("DELETE /api/rules/{id}", h.deleteRule)
 	h.mux.HandleFunc("GET /api/intercept", h.getIntercept)
+	h.mux.HandleFunc("GET /api/intercept/held/{id}/raw", h.getInterceptHeldRaw)
 	h.mux.HandleFunc("POST /api/intercept/toggle", h.toggleIntercept)
 	h.mux.HandleFunc("POST /api/intercept/filter", h.setInterceptFilter)
 	h.mux.HandleFunc("POST /api/intercept/{id}/forward", h.forwardIntercept)
@@ -177,9 +188,12 @@ func (h *Hub) routes() {
 	h.mux.HandleFunc("POST /api/sysproxy", h.setSysProxy)
 	h.mux.HandleFunc("GET /api/session", h.getSession)
 	h.mux.HandleFunc("POST /api/session", h.setSession)
+	h.mux.HandleFunc("POST /api/session/login/run", h.runLoginMacro)
+	h.mux.HandleFunc("POST /api/session/login/from-flow/{id}", h.loginMacroFromFlow)
 	h.mux.HandleFunc("POST /api/ai/assist", h.aiAssist)
 	h.mux.HandleFunc("POST /api/ai/assist/stream", h.aiAssistStream)
 	h.mux.HandleFunc("POST /api/ai/actions", h.aiActions)
+	h.mux.HandleFunc("GET /api/ai/openrouter/models", h.aiOpenRouterModels)
 	h.mux.HandleFunc("GET /api/ca.crt", h.getCA)
 	h.mux.HandleFunc("POST /api/repeater/send", h.repeaterSend)
 	h.mux.HandleFunc("GET /api/repeater/history", h.repeaterHistory)
@@ -197,6 +211,9 @@ func (h *Hub) routes() {
 	h.mux.HandleFunc("POST /api/discovery/stop", h.discoveryStop)
 	h.mux.HandleFunc("GET /api/discovery/state", h.discoveryStateHandler)
 	h.mux.HandleFunc("GET /api/discovery/wordlist", h.discoveryWordlist)
+	h.mux.HandleFunc("GET /api/discovery/seeds", h.discoverySeeds)
+	h.mux.HandleFunc("GET /api/discovery/suggest", h.discoverySuggest)
+	h.mux.HandleFunc("GET /api/discovery/scope-targets", h.discoveryScopeTargets)
 	h.mux.HandleFunc("POST /api/scanner/run", h.scannerRun)
 	h.mux.HandleFunc("GET /api/scanner/issues", h.scannerIssues)
 	h.mux.HandleFunc("GET /api/scanner/report", h.scannerReport)
@@ -287,7 +304,8 @@ type heldJSON struct {
 	Scheme string `json:"scheme"`
 	Host   string `json:"host"`
 	Path   string `json:"path"`
-	Raw    string `json:"raw"`
+	Raw    string `json:"raw,omitempty"`
+	Len    int    `json:"len,omitempty"`
 }
 
 type interceptJSON struct {
@@ -362,6 +380,7 @@ func (h *Hub) deleteFlows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if n > 0 {
+		h.epsCache.invalidate()
 		h.broadcast(map[string]any{"type": "flow.new"}) // reuse the reload signal
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": n})
@@ -372,11 +391,17 @@ func (h *Hub) deleteFlows(w http.ResponseWriter, r *http.Request) {
 // (Intruder / active scan) is excluded as noise.
 func (h *Hub) listEndpoints(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	eps, err := h.st.Endpoints(store.EndpointFilter{
+	f := store.EndpointFilter{
 		Host:         q.Get("host"),
 		Search:       q.Get("search"),
 		ExcludeFlags: store.FlagIntruder | store.FlagActiveScan,
-	})
+	}
+	key := endpointsCacheKey(f)
+	if eps, ok := h.epsCache.get(key); ok {
+		writeJSON(w, http.StatusOK, map[string]any{"endpoints": eps})
+		return
+	}
+	eps, err := h.st.Endpoints(f)
 	if err != nil {
 		httpErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -384,6 +409,7 @@ func (h *Hub) listEndpoints(w http.ResponseWriter, r *http.Request) {
 	if eps == nil {
 		eps = []store.Endpoint{}
 	}
+	h.epsCache.set(key, eps)
 	writeJSON(w, http.StatusOK, map[string]any{"endpoints": eps})
 }
 
@@ -391,8 +417,9 @@ func (h *Hub) listEndpoints(w http.ResponseWriter, r *http.Request) {
 
 func (h *Hub) listFlows(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	limit := atoiOr(q.Get("limit"), 200)
 	f := store.FlowFilter{
-		Limit:        atoiOr(q.Get("limit"), 200),
+		Limit:        limit + 1, // fetch one extra to detect truncation
 		BeforeID:     int64(atoiOr(q.Get("before"), 0)),
 		Method:       q.Get("method"),
 		Host:         q.Get("host"),
@@ -405,6 +432,9 @@ func (h *Hub) listFlows(w http.ResponseWriter, r *http.Request) {
 	if q.Get("ai") != "0" {
 		f.IncludeFlags = store.FlagAI
 	}
+	if q.Get("discovery") == "1" {
+		f.RequireFlags = store.FlagDiscovery
+	}
 	if sc := q.Get("status"); sc != "" {
 		f.StatusClass = atoiOr(sc, 0)
 	}
@@ -415,10 +445,14 @@ func (h *Hub) listFlows(w http.ResponseWriter, r *http.Request) {
 			f.NotStatuses = append(f.NotStatuses, n)
 		}
 	}
-	flows, err := h.st.QueryFlowsFilter(f)
+	flows, err := h.st.QueryFlowsListFilter(f)
 	if err != nil {
 		httpErr(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	truncated := len(flows) > limit
+	if truncated {
+		flows = flows[:limit]
 	}
 	inScopeOnly := q.Get("inScope") == "1"
 	out := make([]flowJSON, 0, len(flows))
@@ -428,7 +462,7 @@ func (h *Hub) listFlows(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, toFlowJSON(fl))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"flows": out})
+	writeJSON(w, http.StatusOK, map[string]any{"flows": out, "truncated": truncated})
 }
 
 func (h *Hub) loadFlow(w http.ResponseWriter, r *http.Request) (*store.Flow, bool) {
@@ -625,29 +659,80 @@ func (h *Hub) refreshRules() {
 
 // ---- Intercept ----
 
+func heldFromRequest(held intercept.Held, includeRaw bool) heldJSON {
+	hj := heldJSON{ID: held.ID, Len: len(held.Raw)}
+	if held.Flow != nil {
+		hj.Method, hj.Scheme, hj.Host, hj.Path = held.Flow.Method, held.Flow.Scheme, held.Flow.Host, held.Flow.Path
+	}
+	if includeRaw {
+		hj.Raw = string(held.Raw)
+	}
+	return hj
+}
+
+func heldFromResponse(held intercept.HeldResponse, includeRaw bool) heldJSON {
+	hj := heldJSON{ID: held.ID, Len: len(held.Raw)}
+	if held.Flow != nil {
+		hj.Method, hj.Scheme, hj.Host, hj.Path = held.Flow.Method, held.Flow.Scheme, held.Flow.Host, held.Flow.Path
+	}
+	if includeRaw {
+		hj.Raw = string(held.Raw)
+	}
+	return hj
+}
+
 func (h *Hub) interceptState() interceptJSON {
+	return h.interceptStateWithRaw(true)
+}
+
+func (h *Hub) interceptStateSummary() interceptJSON {
+	return h.interceptStateWithRaw(false)
+}
+
+func (h *Hub) interceptStateWithRaw(includeRaw bool) interceptJSON {
 	out := interceptJSON{}
 	if h.eng == nil {
 		return out
 	}
 	out.Enabled = h.eng.Enabled()
 	for _, held := range h.eng.Queue() {
-		hj := heldJSON{ID: held.ID, Raw: string(held.Raw)}
-		if held.Flow != nil {
-			hj.Method, hj.Scheme, hj.Host, hj.Path = held.Flow.Method, held.Flow.Scheme, held.Flow.Host, held.Flow.Path
-		}
-		out.Queue = append(out.Queue, hj)
+		out.Queue = append(out.Queue, heldFromRequest(held, includeRaw))
 	}
 	out.ResponseEnabled = h.eng.ResponseEnabled()
 	for _, held := range h.eng.ResponseQueue() {
-		hj := heldJSON{ID: held.ID, Raw: string(held.Raw)}
-		if held.Flow != nil {
-			hj.Method, hj.Scheme, hj.Host, hj.Path = held.Flow.Method, held.Flow.Scheme, held.Flow.Host, held.Flow.Path
-		}
-		out.ResponseQueue = append(out.ResponseQueue, hj)
+		out.ResponseQueue = append(out.ResponseQueue, heldFromResponse(held, includeRaw))
 	}
 	out.FilterEnabled, out.FilterTarget, out.FilterPattern = h.eng.InterceptFilter()
 	return out
+}
+
+func (h *Hub) getInterceptHeldRaw(w http.ResponseWriter, r *http.Request) {
+	if h.eng == nil {
+		httpErr(w, http.StatusNotImplemented, "intercept unavailable")
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		httpErr(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	side := r.URL.Query().Get("side")
+	if side == "resp" {
+		for _, held := range h.eng.ResponseQueue() {
+			if held.ID == id {
+				writeJSON(w, http.StatusOK, map[string]any{"raw": string(held.Raw)})
+				return
+			}
+		}
+	} else {
+		for _, held := range h.eng.Queue() {
+			if held.ID == id {
+				writeJSON(w, http.StatusOK, map[string]any{"raw": string(held.Raw)})
+				return
+			}
+		}
+	}
+	httpErr(w, http.StatusNotFound, "not held")
 }
 
 func (h *Hub) getIntercept(w http.ResponseWriter, r *http.Request) {
@@ -834,6 +919,32 @@ func (h *Hub) putSettings(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		httpErr(w, http.StatusBadRequest, "bad json")
 		return
+	}
+	if in.AiProvider != nil || in.AiApiKey != nil || in.AiModel != nil {
+		prov, _, _ := h.st.GetSetting("ai.provider")
+		if prov == "" {
+			prov = aiassist.ProviderAnthropic
+		}
+		if in.AiProvider != nil {
+			prov = *in.AiProvider
+		}
+		if prov == aiassist.ProviderOpenRouter {
+			key, _, _ := h.st.GetSetting("ai.apiKey")
+			if in.AiApiKey != nil {
+				key = *in.AiApiKey
+			}
+			if key == "" {
+				key = os.Getenv("OPENROUTER_API_KEY")
+			}
+			model, _, _ := h.st.GetSetting("ai.model")
+			if in.AiModel != nil {
+				model = *in.AiModel
+			}
+			if err := aiassist.ValidateOpenRouter(r.Context(), key, model); err != nil {
+				httpErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
 	}
 	if in.AiProvider != nil {
 		_ = h.st.SetSetting("ai.provider", *in.AiProvider)

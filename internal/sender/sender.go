@@ -31,6 +31,7 @@ type Request struct {
 	Flags     int64           // e.g. store.FlagRepeater / store.FlagIntruder, OR'd onto the flow
 	Context   context.Context // optional: cancel an in-flight send (e.g. an active-scan kill switch)
 	NoSession bool            // skip the global session headers + token macro (authz replays carry their own identity)
+	retried401 bool           // internal: prevents infinite 401 re-auth loops
 }
 
 // Header is a single session header applied to outgoing sends.
@@ -69,6 +70,9 @@ type Sender struct {
 
 	macroMu sync.RWMutex
 	macro   Macro
+
+	login       loginState
+	refreshSess func([]Header)
 }
 
 // SetMacro configures the token-refresh macro applied before each send.
@@ -228,6 +232,7 @@ func (s *Sender) Send(r Request) (*store.Flow, error) {
 	// applied to req below.
 	var macroTok, macroName, macroMode string
 	if !r.NoSession {
+		s.maybeRefreshLogin()
 		macroTok, macroName, macroMode = s.macroToken()
 	}
 	if macroTok != "" && macroMode == "placeholder" && macroName != "" {
@@ -303,6 +308,15 @@ func (s *Sender) Send(r Request) (*store.Flow, error) {
 	flow.Mime = resp.Header.Get("Content-Type")
 	flow.DurationMs = time.Since(start).Milliseconds()
 	s.persist(flow)
+
+	// 401 re-auth: run the login macro once and retry the original request.
+	if !r.NoSession && !r.retried401 && flow.Status == http.StatusUnauthorized && s.shouldReauth401() {
+		if _, err := s.runLoginMacro(); err == nil {
+			r2 := r
+			r2.retried401 = true
+			return s.Send(r2)
+		}
+	}
 	return flow, nil
 }
 

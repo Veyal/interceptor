@@ -173,7 +173,7 @@ func (s *Server) dispatch(method string, params json.RawMessage) (any, *rpcError
 			"protocolVersion": ver,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "interceptor", "version": version.Version},
-			"instructions":    "Interceptor: an intercepting HTTP/HTTPS proxy for web pentesting. Flow: list_flows/analyze_flow to find & triage → get_flow to read → send_request (replay) or start_intruder (fuzz) to attack → run_scanner (passive) or active_scan (sends payloads) to find bugs. Flow ids come from list_flows. Bodies truncate to maxBytes (default 4000). Scanners obey target scope (list_scope/add_scope_rule). active_scan sends real attacks: pass arm=true once to confirm authorization, and it only fires in-scope. Project size: host_stats shows per-host flow/byte breakdown; prune_history deletes noisy hosts (mode=delete) or keeps only the important ones (mode=keepOnly) — destructive, shown live in Activity.",
+			"instructions":    "Interceptor: an intercepting HTTP/HTTPS proxy for web pentesting. Flow: list_flows/analyze_flow to find & triage → get_flow to read → send_request (replay) or start_intruder (fuzz) to attack → start_discovery (forced-browse paths) → run_scanner (passive) or active_scan (sends payloads) to find bugs. suggest_discovery_paths seeds wordlists from history + AI. run_login_macro refreshes auth on 401. Flow ids come from list_flows. Bodies truncate to maxBytes (default 4000). Scanners obey target scope (list_scope/add_scope_rule). active_scan sends real attacks: pass arm=true once to confirm authorization, and it only fires in-scope. Project size: host_stats shows per-host flow/byte breakdown; prune_history deletes noisy hosts (mode=delete) or keeps only the important ones (mode=keepOnly) — destructive, shown live in Activity.",
 		}, nil
 	case "tools/list":
 		return map[string]any{"tools": s.toolList()}, nil
@@ -966,4 +966,56 @@ func (s *Server) registerTools() {
 			}
 			return fmt.Sprintf("deleted %d flows · freed %s (mode=%s)", d.Deleted, formatBytes(d.FreedBytes), mode), nil
 		})
+
+	s.add("start_discovery",
+		"Content discovery (forced-browse): brute-force paths from a wordlist against a base URL. Scope-gated. Async — poll discovery_state.",
+		obj(map[string]any{
+			"baseUrl":    p("string", "absolute base URL e.g. https://target/"),
+			"wordlist":   p("string", "newline-separated paths (optional — server default if empty)"),
+			"extensions": p("string", "e.g. .php .bak"),
+			"threads":    p("integer", "1–64, default 20"),
+			"delayMs":    p("integer", "ms between dispatches"),
+			"recursive":  p("boolean", "recurse into found directories"),
+			"maxDepth":   p("integer", "recursion depth"),
+			"record":     p("boolean", "save hits to History/Map (default true)"),
+		}, "baseUrl"),
+		func(a map[string]any) (string, error) {
+			return s.api(http.MethodPost, "/api/discovery/start", map[string]any{
+				"baseUrl": argStr(a, "baseUrl"), "wordlist": argStr(a, "wordlist"),
+				"extensions": argStr(a, "extensions"), "threads": argInt(a, "threads", 0),
+				"delayMs": argInt(a, "delayMs", 0), "recursive": argBool(a, "recursive", false),
+				"maxDepth": argInt(a, "maxDepth", 0), "record": argBool(a, "record", true),
+			})
+		})
+
+	s.add("discovery_state", "Discovery run progress + found paths.", obj(map[string]any{}),
+		func(a map[string]any) (string, error) {
+			out, err := s.apiGet("/api/discovery/state")
+			return boundJSON(out, 400), err
+		})
+
+	s.add("stop_discovery", "Stop the running content-discovery scan.", obj(map[string]any{}),
+		func(a map[string]any) (string, error) { return s.api(http.MethodPost, "/api/discovery/stop", nil) })
+
+	s.add("suggest_discovery_paths",
+		"Suggest paths to brute-force on a host: merges captured-history seeds with optional AI guesses (needs AI key for the latter).",
+		obj(map[string]any{
+			"host":    p("string", "target hostname"),
+			"baseUrl": p("string", "alternative to host — derive hostname from this URL"),
+		}),
+		func(a map[string]any) (string, error) {
+			q := url.Values{}
+			if h := argStr(a, "host"); h != "" {
+				q.Set("host", h)
+			}
+			if b := argStr(a, "baseUrl"); b != "" {
+				q.Set("baseUrl", b)
+			}
+			return s.apiGet("/api/discovery/suggest?" + q.Encode())
+		})
+
+	s.add("run_login_macro",
+		"Run the recorded login macro now — refreshes session Cookie/Authorization headers from the login response. Configure via Settings → Session or set_session with loginMacro.",
+		obj(map[string]any{}),
+		func(a map[string]any) (string, error) { return s.api(http.MethodPost, "/api/session/login/run", nil) })
 }

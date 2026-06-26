@@ -39,6 +39,7 @@ func (h *Hub) purgeFlows(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if deleted > 0 {
+		h.epsCache.invalidate()
 		h.broadcast(map[string]any{"type": "flow.new"}) // reuse the reload signal
 	}
 

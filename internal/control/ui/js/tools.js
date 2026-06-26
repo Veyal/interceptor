@@ -53,6 +53,7 @@ export async function repSend(){
     const flow=await api('/api/repeater/send',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({method:t.method,url:t.url.trim(),headers:t.headers,body:t.body})});
     t.resId=flow.id;t.status=repStatusLine(flow);t.color=statusColor(flow.status);
     $('#repStatus').textContent=t.status;$('#repStatus').style.color=t.color;
+    if(flow.status===401) toast('401 Unauthorized — run login macro in Settings → Session or enable Re-auth on 401');
     await renderRepResponse();loadRepHistory();repPersist();
   }catch(e){toast('send: '+e.message);}
   $('#repSend').textContent='Send ▸';$('#repSend').disabled=false;

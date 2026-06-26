@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/Veyal/interceptor/internal/store"
 )
@@ -11,26 +12,41 @@ import (
 // FlowCaptured implements proxy.Events: it pushes a newly-seen flow (request
 // sent, response not yet known) to all live UI subscribers. Concurrency-safe.
 func (h *Hub) FlowCaptured(f *store.Flow) {
+	h.epsCache.invalidate()
 	h.broadcast(map[string]any{"type": "flow.new", "flow": toFlowJSON(f)})
 }
 
 // FlowUpdated implements proxy.Events: it pushes the filled-in flow (response or
 // error now known) so the UI can update the existing history row in place.
 func (h *Hub) FlowUpdated(f *store.Flow) {
+	h.epsCache.invalidate()
 	h.broadcast(map[string]any{"type": "flow.update", "flow": toFlowJSON(f)})
 }
 
 // WSFramed implements the proxy's optional ws-frame sink: it nudges the UI to
-// refresh the frame list for a websocket flow.
+// refresh the frame list for a websocket flow. Events are debounced per flow.
 func (h *Hub) WSFramed(flowID int64) {
-	h.broadcast(map[string]any{"type": "ws.frame", "flowId": flowID})
+	h.wsMu.Lock()
+	if h.wsTimers == nil {
+		h.wsTimers = make(map[int64]*time.Timer)
+	}
+	if t, ok := h.wsTimers[flowID]; ok {
+		t.Stop()
+	}
+	h.wsTimers[flowID] = time.AfterFunc(200*time.Millisecond, func() {
+		h.wsMu.Lock()
+		delete(h.wsTimers, flowID)
+		h.wsMu.Unlock()
+		h.broadcast(map[string]any{"type": "ws.frame", "flowId": flowID})
+	})
+	h.wsMu.Unlock()
 }
 
 // broadcastIntercept pushes the current intercept state (toggle + hold queue).
 // It is registered as the intercept engine's change notifier and may be invoked
 // concurrently.
 func (h *Hub) broadcastIntercept() {
-	h.broadcast(map[string]any{"type": "intercept.update", "intercept": h.interceptState()})
+	h.broadcast(map[string]any{"type": "intercept.update", "intercept": h.interceptStateSummary()})
 }
 
 // broadcast marshals v and fans it out to every connected SSE client, dropping

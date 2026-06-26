@@ -114,6 +114,32 @@ func (s *Store) DeleteFlowsByHost(hosts []string, keepOnly bool) (int64, error) 
 		args[i] = h
 	}
 	ph := strings.TrimRight(strings.Repeat("?,", len(toDelete)), ",")
+	rows, qerr := s.db.Query(`SELECT id, host, path, method, note FROM flows WHERE lower(host) IN (`+ph+`)`, args...)
+	if qerr != nil {
+		return 0, fmt.Errorf("store.DeleteFlowsByHost: list: %w", qerr)
+	}
+	var ftsRows []struct {
+		id           int64
+		host, path   string
+		method, note string
+	}
+	for rows.Next() {
+		var r struct {
+			id           int64
+			host, path   string
+			method, note string
+		}
+		if err := rows.Scan(&r.id, &r.host, &r.path, &r.method, &r.note); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ftsRows = append(ftsRows, r)
+	}
+	rows.Close()
+	for _, r := range ftsRows {
+		_ = s.unindexFlowFTS(r.id, r.host, r.path, r.method, r.note)
+	}
+
 	res, err := s.db.Exec(`DELETE FROM flows WHERE lower(host) IN (`+ph+`)`, args...)
 	if err != nil {
 		return 0, fmt.Errorf("store.DeleteFlowsByHost: delete: %w", err)
@@ -136,22 +162,22 @@ func (s *Store) GCBodies() (removedFiles int64, freedBytes int64, err error) {
 	// 1. Collect every hash referenced by at least one flow.
 	referenced := make(map[string]struct{})
 	rows, err := s.db.Query(
-		`SELECT req_body_hash, res_body_hash FROM flows
-		 WHERE req_body_hash != '' OR res_body_hash != ''`)
+		`SELECT h FROM (
+			SELECT req_body_hash AS h FROM flows WHERE req_body_hash != ''
+			UNION
+			SELECT res_body_hash AS h FROM flows WHERE res_body_hash != ''
+		)`)
 	if err != nil {
 		return 0, 0, fmt.Errorf("store.GCBodies: query refs: %w", err)
 	}
 	for rows.Next() {
-		var rq, rs string
-		if err := rows.Scan(&rq, &rs); err != nil {
+		var h string
+		if err := rows.Scan(&h); err != nil {
 			rows.Close()
 			return 0, 0, fmt.Errorf("store.GCBodies: scan ref: %w", err)
 		}
-		if rq != "" {
-			referenced[rq] = struct{}{}
-		}
-		if rs != "" {
-			referenced[rs] = struct{}{}
+		if h != "" {
+			referenced[h] = struct{}{}
 		}
 	}
 	if err := rows.Close(); err != nil {

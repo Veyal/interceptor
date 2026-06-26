@@ -30,7 +30,16 @@ export async function runAi(kind) {
   await streamAi(kind, seq);
 }
 
-function setStatus(s) { const el = $('#aiStatus'); if (el) el.textContent = s || ''; }
+let aiRenderTimer=null, aiPending='';
+function scheduleAiRender(seq, text){
+  aiPending=text;
+  clearTimeout(aiRenderTimer);
+  aiRenderTimer=setTimeout(()=>{
+    if(seq!==aiSeq)return;
+    $('#aiOut').innerHTML=renderMD(aiPending);
+    $('#aiBody').scrollTop=$('#aiBody').scrollHeight;
+  },90);
+}
 
 // streamAi consumes the SSE stream from /api/ai/assist/stream, re-rendering the
 // accumulated Markdown on every delta. Falls back to the non-streaming endpoint if
@@ -59,7 +68,7 @@ async function streamAi(kind, seq) {
       while ((idx = buf.indexOf('\n\n')) >= 0) {
         const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
         handleSSE(chunk,
-          t => { if (seq !== aiSeq) return; if (!streaming) { streaming = true; setStatus('Streaming…'); } acc += t; $('#aiOut').innerHTML = renderMD(acc); $('#aiBody').scrollTop = $('#aiBody').scrollHeight; },
+          t => { if (seq !== aiSeq) return; if (!streaming) { streaming = true; setStatus('Streaming…'); } acc += t; scheduleAiRender(seq, acc); },
           msg => { throw new Error(msg); });
       }
     }

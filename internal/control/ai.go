@@ -291,3 +291,31 @@ func clip(s string, n int) string {
 	}
 	return s
 }
+
+// aiOpenRouterModels returns the OpenRouter model catalog and optionally validates
+// an API key (?key= for an unsaved key, else stored key / OPENROUTER_API_KEY).
+func (h *Hub) aiOpenRouterModels(w http.ResponseWriter, r *http.Request) {
+	key := strings.TrimSpace(r.URL.Query().Get("key"))
+	if key == "" {
+		key, _, _ = h.st.GetSetting("ai.apiKey")
+		if key == "" {
+			key = os.Getenv("OPENROUTER_API_KEY")
+		}
+	}
+	var keyErr string
+	if key != "" {
+		if err := aiassist.ValidateOpenRouterKey(r.Context(), key); err != nil {
+			keyErr = err.Error()
+		}
+	}
+	models, err := aiassist.ListOpenRouterModels(r.Context())
+	if err != nil {
+		httpErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"models":   models,
+		"keyValid": key != "" && keyErr == "",
+		"keyError": keyErr,
+	})
+}

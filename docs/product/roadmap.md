@@ -1,6 +1,6 @@
 # Interceptor — Roadmap
 
-*Owner: Product · Last updated: 2026-06-22 · Horizon: rolling. Now/Next/Later, not dates.*
+*Owner: Product · Last updated: 2026-06-26 · Horizon: rolling. Now/Next/Later, not dates.*
 
 Roadmap is organized around the strategy in [strategy.md](strategy.md). The product **intent** is a
 proxy operated by **a penetration tester and their AI assistant together**, so the top priorities
@@ -53,7 +53,18 @@ verified live). See [CHANGELOG.md](../../CHANGELOG.md).
 | **Flow → curl** + **findings → Markdown report** | `flow_as_curl` and `scan_report` MCP tools / endpoints |
 | **WebSocket message replay** | `internal/wsrepeater` (RFC 6455, no deps); WS-inspector replay box, `POST /api/ws/send`, `ws_send` MCP tool (**36 tools**) |
 
-## Cycle 3 — remaining bets (all genuinely L/XL; not single-session work)
+## ✅ Shipped (cycle 3 — discovery depth + session continuity)
+
+| Shipped | Notes |
+|---|---|
+| **Content discovery** (forced-browse) | scope-aware engine, Discover tab, soft-404 calibration, recursion, `FlagDiscovery` flows |
+| **Discovery loop** | History DSC badge + filter, Discover→Repeater, scope targets, history seeds, AI path suggestions |
+| **Login macro + 401 re-auth** | recorded login request, auto session refresh, Repeater/Intruder retry on 401 |
+| **MCP discovery + session tools** | `start_discovery`, `discovery_state`, `stop_discovery`, `suggest_discovery_paths`, `run_login_macro` (**41 tools**) |
+| **UX polish** | header intercept cue, `j`/`k` history nav, `r`→Repeater, improved empty states |
+| **[MCP cookbook](mcp-cookbook.md)** + **[benchmark comparison](benchmark-comparison.md)** | agent recipes + Burp/ZAP positioning numbers |
+
+## Cycle 4 — remaining bets (all genuinely L/XL; not single-session work)
 
 These are the honest, larger efforts left. Each deserves its own design → PRD → plan.
 

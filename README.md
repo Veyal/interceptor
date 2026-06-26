@@ -56,13 +56,14 @@ tester's direction and **entirely on the local machine**.
 - **Target scope** — include/exclude rules that focus history, the intercept gate, and the scanner.
 - **WebSocket** capture (`ws://`/`wss://` per-frame) **and replay** (a WebSocket Repeater).
 - **Session / auth injection** — auto-apply an `Authorization`/`Cookie` to every Repeater & Intruder
-  send, plus a **token macro** (CSRF/re-auth: fetch a value from a refresh request, inject per send).
+  send, plus a **token macro** (CSRF/re-auth: fetch a value from a refresh request, inject per send)
+  and a **login macro** (record a login flow, refresh session headers, auto re-auth on 401).
 - **Import / export** — HAR in and out, plus portable **project** bundles (flows + rules + scope +
   settings).
 - **BYO-key AI assist** — explain a request, suggest payloads, or summarize findings via your own
   **Anthropic** or **OpenRouter** key (off until you set one; the exchange is sent only on request).
 - **API & MCP** — a REST control API + SSE event stream and a full **Model Context Protocol** server
-  (36 tools, stdio **and** Streamable-HTTP) so an agent or script drives the same core as the UI.
+  (41 tools, stdio **and** Streamable-HTTP) so an agent or script drives the same core as the UI.
 
 ## Install
 
@@ -80,6 +81,16 @@ go install github.com/Veyal/interceptor/cmd/interceptor@v0.1.0
 
 interceptor        # if $(go env GOPATH)/bin is on your PATH
 ```
+
+**Or update in place** (no `go install` to remember):
+
+```bash
+interceptor update              # latest release
+interceptor update --check      # is a newer version out?
+interceptor update --version 0.6.0
+```
+
+`interceptor update` downloads a prebuilt binary from [GitHub Releases](https://github.com/Veyal/interceptor/releases) when one is attached for your OS/arch (and verifies `checksums.txt` when present). If the release has no binary yet, it falls back to `go install` automatically.
 
 Every tagged version is listed on the [**Releases**](https://github.com/Veyal/interceptor/releases)
 page with its changelog; `@latest` resolves to the newest tag, `@vX.Y.Z` pins one.
@@ -159,7 +170,7 @@ the same capabilities as the UI. Run the app, then connect your MCP client one o
 **Streamable-HTTP** (hosted/remote agents) — `POST` JSON-RPC to `http://127.0.0.1:9966/mcp`
 (stateless; no subprocess needed).
 
-Both expose the same **36 tools** — reading flows (`list_flows`, `get_flow`, `analyze_flow`,
+Both expose the same **41 tools** — reading flows (`list_flows`, `get_flow`, `analyze_flow`,
 `flow_as_curl`), replaying/fuzzing (`send_request`, `start_intruder`, `ws_send`), scanning
 (`run_scanner`, `scan_report`), intercept/rules/scope control, and `set_session` — with bounded
 results so large bodies don't blow the agent's context. The UI's **API → MCP** tab shows a
@@ -221,7 +232,8 @@ entry per change are expected.
 
 Why this exists, who it's for, and what's next live under [`docs/product/`](docs/product/):
 [strategy](docs/product/strategy.md) · [roadmap](docs/product/roadmap.md) ·
-[metrics](docs/product/metrics.md) · [flagship PRD](docs/product/prd-0001-target-scope.md).
+[metrics](docs/product/metrics.md) · [MCP cookbook](docs/product/mcp-cookbook.md) ·
+[flagship PRD](docs/product/prd-0001-target-scope.md).
 Performance numbers (≈20 MB idle, ≈1 s cold start) are in [docs/benchmarks.md](docs/benchmarks.md).
 Larger bets ahead: login-macro/401 re-auth session handling, HTTP/2, an extension API, and CI-built
 release binaries.

@@ -6,7 +6,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-06-26
+
 ### Changed
+- **Performance: faster History and Map.** Flow list API skips header JSON blobs
+  (`QueryFlowsListFilter`) and returns `truncated: true` when the limit is hit; the UI
+  shows a **500-flow cap** banner. SSE `flow.new` / `flow.update` patch rows in place
+  instead of reloading the whole table when filters are simple. Map `/api/endpoints` is
+  cached until flows change. Intercept SSE omits held `raw` bodies (lazy-fetch via
+  `GET /api/intercept/held/{id}/raw`); WS frame events are debounced per flow.
+- **Search uses FTS5.** Flow search (`?search=`) now matches via an FTS5 index on
+  host/path/method/note (prefix tokens); indexes stay in sync on insert/update/delete.
+- **Body GC and SQLite pool.** `GCBodies` uses a DISTINCT hash union; the DB pool
+  allows a few concurrent readers (`SetMaxOpenConns(4)`).
+- **UX polish.** Top bar **⌘K** and **?** buttons; Views dropdown always visible;
+  **Ctrl+Space** sends only on the Repeater tab; Authz in the command palette;
+  toast `aria-live="polite"`; context-menu arrow-key nav; intercept filter auto-applies
+  (~650ms debounce); Match & Replace `<details>` opens when rules exist; **Ctrl+Shift+F**
+  forwards held traffic (avoids clashing with browser Find); Activity rows with a flow
+  reference jump to History; AI streaming throttles Markdown re-renders; Notes preview
+  caches rendered HTML; Proxy/Intercept stack below ~1100px width.
+- **Project Notes images in SQLite.** Pasted screenshots are stored as blobs in a new
+  `notes_images` table; markdown keeps a short `![…](/api/notes/images/{id})` ref instead
+  of inline base64. Preview loads images from the API. Legacy data-URL images are migrated
+  automatically on load/save; orphaned blobs are garbage-collected when notes change.
+- **Project Notes autosave + shortcut.** Notes save automatically (~800ms after you
+  stop typing, on blur, and when leaving the tab or switching to Preview). The manual
+  Save button is gone; a small status shows saving/saved. **Ctrl+B** jumps to Notes
+  (also in the command palette).
+- **OpenRouter AI settings: validated key + model picker.** Settings → AI assist now loads
+  models into a **dropdown** (no free-text model IDs). **Load models** validates the API key
+  against OpenRouter's `/auth/key` endpoint; **Save** rejects invalid keys and unknown models.
+  Anthropic still uses an optional text model field.
+- **Proxy History multi-select without checkboxes.** Row checkboxes and the header
+  select-all box are gone — **Shift+click** (or **Shift+j/k**) range-selects,
+  **Ctrl+Shift+click** (or **Ctrl+Shift+j/k**) toggles a row, and **Ctrl+Shift+A**
+  selects or clears all shown flows. Selected rows are highlighted; the action bar
+  is unchanged.
+- **Map tab overhaul (site-map UX).** **Tree** is now the default view (remembered in
+  `localStorage`); new **Table** view with sortable Method/Path/Status/Hits columns, row
+  click → inspect, **→ Rep** → Repeater. **Graph** is optional: larger click targets,
+  hover tooltips, search highlights + auto-expand, breadcrumb bar, double-click a host to
+  focus its domain, and a warning when the graph exceeds 150 nodes.
 - **Request/response views default to Pretty.** The inspector, the Repeater response pane, and
   the Map flow popup now beautify (and syntax-highlight) the body by default instead of showing
   raw bytes — toggle back to **Raw** anytime. Large bodies still fall back to raw automatically.
@@ -19,7 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - **Status** → filter status class / exclude this exact status (no host clutter).
   - **Method / Path** → their own filter/exclude (path adds copy-path).
   - **Global section** (always): Send to Repeater/Intruder, Copy URL/cURL, ✨ Ask AI explain/payloads,
-    🔓 Authz test, Clear filters.
+    🔓 Authz test, **🔑 Use as login macro**, Clear filters.
 - **The request/response inspector panes now have their own right-click menu.** A
   **Selection** section (Copy, Decode/encode, Search in history, Add to scope when the text looks
   like a host) appears when text is highlighted, above the same global flow actions; with no
@@ -48,6 +89,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `~/.interceptor/active-project`, so a plain `interceptor` launch resumes whatever the UI last
   switched to (rather than always starting on `default`). An explicit `--project` still wins, and a
   `--project /path` one-off never overwrites the remembered name.
+- **Login macro + 401 re-auth (session continuity).** Settings → Session gains a **login macro**:
+  record a login request (or right-click a flow → **Use as login macro**), run it to extract
+  `Cookie` / `Authorization` into session headers, optional **refresh interval**, and **re-auth on
+  401** (Repeater/Intruder automatically re-login and retry once). API: `POST /api/session/login/run`,
+  `POST /api/session/login/from-flow/{id}`; MCP: `run_login_macro`.
+- **Discovery loop completion.** History shows a **DSC** badge on `FlagDiscovery` flows and a
+  **🔎 discover** filter; Discover results have **→ Rep** (send to Repeater); **◎ From scope** fills
+  base URLs from include rules; **＋ History seeds** and **✨ AI paths** grow the wordlist from
+  captured traffic (+ optional AI). API: `/api/discovery/seeds`, `/suggest`, `/scope-targets`.
+- **MCP discovery tools.** `start_discovery`, `discovery_state`, `stop_discovery`,
+  `suggest_discovery_paths` — **41 tools** total (descriptor test guards drift).
+- **UX polish.** Top bar shows **intercept state** (REQ/RESP on + held count); Proxy history adds
+  `j`/`k` row walk and bare `r` → Repeater; improved empty states on Discover and Authz.
+- **Docs:** [MCP cookbook](docs/product/mcp-cookbook.md) (3 agent recipes) and
+  [benchmark comparison vs Burp/ZAP](docs/product/benchmark-comparison.md).
+- **`interceptor update` CLI.** Self-update from the terminal: downloads a prebuilt
+  release binary for your OS/arch from GitHub (with `checksums.txt` verification when
+  present), replaces the running executable, or falls back to `go install` when the
+  release has no binary attached. Flags: `--check`, `--version vX.Y.Z`, `--force`.
+  Also: `interceptor help`, and the startup update notice now suggests the command.
 
 ### Changed
 - **No more terminal project picker.** Startup no longer blocks on the interactive

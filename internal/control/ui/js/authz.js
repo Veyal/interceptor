@@ -10,7 +10,7 @@ export function openAuthz(flowId) {
   authzFlowId = flowId || null;
   openModal($('#authzModal'));
   $('#authzFlow').textContent = flowId ? ('#' + flowId) : '(none)';
-  $('#authzResults').innerHTML = '<div class="hint">Run to compare access across roles.</div>';
+  $('#authzResults').innerHTML = '<div class="hint">Define identities below, then <b>Run</b> to replay this request as each role and diff for broken access control (IDOR, privilege escalation).</div>';
   loadAuthzIdentities();
 }
 

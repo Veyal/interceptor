@@ -1,10 +1,131 @@
-import { $, $$, esc, escAttr, state, toast, api, methodColor, statusColor, statusText, mimeLabel, fmtSize, fmtBytes, fmtTime, fmtDur, FLAG_WS, FLAG_AI, RENDER_CAP, highlightHTTP, prettify, copyText, uiPrompt, uiConfirm, closeModals, isBinaryMime, bodyMime, headerBlockText } from './core.js';
+import { $, $$, esc, escAttr, state, toast, api, methodColor, statusColor, statusText, mimeLabel, fmtSize, fmtBytes, fmtTime, fmtDur, FLAG_WS, FLAG_AI, FLAG_DISCOVERY, RENDER_CAP, highlightHTTP, prettify, copyText, uiPrompt, uiConfirm, closeModals, isBinaryMime, bodyMime, headerBlockText } from './core.js';
 import { sendToRepeater, sendToIntruder } from './tools.js';
 import { retentionStats, loadRetention } from './settings.js';
 import { openAi } from './ai.js';
 import { openAuthz } from './authz.js';
 import { openDecoder } from './scanner.js';
 import { prefillDiscovery } from './discovery.js';
+
+const FLOW_LIMIT=500;
+const EXCLUDE_NORM=64|128|512; // repeater, intruder, active scan
+
+function flowExcluded(f){return (f.flags&EXCLUDE_NORM)!==0&&(f.flags&FLAG_AI)===0;}
+function canIncremental(){
+  if(state.inScopeOnly||state.discoveryOnly)return false;
+  if(state.filters.search)return false;
+  if(state.filters.exclude&&state.filters.exclude.length)return false;
+  return true;
+}
+function flowMatchesFilters(f){
+  const fl=state.filters;
+  if(flowExcluded(f))return false;
+  if(state.discoveryOnly&&(f.flags&FLAG_DISCOVERY)===0)return false;
+  if(!state.showAI&&(f.flags&FLAG_AI))return false;
+  if(fl.scheme&&f.scheme!==fl.scheme)return false;
+  if(fl.method&&f.method!==fl.method)return false;
+  if(fl.host&&!f.host.toLowerCase().includes(fl.host.toLowerCase()))return false;
+  if(fl.status&&Math.floor((f.status||0)/100)!==Number(fl.status))return false;
+  for(const e of fl.exclude||[]){
+    const v=String(e.value);
+    if(e.field==='method'&&f.method===v)return false;
+    if(e.field==='host'&&f.host.toLowerCase().includes(v.toLowerCase()))return false;
+    if(e.field==='path'&&f.path.toLowerCase().includes(v.toLowerCase()))return false;
+    if(e.field==='status'&&String(f.status)===v)return false;
+  }
+  return true;
+}
+function flowRowHTML(f){
+  const intercepted=(f.flags&1)!==0;
+  const pending=!f.status&&!f.error;
+  const stHTML=f.status?String(f.status):(f.error?'ERR':'<span class="blink" style="color:var(--fg3)" title="waiting for response">•••</span>');
+  return `<div class="trow ${f.id===state.selId?'sel':''}${state.selected.has(f.id)?' msel':''}${pending?' pending':''}" data-id="${f.id}" title="Click inspect · Shift+click range · Ctrl+Shift+click toggle">
+      <div class="tr-id" data-field="id">${f.id}</div>
+      <div class="tr-m" data-field="method" style="color:${methodColor(f.method)}">${esc(f.method)}</div>
+      <div class="tr-host" data-field="host">${esc(f.scheme==='https'?'🔒 ':'')}${esc(f.host)}</div>
+      <div class="tr-path" data-field="path">${esc(f.path)}${intercepted?' <span style="color:var(--accent)" title="intercepted">●</span>':''}${(f.flags&FLAG_AI)?'<span class="ai-tag" title="sent by the AI assistant">AI</span>':''}${(f.flags&FLAG_DISCOVERY)?'<span class="ai-tag" style="background:var(--violetDim);color:var(--violet)" title="found by content discovery">DSC</span>':''}${f.note?' <span title="has a note" style="cursor:help">📝</span>':''}</div>
+      <div class="tr-st" data-field="status" style="color:${statusColor(f.status)}">${stHTML}</div>
+      <div class="tr-mime" data-field="mime">${esc(mimeLabel(f.mime))}</div>
+      <div class="tr-len" data-field="size">${f.status?fmtSize(f.resLen):''}</div>
+      <div class="tr-t" data-field="time">${fmtTime(f.ts)}</div>
+    </div>`;
+}
+function wireFlowRow(r){
+  const id=Number(r.dataset.id);
+  r.onclick=e=>flowRowClick(id,e);
+  r.oncontextmenu=e=>{
+    e.preventDefault();
+    const f=state.flows.find(x=>x.id===id);
+    const cell=e.target.closest('[data-field]');
+    showCtx(e.clientX,e.clientY,f,cell?cell.dataset.field:'');
+  };
+}
+function updateTruncBanner(){
+  const b=$('#flowCapBanner');
+  if(!b)return;
+  b.style.display=state.flowTruncated?'block':'none';
+}
+function removeFlowRow(id){
+  const row=document.querySelector('#rows .trow[data-id="'+id+'"]');
+  if(row)row.remove();
+}
+export function patchFlowRow(f){
+  const row=document.querySelector('#rows .trow[data-id="'+f.id+'"]');
+  if(row){
+    const tmp=document.createElement('div');
+    tmp.innerHTML=flowRowHTML(f);
+    const nr=tmp.firstElementChild;
+    wireFlowRow(nr);
+    row.replaceWith(nr);
+    return;
+  }
+  if(!flowMatchesFilters(f))return;
+  const box=$('#rows');
+  if(!box||box.querySelector('.empty')||box.querySelector('#gsMcp')){renderRows();return;}
+  const tmp=document.createElement('div');
+  tmp.innerHTML=flowRowHTML(f);
+  const nr=tmp.firstElementChild;
+  wireFlowRow(nr);
+  const sorted=applySort(state.flows);
+  const idx=sorted.findIndex(x=>x.id===f.id);
+  const next=sorted[idx+1];
+  if(next){
+    const anchor=document.querySelector('#rows .trow[data-id="'+next.id+'"]');
+    if(anchor)anchor.before(nr);else box.prepend(nr);
+  }else box.prepend(nr);
+}
+export function upsertFlow(f){
+  const i=state.flows.findIndex(x=>x.id===f.id);
+  if(i>=0)state.flows[i]=f;
+  else{
+    state.flows.unshift(f);
+    if(state.flows.length>FLOW_LIMIT){
+      const dropped=state.flows.pop();
+      if(dropped)removeFlowRow(dropped.id);
+      state.flowTruncated=true;
+    }
+  }
+  $('#rowCount').textContent=state.flows.length;
+  updateTruncBanner();
+}
+export function handleFlowNew(f){
+  if(!f)return;
+  const proxy=document.querySelector('.panel[data-panel="proxy"]');
+  if(!proxy||!proxy.classList.contains('active')||!canIncremental()||!flowMatchesFilters(f)){scheduleReload();return;}
+  upsertFlow(f);
+  patchFlowRow(f);
+  refreshMethodFilter();
+}
+export function handleFlowUpdate(f){
+  if(!f)return;
+  const i=state.flows.findIndex(x=>x.id===f.id);
+  if(i<0){
+    if(canIncremental()&&flowMatchesFilters(f)){upsertFlow(f);patchFlowRow(f);refreshMethodFilter();}
+    else scheduleReload();
+    return;
+  }
+  state.flows[i]=f;
+  patchFlowRow(f);
+}
 
 export function applySort(flows){
   const k=state.sort.key,dir=state.sort.dir;
@@ -41,44 +162,51 @@ export function renderRows(){
       const b=document.getElementById('gsMcp');if(b)b.onclick=()=>{document.querySelector('.tab[data-tab="api"]').click();document.querySelector('#apiSub button[data-s="mcp"]').click();};
     }
     return;}
-  box.innerHTML=flows.map(f=>{
-    const intercepted=(f.flags&1)!==0;
-    const pending=!f.status&&!f.error;
-    const stHTML=f.status?String(f.status):(f.error?'ERR':'<span class="blink" style="color:var(--fg3)" title="waiting for response">•••</span>');
-    return `<div class="trow ${f.id===state.selId?'sel':''}${pending?' pending':''}" data-id="${f.id}" title="Left-click to inspect · Right-click to filter / copy">
-      <div class="tr-id" data-field="id"><input type="checkbox" class="rowsel" data-id="${f.id}"${state.selected.has(f.id)?' checked':''} style="vertical-align:middle;margin-right:5px">${f.id}</div>
-      <div class="tr-m" data-field="method" style="color:${methodColor(f.method)}">${esc(f.method)}</div>
-      <div class="tr-host" data-field="host">${esc(f.scheme==='https'?'🔒 ':'')}${esc(f.host)}</div>
-      <div class="tr-path" data-field="path">${esc(f.path)}${intercepted?' <span style="color:var(--accent)" title="intercepted">●</span>':''}${(f.flags&FLAG_AI)?'<span class="ai-tag" title="sent by the AI assistant">AI</span>':''}${f.note?' <span title="has a note" style="cursor:help">📝</span>':''}</div>
-      <div class="tr-st" data-field="status" style="color:${statusColor(f.status)}">${stHTML}</div>
-      <div class="tr-mime" data-field="mime">${esc(mimeLabel(f.mime))}</div>
-      <div class="tr-len" data-field="size">${f.status?fmtSize(f.resLen):''}</div>
-      <div class="tr-t" data-field="time">${fmtTime(f.ts)}</div>
-    </div>`;
-  }).join('');
-  $$('#rows .trow').forEach(r=>{
-    const id=Number(r.dataset.id);
-    r.onclick=()=>selectFlow(id);
-    r.oncontextmenu=e=>{
-      e.preventDefault();
-      const f=state.flows.find(x=>x.id===id);
-      const cell=e.target.closest('[data-field]');
-      showCtx(e.clientX,e.clientY,f,cell?cell.dataset.field:'');
-    };
-  });
-  $$('#rows .rowsel').forEach(cb=>{
-    cb.onclick=e=>{
-      e.stopPropagation(); // toggle selection without opening the inspector
-      const id=Number(cb.dataset.id),list=applySort(state.flows),idx=list.findIndex(f=>f.id===id);
-      if(e.shiftKey&&state.lastSelIdx>=0&&state.lastSelIdx<list.length){
-        const a=Math.min(state.lastSelIdx,idx),b=Math.max(state.lastSelIdx,idx);
-        for(let i=a;i<=b;i++){cb.checked?state.selected.add(list[i].id):state.selected.delete(list[i].id);}
-      }else{cb.checked?state.selected.add(id):state.selected.delete(id);}
-      state.lastSelIdx=idx;renderRows();updateSelBar();
-    };
-  });
-  const sa=$('#selAll');
-  if(sa){const list=applySort(state.flows);sa.checked=list.length>0&&list.every(f=>state.selected.has(f.id));sa.indeterminate=!sa.checked&&list.some(f=>state.selected.has(f.id));}
+  box.innerHTML=flows.map(f=>flowRowHTML(f)).join('');
+  $$('#rows .trow').forEach(wireFlowRow);
+}
+export function flowRowClick(id,e){
+  const list=applySort(state.flows),idx=list.findIndex(f=>f.id===id);
+  if(idx<0)return;
+  const mod=e.ctrlKey||e.metaKey;
+  if(e.shiftKey&&mod){
+    state.selected.has(id)?state.selected.delete(id):state.selected.add(id);
+    state.lastSelIdx=idx;selectFlow(id);updateSelBar();return;
+  }
+  if(e.shiftKey){
+    const anchor=state.lastSelIdx>=0?state.lastSelIdx:idx;
+    const a=Math.min(anchor,idx),b=Math.max(anchor,idx);
+    state.selected.clear();
+    for(let i=a;i<=b;i++)state.selected.add(list[i].id);
+    state.lastSelIdx=idx;selectFlow(id);updateSelBar();return;
+  }
+  state.selected.clear();state.lastSelIdx=idx;selectFlow(id);updateSelBar();
+}
+export function walkFlowNav(down,e){
+  const list=applySort(state.flows);
+  if(!list.length)return null;
+  const i=list.findIndex(f=>f.id===state.selId);
+  const ni=i<0?0:(down?Math.min(i+1,list.length-1):Math.max(i-1,0));
+  if(ni===i)return null;
+  const id=list[ni].id,mod=e.ctrlKey||e.metaKey;
+  if(e.shiftKey&&mod){
+    state.selected.has(id)?state.selected.delete(id):state.selected.add(id);
+    state.lastSelIdx=ni;selectFlow(id);updateSelBar();return id;
+  }
+  if(e.shiftKey){
+    const anchor=state.lastSelIdx>=0?state.lastSelIdx:(i>=0?i:ni);
+    const a=Math.min(anchor,ni),b=Math.max(anchor,ni);
+    state.selected.clear();
+    for(let j=a;j<=b;j++)state.selected.add(list[j].id);
+    state.lastSelIdx=ni;selectFlow(id);updateSelBar();return id;
+  }
+  state.selected.clear();state.lastSelIdx=ni;selectFlow(id);updateSelBar();return id;
+}
+export function toggleSelectAllShown(){
+  const list=applySort(state.flows);
+  const all=list.length>0&&list.every(f=>state.selected.has(f.id));
+  if(all)state.selected.clear();else list.forEach(f=>state.selected.add(f.id));
+  updateSelBar();renderRows();
 }
 export async function loadFlows(){
   const q=new URLSearchParams();
@@ -90,9 +218,17 @@ export async function loadFlows(){
   if(f.host)q.set('host',f.host);
   (f.exclude||[]).forEach(e=>{const k={method:'notMethod',host:'notHost',path:'notPath',status:'notStatus'}[e.field];if(k)q.append(k,e.value);});
   if(state.inScopeOnly)q.set('inScope','1');
+  if(state.discoveryOnly)q.set('discovery','1');
   if(!state.showAI)q.set('ai','0');
-  q.set('limit','500');
-  try{const d=await api('/api/flows?'+q.toString());state.flows=d.flows||[];renderRows();refreshMethodFilter();}catch(e){toast('flows: '+e.message);}
+  q.set('limit',String(FLOW_LIMIT));
+  try{
+    const d=await api('/api/flows?'+q.toString());
+    state.flows=d.flows||[];
+    state.flowTruncated=!!d.truncated;
+    renderRows();
+    updateTruncBanner();
+    refreshMethodFilter();
+  }catch(e){toast('flows: '+e.message);}
 }
 function refreshMethodFilter(){
   if(state.filters.method)return; // don't shrink the list while filtering by method
@@ -195,7 +331,7 @@ export async function renderSide(side){
 // page. Other tabs (Intruder, Repeater, AI, Map) own their own seg handlers; a bare
 // $$('.seg') here would clobber them since this module loads after them.
 $$('.seg[data-side]').forEach(seg=>{const side=seg.dataset.side;seg.querySelectorAll('button').forEach(b=>b.onclick=()=>{
-  state.view[side]=b.dataset.view;seg.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));renderSide(side);});});
+  state.view[side]=b.dataset.view;seg.querySelectorAll('button').forEach(x=>{x.classList.toggle('on',x===b);x.setAttribute('aria-pressed',x===b?'true':'false');});renderSide(side);});});
 
 $$('.thead [data-sort]').forEach(h=>h.onclick=()=>{
   const k=h.dataset.sort;if(state.sort.key===k)state.sort.dir*=-1;else{state.sort.key=k;state.sort.dir=k==='id'||k==='time'?-1:1;}renderRows();});
@@ -219,6 +355,7 @@ $('#importHarFile').onchange=async e=>{
   e.target.value='';
 };
 $('#scopeToggle').onclick=()=>{state.inScopeOnly=!state.inScopeOnly;$('#scopeToggle').classList.toggle('accent',state.inScopeOnly);$('#scopeToggle').textContent=(state.inScopeOnly?'◉':'◎')+' in scope';loadFlows();};
+$('#discFilter').onclick=()=>{state.discoveryOnly=!state.discoveryOnly;$('#discFilter').classList.toggle('accent',state.discoveryOnly);loadFlows();};
 $('#aiToggle').onclick=()=>{state.showAI=!state.showAI;$('#aiToggle').classList.toggle('accent',state.showAI);loadFlows();};
 export async function saveNote(){
   if(!state.selId)return;
@@ -238,7 +375,6 @@ export function renderViews(){
   const sel=$('#viewsSelect'),cur=sel.value;
   sel.innerHTML='<option value="">views…</option>'+state.views.map(v=>`<option value="${v.id}">${esc(v.name)}</option>`).join('');
   if(state.views.find(v=>String(v.id)===cur))sel.value=cur;
-  sel.style.display=state.views.length?'':'none';                       // hide the picker until a view is saved
   $('#delViewBtn').style.display=(state.views.length&&sel.value)?'inline-block':'none';
 }
 $('#viewsSelect').onchange=()=>{
@@ -331,7 +467,10 @@ export function renderChips(){
 }
 /* ---- right-click context menu ---- */
 export const ctx=$('#ctxmenu');
-function hideCtx(){ctx.classList.remove('show');ctx._acts=null;}
+function hideCtx(){
+  if(ctx._keyHandler){document.removeEventListener('keydown',ctx._keyHandler);ctx._keyHandler=null;}
+  ctx.classList.remove('show');ctx._acts=null;
+}
 // openMenu renders a sectioned context menu. Each section is {head?, items:[…]};
 // each item is {label, val?, act, on?, danger?} or {sep:true}. It positions the
 // menu and flips it on-screen if it would overflow the viewport.
@@ -349,12 +488,23 @@ function openMenu(x,y,sections){
       acts.push(it.act);
     });
   });
-  ctx.innerHTML=html;ctx._acts=acts;
+  ctx.innerHTML=html;ctx._acts=acts;ctx._sel=0;
+  const items=ctx.querySelectorAll('.ctx-item');
+  items.forEach((el,i)=>el.classList.toggle('on',i===0));
   ctx.querySelectorAll('[data-i]').forEach(el=>el.onclick=()=>{const fn=ctx._acts[Number(el.dataset.i)];hideCtx();if(fn)fn();});
   ctx.style.left=x+'px';ctx.style.top=y+'px';ctx.classList.add('show');
   const r=ctx.getBoundingClientRect();
   if(r.right>innerWidth)ctx.style.left=Math.max(4,x-r.width)+'px';
   if(r.bottom>innerHeight)ctx.style.top=Math.max(4,y-r.height)+'px';
+  const paintSel=()=>{items.forEach((el,i)=>el.classList.toggle('on',i===ctx._sel));const cur=items[ctx._sel];if(cur)cur.scrollIntoView({block:'nearest'});};
+  ctx._keyHandler=e=>{
+    if(!ctx.classList.contains('show'))return;
+    if(e.key==='ArrowDown'){e.preventDefault();ctx._sel=Math.min(items.length-1,ctx._sel+1);paintSel();}
+    else if(e.key==='ArrowUp'){e.preventDefault();ctx._sel=Math.max(0,ctx._sel-1);paintSel();}
+    else if(e.key==='Enter'){e.preventDefault();const fn=ctx._acts[ctx._sel];hideCtx();if(fn)fn();}
+    else if(e.key==='Escape'){e.preventDefault();hideCtx();}
+  };
+  document.addEventListener('keydown',ctx._keyHandler);
 }
 
 // isIPHost reports whether h is an IP literal / localhost (so "domain" actions,
@@ -399,7 +549,17 @@ function flowGlobalSection(f,head){
     {label:'✨ Ask AI',val:'explain',act:()=>openAi('explain',[f.id])},
     {label:'✨ Ask AI',val:'payloads',act:()=>openAi('suggest',[f.id])},
     {label:'🔓 Authz test',val:'roles',act:()=>openAuthz(f.id)},
+    {label:'🔑 Use as login macro',act:()=>saveLoginMacroFromFlow(f.id)},
   ]};
+}
+
+async function saveLoginMacroFromFlow(id){
+  try{
+    await api('/api/session/login/from-flow/'+id,{method:'POST'});
+    toast('login macro saved — Settings → Session');
+    document.querySelector('.tab[data-tab="settings"]').click();
+    const b=document.querySelector('#setNav button[data-sec="session"]');if(b)b.click();
+  }catch(e){toast(e.message);}
 }
 
 // showCtx builds the history-row menu: a contextual top section keyed to the
@@ -526,7 +686,6 @@ export async function copyCurl(f){
 }
 // ---- History multi-select actions ----
 export function updateSelBar(){const n=state.selected.size;$('#selBar').style.display=n?'flex':'none';$('#selCount').textContent=n+' selected';}
-$('#selAll').onclick=e=>{e.stopPropagation();const list=applySort(state.flows);if(e.target.checked)list.forEach(f=>state.selected.add(f.id));else state.selected.clear();renderRows();updateSelBar();};
 $('#selClear').onclick=()=>{state.selected.clear();state.lastSelIdx=-1;renderRows();updateSelBar();};
 $('#selAsk').onclick=()=>{const ids=[...state.selected];if(ids.length)openAi('summarize',ids);};
 $('#selScope').onclick=async()=>{

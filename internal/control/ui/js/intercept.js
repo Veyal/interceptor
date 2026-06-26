@@ -3,6 +3,8 @@ import { $, $$, esc, escAttr, state, toast, api, methodColor } from './core.js';
 /* ---- intercept ---- */
 // One unified hold queue (requests + responses) feeding one editor. state.heldSel
 // is {id, side:'req'|'resp'} for the selected item, or null.
+const heldRawCache=new Map();
+
 export function renderIntercept(){
   const ic=state.intercept||{};
   const rq=ic.queue||[], rrq=ic.responseQueue||[];
@@ -25,7 +27,8 @@ export function renderIntercept(){
     <span class="u">${esc(h.host)}${esc(h.path)}</span></div>`).join('');
   $$('#heldList .icpt-item').forEach(el=>el.onclick=()=>selectHeld(Number(el.dataset.id),el.dataset.side));
   const cur=state.heldSel&&items.find(h=>h.id===state.heldSel.id&&h.side===state.heldSel.side);
-  if(cur)selectHeld(cur.id,cur.side); else selectHeld(items[0].id,items[0].side);
+  if(cur)selectHeld(cur.id,cur.side,{keepEditor:true});
+  else selectHeld(items[0].id,items[0].side);
 }
 function setSwitch(btnSel,stateSel,on){
   const b=$(btnSel);if(b){b.classList.toggle('on',!!on);b.setAttribute('aria-pressed',on?'true':'false');}
@@ -42,10 +45,29 @@ function showEditor(h){
     ?`<span class="icpt-tag resp" style="margin-right:8px">RESP</span><span class="u">${esc(h.host)}${esc(h.path)}</span>`
     :`<span style="color:${methodColor(h.method)};font-weight:700">${esc(h.method)}</span> ${esc(h.host)}${esc(h.path)}`;
 }
-export function selectHeld(id,side){
+export async function selectHeld(id,side,opts={}){
   state.heldSel={id,side};
   $$('#heldList .icpt-item').forEach(el=>el.classList.toggle('sel',Number(el.dataset.id)===id&&el.dataset.side===side));
-  const h=heldItem(id,side);if(h)showEditor({...h,side});
+  const h=heldItem(id,side);if(!h)return;
+  const cacheKey=side+':'+id;
+  let raw=h.raw;
+  if(opts.keepEditor){
+    const ta=$('#heldRaw');
+    if(ta&&document.activeElement===ta)return;
+    if(ta&&ta.value)raw=ta.value;
+  }
+  if(!raw&&h.len!=null){
+    if(heldRawCache.has(cacheKey))raw=heldRawCache.get(cacheKey);
+    else{
+      try{
+        const d=await api('/api/intercept/held/'+id+'/raw?side='+side);
+        raw=d.raw||'';
+        heldRawCache.set(cacheKey,raw);
+        h.raw=raw;
+      }catch(e){raw='';}
+    }
+  }
+  showEditor({...h,side,raw});
 }
 $('#respInterceptToggle').onclick=async()=>{
   try{const s=await api('/api/intercept/response/toggle',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({enabled:!state.intercept.responseEnabled})});state.intercept=s;renderIntercept();}catch(e){toast(e.message);}
@@ -59,10 +81,13 @@ $('#interceptToggle').onclick=toggleIntercept;
 $('#forwardBtn').onclick=async()=>{const sel=state.heldSel;if(!sel)return;
   const base=sel.side==='resp'?'/api/intercept/response/':'/api/intercept/';
   try{await api(base+sel.id+'/forward',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({raw:$('#heldRaw').value})});
+    heldRawCache.delete(sel.side+':'+sel.id);
     toast(sel.side==='resp'?'response forwarded':'forwarded');}catch(e){toast(e.message);}};
 $('#dropBtn').onclick=async()=>{const sel=state.heldSel;if(!sel)return;
   const base=sel.side==='resp'?'/api/intercept/response/':'/api/intercept/';
-  try{await api(base+sel.id+'/drop',{method:'POST'});toast(sel.side==='resp'?'response dropped':'dropped');}catch(e){toast(e.message);}};
+  try{await api(base+sel.id+'/drop',{method:'POST'});
+    heldRawCache.delete(sel.side+':'+sel.id);
+    toast(sel.side==='resp'?'response dropped':'dropped');}catch(e){toast(e.message);}};
 export async function applyInterceptFilter(){
   const enabled=$('#interceptFilterOn').checked,target=$('#interceptFilterTarget').value,pattern=$('#interceptFilterPattern').value;
   try{const s=await api('/api/intercept/filter',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({enabled,target,pattern})});
@@ -70,10 +95,22 @@ export async function applyInterceptFilter(){
 }
 $('#interceptFilterApply').onclick=applyInterceptFilter;
 $('#interceptFilterPattern').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();applyInterceptFilter();}});
+let icptFilterTimer=null;
+function scheduleInterceptFilter(){
+  clearTimeout(icptFilterTimer);
+  icptFilterTimer=setTimeout(applyInterceptFilter,650);
+}
+['interceptFilterOn','interceptFilterTarget','interceptFilterPattern'].forEach(id=>{
+  const el=$('#'+id);if(!el)return;
+  el.addEventListener('change',scheduleInterceptFilter);
+  if(el.tagName==='INPUT')el.addEventListener('input',scheduleInterceptFilter);
+});
 
 /* ---- rules ---- */
 export function renderRules(){
   const body=$('#rulesBody');
+  const det=document.querySelector('details.icpt-mr');
+  if(det&&state.rules.length)det.open=true;
   if(!state.rules.length){body.innerHTML='<tr><td colspan="5" class="hint" style="padding:10px 8px">No rules. Add one below.</td></tr>';return;}
   body.innerHTML=state.rules.map(r=>`<tr data-id="${r.id}">
     <td><input type="checkbox" ${r.enabled?'checked':''} data-k="enabled"></td>

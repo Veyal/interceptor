@@ -91,68 +91,7 @@ func (s *Store) QueryFlowsFilter(f FlowFilter) ([]*Flow, error) {
 	if limit <= 0 {
 		limit = 200
 	}
-	var (
-		where []string
-		args  []any
-	)
-	if f.BeforeID > 0 {
-		where = append(where, "id < ?")
-		args = append(args, f.BeforeID)
-	}
-	if f.Method != "" {
-		where = append(where, "method = ?")
-		args = append(args, f.Method)
-	}
-	if f.Scheme != "" {
-		where = append(where, "scheme = ?")
-		args = append(args, f.Scheme)
-	}
-	if f.Host != "" {
-		where = append(where, "instr(lower(host), lower(?)) > 0")
-		args = append(args, f.Host)
-	}
-	if f.Search != "" {
-		// Match the term against method, host, path, or the operator's note.
-		where = append(where, "(instr(lower(path), lower(?)) > 0 OR instr(lower(host), lower(?)) > 0 OR instr(lower(method), lower(?)) > 0 OR instr(lower(note), lower(?)) > 0)")
-		args = append(args, f.Search, f.Search, f.Search, f.Search)
-	}
-	if f.StatusClass >= 1 && f.StatusClass <= 5 {
-		lo := f.StatusClass * 100
-		where = append(where, "status >= ? AND status < ?")
-		args = append(args, lo, lo+100)
-	}
-	if f.RequireFlags != 0 {
-		where = append(where, "(flags & ?) != 0")
-		args = append(args, f.RequireFlags)
-	}
-	if f.ExcludeFlags != 0 {
-		// A row is hidden if it carries an ExcludeFlags bit — unless it also
-		// carries an IncludeFlags bit, which exempts it (e.g. AI traffic shown
-		// in History despite the Repeater/Intruder/ActiveScan exclusion).
-		if f.IncludeFlags != 0 {
-			where = append(where, "((flags & ?) = 0 OR (flags & ?) != 0)")
-			args = append(args, f.ExcludeFlags, f.IncludeFlags)
-		} else {
-			where = append(where, "(flags & ?) = 0")
-			args = append(args, f.ExcludeFlags)
-		}
-	}
-	for _, m := range f.NotMethods {
-		where = append(where, "method <> ?")
-		args = append(args, m)
-	}
-	for _, h := range f.NotHosts {
-		where = append(where, "instr(lower(host), lower(?)) = 0")
-		args = append(args, h)
-	}
-	for _, p := range f.NotPaths {
-		where = append(where, "instr(lower(path), lower(?)) = 0")
-		args = append(args, p)
-	}
-	for _, st := range f.NotStatuses {
-		where = append(where, "status <> ?")
-		args = append(args, st)
-	}
+	where, args := buildFlowFilterWhere(f)
 
 	q := "SELECT " + flowColumns + " FROM flows"
 	if len(where) > 0 {

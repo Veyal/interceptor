@@ -3,21 +3,24 @@
 // the command palette, global keyboard shortcuts, the live SSE event stream,
 // theme, the version badge, and the boot sequence that kicks everything off.
 import { $, $$, esc, state, api, toast, MODAL_IDS, openModal, closeModal } from './core.js';
-import { applySort, selectFlow, renderChips, loadFlows, loadScope, loadViews, scheduleReload, renderWSFrames, clearAllFilters } from './proxy.js';
+import { selectFlow, renderChips, loadFlows, loadScope, loadViews, scheduleReload, renderWSFrames, clearAllFilters, walkFlowNav, toggleSelectAllShown, handleFlowNew, handleFlowUpdate } from './proxy.js';
 import { renderIntercept, toggleIntercept, loadRules } from './intercept.js';
 import { repInit, repSend, sendToRepeater, sendToIntruder, scheduleIntr } from './tools.js';
 import { loadIssues, runScan, loadScanTargets, openActive, openDecoder, loadActive, loadChecksList, loadOob } from './scanner.js';
 import { loadEndpoints } from './map.js';
 import { loadDiscovery, refreshDiscovery } from './discovery.js';
 import { loadSettings, loadSysProxy, loadSession, loadProject, openProjectModal } from './settings.js';
-import { loadNotes } from './notes.js';
+import { loadNotes, flushNotesSave, focusNotes } from './notes.js';
 import { loadApiKeys, loadReference, loadMCP } from './apipanel.js';
 import { renderActivity, onActivity, loadActivity, clearActSeen } from './activity.js';
 import './ai.js'; // side-effect: wires the AI assist modal (its openAi is also imported by proxy.js)
-import './authz.js'; // side-effect: wires the authorization-test modal (openAuthz also imported by proxy.js)
+import './authz.js'; // side-effect: wires authz modal buttons
+import { openAuthz } from './authz.js';
 
 /* ---- tabs ---- */
 function activateTab(t){
+  const prev=$('.panel.active');
+  if(prev&&prev.dataset.panel==='notes')flushNotesSave();
   const tabs=$$('.tab');
   tabs.forEach(x=>{x.classList.remove('active');x.setAttribute('aria-selected','false');x.tabIndex=-1;});
   t.classList.add('active');t.setAttribute('aria-selected','true');t.tabIndex=0;
@@ -28,6 +31,11 @@ function activateTab(t){
   if(t.dataset.tab==='discover')loadDiscovery();
   if(t.dataset.tab==='map')loadEndpoints();
   if(t.dataset.tab==='notes')loadNotes();
+}
+function goToNotes(){
+  const tab=document.querySelector('.tab[data-tab="notes"]');
+  if(tab)activateTab(tab);
+  focusNotes();
 }
 $$('.tab').forEach(t=>{
   t.onclick=()=>activateTab(t);
@@ -52,24 +60,25 @@ function restoreTab(){
   }catch(e){}
 }
 
-// ↑/↓ walk the visible History rows and load each in the inspector — only on the
-// Proxy tab, never while typing in a field or with a modal/palette open.
+// ↑/↓/j/k walk History; Shift extends range, Ctrl+Shift toggles — only on Proxy tab.
 document.addEventListener('keydown',e=>{
-  if(e.key!=='ArrowDown'&&e.key!=='ArrowUp')return;
+  const mod=e.ctrlKey||e.metaKey;
   const p=document.querySelector('.panel[data-panel="proxy"]');
+  if(p&&p.classList.contains('active')&&mod&&e.shiftKey&&e.key.toLowerCase()==='a'){
+    const t=e.target;
+    if(t&&/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))return;
+    e.preventDefault();toggleSelectAllShown();return;
+  }
+  if(e.key!=='ArrowDown'&&e.key!=='ArrowUp'&&e.key!=='j'&&e.key!=='k')return;
   if(!p||!p.classList.contains('active'))return;
   const t=e.target;
   if(t&&/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))return;
   if(MODAL_IDS.some(id=>{const m=$('#'+id);return m&&m.style.display==='flex';}))return;
   if(typeof cmdk!=='undefined'&&cmdk.open)return;
-  const flows=applySort(state.flows);
-  if(!flows.length)return;
-  const i=flows.findIndex(f=>f.id===state.selId);
-  const ni=i<0?0:(e.key==='ArrowDown'?Math.min(i+1,flows.length-1):Math.max(i-1,0));
-  if(ni===i)return;
+  const down=e.key==='ArrowDown'||e.key==='j';
   e.preventDefault();
-  const id=flows[ni].id;
-  selectFlow(id);
+  const id=walkFlowNav(down,e);
+  if(id==null)return;
   const row=document.querySelector('#rows .trow[data-id="'+id+'"]');
   if(row)row.scrollIntoView({block:'nearest'});
 });
@@ -84,6 +93,18 @@ function renderCapStat(){
   const d=$('#capDot');
   if(ago<3){ s.textContent='· capturing live'; }
   else { if(d)d.classList.remove('live'); s.textContent='· idle · '+capCount+' captured this session'; }
+  renderIcptStat();
+}
+function renderIcptStat(){
+  const el=$('#icptStat'); if(!el)return;
+  const ic=state.intercept||{};
+  const held=(ic.queue||[]).length+(ic.responseQueue||[]).length;
+  const parts=[];
+  if(ic.enabled) parts.push('REQ intercept ON');
+  if(ic.responseEnabled) parts.push('RESP intercept ON');
+  if(held) parts.push(held+' held');
+  if(parts.length){ el.style.display='inline'; el.textContent='· '+parts.join(' · '); }
+  else el.style.display='none';
 }
 setInterval(renderCapStat,1000);
 
@@ -91,11 +112,11 @@ setInterval(renderCapStat,1000);
 function connectEvents(){
   const es=new EventSource('/api/events');
   es.onmessage=e=>{let m;try{m=JSON.parse(e.data);}catch(err){return;}
-    if(m.type==='flow.new'){scheduleReload();onCapture();}
-    else if(m.type==='flow.update'){scheduleReload();if(m.flow&&m.flow.id===state.selId)selectFlow(state.selId);} // response arrived: refresh the open detail
+    if(m.type==='flow.new'){if(m.flow)handleFlowNew(m.flow);else scheduleReload();onCapture();}
+    else if(m.type==='flow.update'){if(m.flow)handleFlowUpdate(m.flow);else scheduleReload();if(m.flow&&m.flow.id===state.selId)selectFlow(state.selId);}
     else if(m.type==='activity')onActivity(m.item);
     else if(m.type==='activity.clear'){state.activity=[];if(document.querySelector('.tab[data-tab="activity"]').classList.contains('active'))renderActivity();clearActSeen();}
-    else if(m.type==='intercept.update'){state.intercept=m.intercept;renderIntercept();}
+    else if(m.type==='intercept.update'){state.intercept=m.intercept;renderIntercept();renderIcptStat();}
     else if(m.type==='rules.update')loadRules();
     else if(m.type==='intruder.update')scheduleIntr();
     else if(m.type==='scanner.update')loadIssues();
@@ -148,7 +169,8 @@ function cmdkCommands(){
     {t:'Go to Scanner',kw:'passive active scan checks findings issues vulnerabilities report',run:go('scanner')},
     {t:'Go to Discover',kw:'content discovery forced browse brute force dirbuster gobuster ffuf wordlist directories endpoints fuzz paths',run:go('discover')},
     {t:'Go to Map',kw:'endpoints attack surface graph tree',run:go('map')},
-    {t:'Go to Notes',kw:'scratchpad markdown findings',run:go('notes')},
+    {t:'Go to Notes',kw:'scratchpad markdown findings notebook',run:goToNotes},
+    {t:'Open Authz test',kw:'authorization access control roles identity',run:()=>{const f=selectedFlow();if(f)openAuthz(f.id);else toast('select a flow in History first');}},
     {t:'Go to Activity',kw:'ai mcp glass box agent log',run:go('activity')},
     {t:'Go to API',kw:'keys tokens rest mcp reference',run:go('api')},
     {t:'Settings: Proxy & network',kw:'listener bind port upstream system proxy capture browser telemetry',run:goSet('proxy')},
@@ -195,15 +217,24 @@ document.addEventListener('keydown',e=>{
   const mod=e.ctrlKey||e.metaKey;
   const tag=(e.target.tagName||'').toLowerCase();
   const typing=tag==='input'||tag==='textarea'||e.target.isContentEditable;
+  if(mod&&e.key.toLowerCase()==='b'){
+    e.preventDefault();goToNotes();return;
+  }
   if(mod&&e.key.toLowerCase()==='k'){e.preventDefault();cmdk.open?cmdkClose():cmdkOpen();return;}
   if(cmdk.open)return; // the palette handles its own keys
-  if(mod&&(e.key===' '||e.code==='Space')){e.preventDefault();document.querySelector('.tab[data-tab="repeater"]').click();repSend();return;} // Ctrl+Space: send in Repeater
-  if(mod&&e.key.toLowerCase()==='r'){const f=selectedFlow();if(f){e.preventDefault();sendToRepeater(f);}return;} // Ctrl+R: → Repeater
-  if(mod&&e.key.toLowerCase()==='i'){const f=selectedFlow();if(f){e.preventDefault();sendToIntruder(f);}return;} // Ctrl+I: → Intruder
-  // Ctrl+F forward / Ctrl+D drop the selected held item — only on the Intercept tab with something held
-  if(mod&&(e.key.toLowerCase()==='f'||e.key.toLowerCase()==='d')&&document.querySelector('.tab[data-tab="intercept"]').classList.contains('active')){
-    const drop=e.key.toLowerCase()==='d';
-    if(state.heldSel){e.preventDefault();$(drop?'#dropBtn':'#forwardBtn').click();return;}
+  if(mod&&(e.key===' '||e.code==='Space')){
+    const rep=document.querySelector('.panel[data-panel="repeater"]');
+    if(!rep||!rep.classList.contains('active'))return;
+    e.preventDefault();repSend();return;
+  }
+  if(mod&&e.key.toLowerCase()==='r'){const f=selectedFlow();if(f){e.preventDefault();sendToRepeater(f);}return;}
+  if(!mod&&!typing&&e.key==='r'){const f=selectedFlow();if(f){const p=document.querySelector('.panel[data-panel="proxy"]');if(p&&p.classList.contains('active')){e.preventDefault();sendToRepeater(f);}}return;}
+  if(mod&&e.key.toLowerCase()==='i'){const f=selectedFlow();if(f){e.preventDefault();sendToIntruder(f);}return;}
+  // Ctrl+Shift+F forward / Ctrl+D drop the selected held item — Intercept tab only
+  if(document.querySelector('.tab[data-tab="intercept"]').classList.contains('active')){
+    const drop=mod&&e.key.toLowerCase()==='d';
+    const fwd=mod&&e.shiftKey&&e.key.toLowerCase()==='f';
+    if((drop||fwd)&&state.heldSel){e.preventDefault();$(drop?'#dropBtn':'#forwardBtn').click();return;}
   }
   if(e.key==='/'&&!typing&&!mod){const s=$('#fSearch');if(s){e.preventDefault();document.querySelector('.tab[data-tab="proxy"]').click();s.focus();}return;} // /: focus search
   if(e.key==='?'&&!typing&&!mod){e.preventDefault();openModal($('#shortcutsModal'));return;} // ?: keyboard cheatsheet
@@ -246,4 +277,6 @@ applyTheme(currentTheme()); // sync the button icon with the theme applied pre-p
 
 /* ---- boot ---- */
 async function refreshIntercept(){try{state.intercept=await api('/api/intercept');renderIntercept();}catch(e){}}
-renderChips();loadSettings();loadSysProxy();loadSession();loadFlows();loadRules();loadScope();loadViews();refreshIntercept();repInit();loadIssues();loadApiKeys();loadReference();loadMCP();loadActivity();loadProject();loadVersion(true);connectEvents();restoreTab();
+renderChips();loadSettings();loadSysProxy();loadSession();loadFlows();loadRules();loadScope();loadViews();refreshIntercept().then(()=>renderIcptStat());repInit();loadIssues();loadApiKeys();loadReference();loadMCP();loadActivity();loadProject();loadVersion(true);connectEvents();restoreTab();
+{const cb=$('#cmdkBtn');if(cb)cb.onclick=()=>cmdkOpen();}
+{const hb=$('#helpBtn');if(hb)hb.onclick=()=>openModal($('#shortcutsModal'));}

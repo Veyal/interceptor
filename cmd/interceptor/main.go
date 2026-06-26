@@ -39,6 +39,18 @@ func main() {
 		case "version", "-v", "--version":
 			fmt.Println("interceptor v" + version.String())
 			return
+		case "update":
+			if err := runUpdate(os.Args[2:]); err != nil {
+				if errors.Is(err, version.ErrRestartRequired) {
+					os.Exit(0)
+				}
+				fmt.Fprintf(os.Stderr, "update failed: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		case "help", "-h", "--help":
+			printUsage()
+			return
 		}
 	}
 	// `interceptor mcp` runs a Model Context Protocol server on stdio that drives
@@ -200,7 +212,7 @@ func run() error {
 			}
 			hub.SetUpdate(latest, newer)
 			if newer {
-				log.Printf("↑ A new version is available: v%s (you have v%s) — https://github.com/%s/releases", latest, version.String(), version.Repo)
+				log.Printf("↑ A new version is available: v%s (you have v%s) — run `interceptor update` or see https://github.com/%s/releases", latest, version.String(), version.Repo)
 			}
 		}()
 	}

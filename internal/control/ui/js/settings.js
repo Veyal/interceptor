@@ -11,15 +11,66 @@ $$('#setNav button').forEach(b=>b.onclick=()=>{
 });
 
 /* ---- settings ---- */
+let savedAiModel='';
+
 export async function loadSettings(){try{const s=await api('/api/settings');state.proxyAddr=s.proxyAddr;$('#proxyAddr').textContent=s.proxyAddr;$('#setAddr').value=s.proxyAddr;
   if($('#setUpstream'))$('#setUpstream').value=s.upstreamProxy||'';
   if($('#setAiProvider'))$('#setAiProvider').value=s.aiProvider||'anthropic';
-  if($('#setAiModel'))$('#setAiModel').value=s.aiModel||'';
+  savedAiModel=s.aiModel||'';
+  if($('#setAiModel'))$('#setAiModel').value=savedAiModel;
   if($('#aiKeyState'))$('#aiKeyState').textContent=s.aiHasKey?'Key configured ✓':'No key set.';
   if($('#capScopeToggle'))setCapScope(!!s.captureScopeOnly);
   if($('#suppressTelemetryToggle'))setSuppressTelemetry(s.suppressBrowserTelemetry!==false);
-  aiPlaceholders();
+  aiSyncProviderUI();
   state.intercept.enabled=s.interceptEnabled;}catch(e){}}
+
+function aiIsOpenRouter(){return ($('#setAiProvider')||{}).value==='openrouter';}
+
+export function aiSyncProviderUI(){
+  if(!$('#setAiProvider'))return;
+  const or=aiIsOpenRouter();
+  const inp=$('#setAiModel'),sel=$('#setAiModelSelect'),loadBtn=$('#loadAiModelsBtn'),hint=$('#setAiModelHint');
+  if(inp)inp.style.display=or?'none':'';
+  if(sel)sel.style.display=or?'':'none';
+  if(loadBtn)loadBtn.style.display=or?'':'none';
+  if(hint)hint.textContent=or?'(required — pick from list)':'(optional)';
+  aiPlaceholders();
+  if(or)loadOpenRouterModels(false);
+}
+
+export async function loadOpenRouterModels(force){
+  if(!aiIsOpenRouter())return;
+  const sel=$('#setAiModelSelect'),stateEl=$('#aiValidateState');
+  if(!sel)return;
+  const key=($('#setAiKey')||{}).value.trim();
+  if(!key&&!force&&sel.options.length>1)return;
+  sel.disabled=true;
+  if(stateEl)stateEl.textContent='Loading models…';
+  try{
+    const q=key?'?key='+encodeURIComponent(key):'';
+    const d=await api('/api/ai/openrouter/models'+q);
+    const cur=sel.value||savedAiModel;
+    sel.innerHTML='<option value="">— select a model —</option>'+
+      (d.models||[]).map(m=>`<option value="${escAttr(m.id)}">${esc(m.name||m.id)}</option>`).join('');
+    if(cur&&[...sel.options].some(o=>o.value===cur))sel.value=cur;
+    else if(savedAiModel&&[...sel.options].some(o=>o.value===savedAiModel))sel.value=savedAiModel;
+    if(stateEl){
+      if(d.keyError)stateEl.textContent=d.keyError;
+      else if(d.keyValid)stateEl.textContent='Key valid ✓';
+      else stateEl.textContent=key?'':'Enter API key, then load models';
+    }
+  }catch(e){
+    if(stateEl)stateEl.textContent='';
+    toast('models: '+e.message);
+  }finally{sel.disabled=false;}
+}
+
+export function aiPlaceholders(){if(!$('#setAiProvider'))return;
+  const p=$('#setAiProvider').value;
+  if(p==='openrouter'){$('#setAiKey').placeholder='sk-or-…';}
+  else{$('#setAiKey').placeholder='sk-ant-…';$('#setAiModel').placeholder='claude-haiku-4-5-20251001';}}
+if($('#setAiProvider'))$('#setAiProvider').onchange=aiSyncProviderUI;
+if($('#loadAiModelsBtn'))$('#loadAiModelsBtn').onclick=()=>loadOpenRouterModels(true);
 export function setCapScope(on){const b=$('#capScopeToggle');if(!b)return;b.classList.toggle('on',on);b.setAttribute('aria-pressed',on?'true':'false');b.textContent=on?'Saving in-scope only':'Saving all traffic';}
 $('#capScopeToggle')&&($('#capScopeToggle').onclick=async()=>{
   const on=!$('#capScopeToggle').classList.contains('on');
@@ -32,20 +83,26 @@ $('#suppressTelemetryToggle')&&($('#suppressTelemetryToggle').onclick=async()=>{
   try{await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({suppressBrowserTelemetry:on})});setSuppressTelemetry(on);toast(on?'Browser telemetry suppressed':'Browser telemetry now visible in history');}
   catch(e){toast('telemetry: '+e.message);}
 });
-export function aiPlaceholders(){if(!$('#setAiProvider'))return;
-  const p=$('#setAiProvider').value;
-  if(p==='openrouter'){$('#setAiKey').placeholder='sk-or-…';$('#setAiModel').placeholder='anthropic/claude-3.5-haiku';}
-  else{$('#setAiKey').placeholder='sk-ant-…';$('#setAiModel').placeholder='claude-haiku-4-5-20251001';}}
-if($('#setAiProvider'))$('#setAiProvider').onchange=aiPlaceholders;
 $('#saveUpstreamBtn').onclick=async()=>{
   try{await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({upstreamProxy:$('#setUpstream').value.trim()})});
     toast('upstream proxy saved');}catch(e){toast(e.message);}
 };
 $('#saveAiBtn').onclick=async()=>{
-  const body={aiProvider:$('#setAiProvider').value,aiModel:$('#setAiModel').value.trim()};
+  const provider=$('#setAiProvider').value;
+  const body={aiProvider:provider};
   if($('#setAiKey').value)body.aiApiKey=$('#setAiKey').value;
-  try{await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
-    $('#setAiKey').value='';toast('AI settings saved');loadSettings();}catch(e){toast(e.message);}
+  if(provider==='openrouter'){
+    const model=($('#setAiModelSelect')||{}).value;
+    if(!model){toast('Select an OpenRouter model from the list');return;}
+    body.aiModel=model;
+  }else{
+    const model=$('#setAiModel').value.trim();
+    if(model)body.aiModel=model;
+  }
+  try{
+    await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+    $('#setAiKey').value='';toast('AI settings saved');loadSettings();
+  }catch(e){toast(e.message);}
 };
 export async function loadSession(){try{const s=await api('/api/session');
   if($('#setSessionOn'))$('#setSessionOn').checked=!!s.enabled;
@@ -59,15 +116,28 @@ export async function loadSession(){try{const s=await api('/api/session');
   if($('#macroExtract'))$('#macroExtract').value=m.extract||'';
   if($('#macroMode'))$('#macroMode').value=m.injectMode||'header';
   if($('#macroName'))$('#macroName').value=m.injectName||'';
+  const lm=s.loginMacro||{};
+  if($('#loginMacroOn'))$('#loginMacroOn').checked=!!lm.enabled;
+  if($('#loginMacroReq'))$('#loginMacroReq').value=lm.request||'';
+  if($('#loginMacroTarget'))$('#loginMacroTarget').value=lm.target||'';
+  if($('#loginMacroRefresh'))$('#loginMacroRefresh').value=lm.refreshSecs||0;
+  if($('#loginMacro401'))$('#loginMacro401').checked=lm.reauthOn401!==false;
+  if($('#loginMacroState'))$('#loginMacroState').textContent=lm.enabled?'Login macro configured':'';
 }catch(e){}}
+function loginMacroBody(){
+  return {enabled:$('#loginMacroOn').checked,target:$('#loginMacroTarget').value.trim(),request:$('#loginMacroReq').value,
+    refreshSecs:parseInt(($('#loginMacroRefresh')||{}).value,10)||0,reauthOn401:!!($('#loginMacro401')||{}).checked};
+}
 // Save session headers + the token macro together (the endpoint takes both).
 function saveSessionAll(){
   const macro={enabled:$('#macroOn').checked,target:$('#macroTarget').value.trim(),request:$('#macroReq').value,extract:$('#macroExtract').value.trim(),injectMode:$('#macroMode').value,injectName:$('#macroName').value.trim()};
-  const body={enabled:$('#setSessionOn').checked,headers:$('#setSessionHeaders').value,macro};
+  const body={enabled:$('#setSessionOn').checked,headers:$('#setSessionHeaders').value,macro,loginMacro:loginMacroBody()};
   return api('/api/session',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
 }
 if($('#saveSessionBtn'))$('#saveSessionBtn').onclick=async()=>{try{await saveSessionAll();toast('session saved');loadSession();}catch(e){toast(e.message);}};
 if($('#macroSave'))$('#macroSave').onclick=async()=>{try{await saveSessionAll();toast($('#macroOn').checked?'token macro on — fires before each send':'macro saved');loadSession();}catch(e){toast(e.message);}};
+if($('#loginMacroSave'))$('#loginMacroSave').onclick=async()=>{try{await saveSessionAll();toast('login macro saved');loadSession();}catch(e){toast(e.message);}};
+if($('#loginMacroRun'))$('#loginMacroRun').onclick=async()=>{try{await saveSessionAll();const r=await api('/api/session/login/run',{method:'POST'});toast('session refreshed ('+r.applied+' header'+(r.applied===1?'':'s')+')');loadSession();}catch(e){toast(e.message);}};
 
 /* ---- data retention panel ---- */
 export let retentionStats=null; // cached from last fetch

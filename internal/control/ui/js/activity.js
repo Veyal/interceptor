@@ -1,20 +1,34 @@
-import { $, esc, api, state } from './core.js';
+import { $, esc, api, state, toast } from './core.js';
+import { selectFlow } from './proxy.js';
 
 /* ---- AI activity feed (glass box: watch what the AI is doing, live) ---- */
 export const ACT_MAX=300;
 export function actTime(ts){const d=new Date(ts);const p=n=>String(n).padStart(2,'0');return p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());}
+function flowIdFromActivity(it){
+  const m=(it.result||it.summary||'').match(/flow #(\d+)/i);
+  return m?Number(m[1]):null;
+}
 export function renderActivity(){
   const box=$('#actFeed');if(!box)return;
   const a=state.activity;
   $('#actCount').textContent=a.length?a.length+(a.length===1?' action':' actions'):'';
   if(!a.length){box.innerHTML='<div class="empty">No AI activity yet.<br>Point your AI assistant at this project over MCP (API → MCP) and its every move shows up here, live.</div>';return;}
-  box.innerHTML=a.map(it=>`<div class="act-row">
+  box.innerHTML=a.map((it,i)=>{
+    const fid=flowIdFromActivity(it);
+    return `<div class="act-row${fid?' act-jump':''}" data-flow="${fid||''}" data-i="${i}" title="${fid?'Open flow #'+fid+' in History':''}">
     <span class="ok" style="background:${it.ok?'var(--accent)':'var(--red)'}" title="${it.ok?'ok':'error'}"></span>
     <span class="act-tool">${esc(it.tool)}</span>
     <span class="act-sum">${esc(it.summary||'')}</span>
     <span class="act-res">${esc(it.result||'')}</span>
     <span class="act-meta">${it.ms}ms · ${actTime(it.ts)}</span>
-  </div>`).join('');
+  </div>`;
+  }).join('');
+  box.querySelectorAll('.act-row.act-jump').forEach(row=>row.onclick=()=>{
+    const id=Number(row.dataset.flow);
+    if(!id)return;
+    document.querySelector('.tab[data-tab="proxy"]').click();
+    selectFlow(id);
+  });
 }
 export let aiPulseTimer=null;
 export function flashAiPulse(tool){
@@ -37,3 +51,4 @@ export async function loadActivity(){try{const d=await api('/api/activity');stat
 export function clearActSeen(){state.actUnseen=0;const b=$('#actBadge');if(b)b.style.display='none';}
 $('#actClear').onclick=async()=>{try{await api('/api/activity',{method:'DELETE'});}catch(e){}state.activity=[];renderActivity();clearActSeen();};
 $('#aiPulse').onclick=()=>document.querySelector('.tab[data-tab="activity"]').click();
+$('#aiPulse').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('#aiPulse').click();}});

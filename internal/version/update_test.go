@@ -1,0 +1,88 @@
+package version
+
+import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
+	"strings"
+	"testing"
+)
+
+func TestPickAsset(t *testing.T) {
+	rel := &releaseInfo{
+		Tag: "v1.2.3",
+		Assets: []releaseAsset{
+			{Name: "interceptor_1.2.3_linux_amd64.tar.gz", URL: "https://ex/linux"},
+			{Name: "interceptor_1.2.3_darwin_arm64.tar.gz", URL: "https://ex/darwin"},
+			{Name: "checksums.txt", URL: "https://ex/sums"},
+		},
+	}
+	name, url := pickAssetFor(rel, "1.2.3", "linux", "amd64")
+	if name != "interceptor_1.2.3_linux_amd64.tar.gz" || url != "https://ex/linux" {
+		t.Fatalf("linux: %q %q", name, url)
+	}
+	name, url = pickAssetFor(rel, "1.2.3", "darwin", "arm64")
+	if url != "https://ex/darwin" {
+		t.Fatalf("darwin: %q %q", name, url)
+	}
+}
+
+func pickAssetFor(rel *releaseInfo, version, goos, goarch string) (string, string) {
+	candidates := assetCandidates(version, goos, goarch)
+	byName := map[string]string{}
+	for _, a := range rel.Assets {
+		byName[strings.ToLower(a.Name)] = a.URL
+	}
+	for _, c := range candidates {
+		if u, ok := byName[strings.ToLower(c)]; ok {
+			return c, u
+		}
+	}
+	osToken, archToken := platformTokens(goos, goarch)
+	for _, a := range rel.Assets {
+		low := strings.ToLower(a.Name)
+		if !strings.HasSuffix(low, ".tar.gz") && !strings.HasSuffix(low, ".zip") {
+			continue
+		}
+		if strings.Contains(low, osToken) && strings.Contains(low, archToken) {
+			return a.Name, a.URL
+		}
+	}
+	return "", ""
+}
+
+func TestUntarGz(t *testing.T) {
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+	_ = tw.WriteHeader(&tar.Header{Name: "interceptor", Mode: 0o755, Size: 3})
+	_, _ = tw.Write([]byte("bin"))
+	_ = tw.Close()
+	_ = gw.Close()
+
+	got, err := untarGz(buf.Bytes())
+	if err != nil || string(got) != "bin" {
+		t.Fatalf("untarGz: %q err=%v", got, err)
+	}
+}
+
+func TestVerifySHA256(t *testing.T) {
+	data := []byte("hello")
+	sum := sha256.Sum256(data)
+	hexSum := hex.EncodeToString(sum[:])
+	if err := verifySHA256(data, hexSum); err != nil {
+		t.Fatal(err)
+	}
+	if verifySHA256(data, "deadbeef") == nil {
+		t.Fatal("expected mismatch")
+	}
+}
+
+func TestAssetCandidates(t *testing.T) {
+	c := assetCandidates("0.7.0", "linux", "amd64")
+	if len(c) < 2 || c[0] != "interceptor_0.7.0_linux_amd64.tar.gz" {
+		t.Fatalf("unexpected candidates: %v", c)
+	}
+}
