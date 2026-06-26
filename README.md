@@ -42,7 +42,7 @@ tester's direction and **entirely on the local machine**.
   resends for race conditions), with thread + delay controls, payload processing (url/base64/…),
   **grep-match/extract**, anomaly flagging, attack tabs and run history.
 - **Authorization testing** — replay a request as each saved identity (role) and diff for broken
-  access control (IDOR). **OOB interaction catcher** for blind SSRF/XXE/SQLi/RCE.
+  access control (IDOR). **OOB interaction catcher** for blind SSRF/XXE/SQLi/RCE (off by default — remote targets cannot reach `localhost`; enable in Settings → Scanner when you have a tunnel or public URL).
 - **Content discovery** — scope-aware forced-browse (dirbuster/ffuf-style): wordlist + extensions,
   per-directory soft-404 calibration, recursion, threads/delay; found endpoints feed History & the Map.
 - **AI assist** — BYO-key LLM explains requests, suggests payloads (with Repeater/Intruder routing),
@@ -63,7 +63,7 @@ tester's direction and **entirely on the local machine**.
 - **BYO-key AI assist** — explain a request, suggest payloads, or summarize findings via your own
   **Anthropic** or **OpenRouter** key (off until you set one; the exchange is sent only on request).
 - **API & MCP** — a REST control API + SSE event stream and a full **Model Context Protocol** server
-  (41 tools, stdio **and** Streamable-HTTP) so an agent or script drives the same core as the UI.
+  (49 tools, stdio **and** Streamable-HTTP) so an agent or script drives the same core as the UI.
 
 ## Install
 
@@ -170,7 +170,7 @@ the same capabilities as the UI. Run the app, then connect your MCP client one o
 **Streamable-HTTP** (hosted/remote agents) — `POST` JSON-RPC to `http://127.0.0.1:9966/mcp`
 (stateless; no subprocess needed).
 
-Both expose the same **41 tools** — reading flows (`list_flows`, `get_flow`, `analyze_flow`,
+Both expose the same **49 tools** — reading flows (`list_flows`, `get_flow`, `analyze_flow`,
 `flow_as_curl`), replaying/fuzzing (`send_request`, `start_intruder`, `ws_send`), scanning
 (`run_scanner`, `scan_report`), intercept/rules/scope control, and `set_session` — with bounded
 results so large bodies don't blow the agent's context. The UI's **API → MCP** tab shows a

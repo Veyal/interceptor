@@ -24,6 +24,7 @@ type projectBundle struct {
 	Rules    []store.Rule      `json:"rules"`
 	Scope    []store.ScopeRule `json:"scope"`
 	Settings map[string]string `json:"settings"`
+	Notes    string            `json:"notes,omitempty"`
 }
 
 func (h *Hub) exportProject(w http.ResponseWriter, r *http.Request) {
@@ -35,12 +36,15 @@ func (h *Hub) exportProject(w http.ResponseWriter, r *http.Request) {
 	rules, _ := h.st.ListRules()
 	scope, _ := h.st.ListScopeRules()
 	up, _, _ := h.st.GetSetting("upstream.proxy")
+	authz, _, _ := h.st.GetSetting("authz.identities")
+	notes, _ := h.st.LoadNotes()
 	bundle := projectBundle{
 		Version:  "1",
 		HAR:      json.RawMessage(harx.Build(flows, h.bodyBytes)),
 		Rules:    rules,
 		Scope:    scope,
-		Settings: map[string]string{"upstream.proxy": up},
+		Notes:    notes,
+		Settings: map[string]string{"upstream.proxy": up, "authz.identities": authz},
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", `attachment; filename="interceptor-project.json"`)
@@ -102,6 +106,14 @@ func (h *Hub) importProject(w http.ResponseWriter, r *http.Request) {
 			_ = h.Upstream(up)
 		}
 		_ = h.st.SetSetting("upstream.proxy", up)
+	}
+	if authz, ok := bundle.Settings["authz.identities"]; ok && authz != "" {
+		_ = h.st.SetSetting("authz.identities", authz)
+	}
+	if strings.TrimSpace(bundle.Notes) != "" {
+		if _, err := h.st.PersistNotes(bundle.Notes); err == nil {
+			h.broadcast(map[string]any{"type": "notes.update"})
+		}
 	}
 
 	h.refreshRules()

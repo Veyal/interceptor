@@ -66,3 +66,26 @@ func TestIDsAreSandboxed(t *testing.T) {
 		}
 	}
 }
+
+func TestMergeDir(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "src")
+	dst := t.TempDir()
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "a.star"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	n, err := MergeDir(src, dst)
+	if err != nil || n != 1 {
+		t.Fatalf("MergeDir = %d, %v", n, err)
+	}
+	n, err = MergeDir(src, dst)
+	if err != nil || n != 0 {
+		t.Fatalf("second MergeDir = %d, %v", n, err)
+	}
+	n, err = MergeDir(filepath.Join(t.TempDir(), "missing"), dst)
+	if err != nil || n != 0 {
+		t.Fatalf("missing src MergeDir = %d, %v", n, err)
+	}
+}

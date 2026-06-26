@@ -233,3 +233,26 @@ func TestStopHalts(t *testing.T) {
 		t.Fatal("engine should stop running after Stop()")
 	}
 }
+
+func TestRecorderSetsFlowID(t *testing.T) {
+	fp := newFakeProbe(map[string]Outcome{
+		"https://t/admin": {Status: 200, Length: 100},
+	})
+	e := New()
+	e.SetProbe(fp.probe())
+	e.SetRecorder(func(r Result) int64 {
+		if r.URL == "https://t/admin" {
+			return 42
+		}
+		return 0
+	})
+	results := runSync(t, e, Spec{
+		BaseURL: "https://t/", Words: []string{"admin"}, Threads: 1,
+	})
+	if len(results) != 1 {
+		t.Fatalf("got %d results, want 1", len(results))
+	}
+	if results[0].FlowID != 42 {
+		t.Fatalf("flowId = %d, want 42", results[0].FlowID)
+	}
+}

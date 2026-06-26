@@ -1,4 +1,4 @@
-import { $, esc, escAttr, toast, api, methodColor, statusColor, statusText, highlightHTTP, prettify, fmtDur, fmtSize } from './core.js';
+import { $, esc, escAttr, toast, api, methodColor, statusColor, statusText, highlightHTTP, prettify, beautifyBody, fmtDur, fmtSize, openCtxMenu, DEC_OPS, contentTypeFromRaw, pickTextFile, applyTextList, countListLines, normalizeListText } from './core.js';
 
 // repStatusLine builds a rich response summary: "200 OK · 142 ms · 4.1 KB".
 function repStatusLine(f){
@@ -8,12 +8,26 @@ function repStatusLine(f){
 
 /* ---- repeater (multi-tab; each tab = an endpoint with its own history) ---- */
 export let repSeq=1, repTabs=[], repActive=null;
-export function repBlank(){return {tid:repSeq++,title:'new tab',method:'GET',url:'',headers:'',body:'',resId:null,resView:'pretty',status:'',color:''};}
+export function repBlank(){return {tid:repSeq++,title:'new tab',method:'GET',url:'',headers:'',body:'',reqView:'raw',resId:null,resView:'pretty',status:'',color:''};}
 export function repCur(){return repTabs.find(t=>t.tid===repActive)||null;}
 export function repTitle(t){if(!t.url)return 'new tab';try{const u=new URL(t.url);return t.method+' '+u.host+u.pathname;}catch(e){return t.method+' '+t.url.slice(0,46);}}
 export function repTabEndpoint(t){if(!t||!t.url)return null;try{const u=new URL(t.url);return u.host+u.pathname;}catch(e){return null;}}
 export function repFlowEndpoint(f){return f.host+String(f.path||'').split('?')[0];}
 export function headersToText(h){if(!h)return'';const out=[];(h.Host||[]).forEach(v=>out.push('Host: '+v));Object.keys(h).sort().forEach(k=>{if(k==='Host')return;(h[k]||[]).forEach(v=>out.push(k+': '+v));});return out.join('\n');}
+
+function compactBody(s){
+  const t=(s||'').replace(/^\uFEFF/,'').trim();
+  if(t&&(t[0]==='{'||t[0]==='[')){try{return JSON.stringify(JSON.parse(t));}catch(e){}}
+  return s||'';
+}
+function repBodyForDisplay(body,view){
+  if(view==='pretty')return beautifyBody(body||'');
+  return body||'';
+}
+function repSyncReqSeg(view){
+  const seg=$('#repReqSeg');if(!seg)return;
+  seg.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.view===view));
+}
 
 export function renderRepTabs(){
   const bar=$('#repTabs');if(!bar)return;
@@ -37,7 +51,10 @@ export function repCloseTab(tid){
 export function repSaveEditor(){const t=repCur();if(!t)return;t.method=$('#repMethod').value;t.url=$('#repUrl').value;t.headers=$('#repHeaders').value;t.body=$('#repBody').value;t.title=repTitle(t);}
 export function repLoadEditor(){
   const t=repCur();if(!t)return;
-  $('#repMethod').value=t.method||'GET';$('#repUrl').value=t.url||'';$('#repHeaders').value=t.headers||'';$('#repBody').value=t.body||'';
+  $('#repMethod').value=t.method||'GET';$('#repUrl').value=t.url||'';$('#repHeaders').value=t.headers||'';
+  const rv=t.reqView||'raw';
+  repSyncReqSeg(rv);
+  $('#repBody').value=repBodyForDisplay(t.body,rv);
   $('#repResSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.view===(t.resView||'pretty')));
   if(t.resId){$('#repStatus').textContent=t.status||'';$('#repStatus').style.color=t.color||'var(--fg3)';renderRepResponse();}
   else{$('#repStatus').textContent='';$('#repResView').innerHTML='<span style="color:var(--fg3)">Send a request to see the response.</span>';}
@@ -46,6 +63,9 @@ export function repLoadEditor(){
 export async function repSend(){
   repSaveEditor();const t=repCur();if(!t)return;
   if(!(t.url||'').trim()){toast('enter a URL');return;}
+  t.body=compactBody(t.body);
+  if((t.reqView||'raw')==='pretty')$('#repBody').value=repBodyForDisplay(t.body,'pretty');
+  else $('#repBody').value=t.body;
   $('#repSend').textContent='Sending…';$('#repSend').disabled=true;
   $('#repStatus').textContent='sending…';$('#repStatus').style.color='var(--fg3)';
   $('#repResView').innerHTML='<span class="blink" style="color:var(--fg3)">sending…</span>';
@@ -60,7 +80,7 @@ export async function repSend(){
 }
 export async function renderRepResponse(){
   const t=repCur();if(!t||!t.resId)return;
-  try{const raw=await api('/api/flows/'+t.resId+'/raw?side=res');$('#repResView').innerHTML=highlightHTTP((t.resView==='pretty')?prettify(raw):raw,t.resView==='pretty');}
+  try{const raw=await api('/api/flows/'+t.resId+'/raw?side=res');$('#repResView').innerHTML=highlightHTTP((t.resView==='pretty')?prettify(raw):raw,t.resView==='pretty',contentTypeFromRaw(raw));}
   catch(e){$('#repResView').textContent='(error: '+e.message+')';}
 }
 export async function loadRepHistory(){
@@ -106,13 +126,13 @@ export async function sendToRepeater(f){
     toast('loaded #'+f.id+' into Repeater');
   }catch(e){toast(e.message);}
 }
-export function repPersist(){try{localStorage.setItem('rep.tabs',JSON.stringify({seq:repSeq,active:repActive,tabs:repTabs.map(t=>({tid:t.tid,method:t.method,url:t.url,headers:t.headers,body:t.body,resView:t.resView}))}));}catch(e){}}
+export function repPersist(){try{localStorage.setItem('rep.tabs',JSON.stringify({seq:repSeq,active:repActive,tabs:repTabs.map(t=>({tid:t.tid,method:t.method,url:t.url,headers:t.headers,body:t.body,reqView:t.reqView||'raw',resView:t.resView}))}));}catch(e){}}
 export let repPersistT=null;export function repPersistDebounced(){clearTimeout(repPersistT);repPersistT=setTimeout(repPersist,400);}
 export function repInit(){
   let ok=false;
   try{const d=JSON.parse(localStorage.getItem('rep.tabs')||'null');
     if(d&&d.tabs&&d.tabs.length){
-      repTabs=d.tabs.map(t=>({tid:t.tid,method:t.method||'GET',url:t.url||'',headers:t.headers||'',body:t.body||'',resView:t.resView||'pretty',resId:null,status:'',color:'',title:''}));
+      repTabs=d.tabs.map(t=>({tid:t.tid,method:t.method||'GET',url:t.url||'',headers:t.headers||'',body:t.body||'',reqView:t.reqView||'raw',resView:t.resView||'pretty',resId:null,status:'',color:'',title:''}));
       repTabs.forEach(t=>t.title=repTitle(t));
       repActive=(d.active&&repTabs.find(x=>x.tid===d.active))?d.active:repTabs[0].tid;
       repSeq=Math.max(d.seq||0,Math.max.apply(null,repTabs.map(t=>t.tid))+1);ok=true;
@@ -122,8 +142,46 @@ export function repInit(){
   renderRepTabs();repLoadEditor();
   ['#repMethod','#repUrl'].forEach(s=>{const el=$(s);if(el)el.addEventListener('input',()=>{repSaveEditor();renderRepTabs();repPersistDebounced();});});
   ['#repHeaders','#repBody'].forEach(s=>{const el=$(s);if(el)el.addEventListener('input',()=>{repSaveEditor();repPersistDebounced();});});
+  repWireEncodeCtx();
+}
+async function repEncodeSel(el,op){
+  const a=el.selectionStart,b=el.selectionEnd,s=el.value.substring(a,b);
+  if(!s){toast('select text first');return;}
+  try{
+    const r=await api('/api/decode',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({op,input:s})});
+    if(r.error){toast(r.error);return;}
+    el.value=el.value.slice(0,a)+r.output+el.value.slice(b);
+    el.selectionStart=a;el.selectionEnd=a+r.output.length;
+    repSaveEditor();repPersistDebounced();
+  }catch(e){toast(e.message);}
+}
+function repShowEncodeCtx(e,el){
+  const a=el.selectionStart,b=el.selectionEnd,s=el.value.substring(a,b);
+  if(!s)return;
+  e.preventDefault();
+  const short=s.length>28?s.slice(0,28)+'…':s;
+  const items=DEC_OPS.filter(([op])=>op!=='jwtdecode'&&op!=='smart')
+    .map(([op,label])=>({label,val:label,act:()=>repEncodeSel(el,op)}));
+  openCtxMenu(e.clientX,e.clientY,[{head:'ENCODE · '+short,items}]);
+}
+function repWireEncodeCtx(){
+  ['#repUrl','#repHeaders','#repBody'].forEach(sel=>{
+    const el=$(sel);if(!el)return;
+    el.addEventListener('contextmenu',e=>repShowEncodeCtx(e,el));
+  });
 }
 $('#repSend').onclick=repSend;
+$('#repReqSeg')&&$('#repReqSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  const t=repCur();if(!t)return;
+  const next=b.dataset.view;
+  if(next===(t.reqView||'raw'))return;
+  repSaveEditor();
+  if((t.reqView||'raw')==='pretty'&&next==='raw')t.body=compactBody(t.body);
+  t.reqView=next;
+  repSyncReqSeg(next);
+  $('#repBody').value=repBodyForDisplay(t.body,next);
+  repPersistDebounced();
+});
 $('#repResSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{const t=repCur();if(t)t.resView=b.dataset.view;$('#repResSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));renderRepResponse();});
 
 /* ---- intruder ---- */
@@ -142,7 +200,8 @@ function intrMarkers(){return (($('#intrTemplate').value||'').match(/§[^§]*§/
 let intrSeq=1, intrTabs=[], intrActive=null, intrPersistT=null;
 function intrBlank(){return {tid:intrSeq++,target:'',template:INTR_TPL,type:'sniper',threads:1,delay:0,repeat:20,sniper:INTR_SNIPER,pos:INTR_POS.slice(),grep:'',extract:'',proc:''};}
 function intrCur(){return intrTabs.find(t=>t.tid===intrActive)||null;}
-function intrTitle(t){if(!t)return 'new attack';let h='';try{h=new URL(t.target).host;}catch(e){h=(t.target||'').replace(/^https?:\/\//,'');}return (t.type||'sniper')+(h?' · '+h:' attack');}
+function intrTypeLabel(t){return t==='repeat'?'null':(t||'sniper');}
+function intrTitle(t){if(!t)return 'new attack';let h='';try{h=new URL(t.target).host;}catch(e){h=(t.target||'').replace(/^https?:\/\//,'');}return intrTypeLabel(t.type)+(h?' · '+h:' attack');}
 function intrReadEditor(){return {target:$('#intrTarget').value,template:$('#intrTemplate').value,
   threads:parseInt($('#intrThreads').value,10)||1,delay:parseInt($('#intrDelay').value,10)||0,repeat:parseInt($('#intrRepeat').value,10)||20,
   grep:$('#intrGrep').value,extract:$('#intrExtract').value,proc:$('#intrProc').value,
@@ -189,7 +248,7 @@ function renderIntrHistory(){
   if(tg)tg.textContent='⟲ History'+(intrHistory.length?' ('+intrHistory.length+')':'');
   if(!box)return;
   if(!intrHistory.length){box.innerHTML='<div class="hint" style="padding:10px">No attacks yet this session.</div>';return;}
-  box.innerHTML=intrHistory.map((h,i)=>`<div class="h" data-i="${i}" title="re-open this run + its config"><div><span style="font-weight:700;text-transform:capitalize">${esc(h.type)}</span> <span style="color:var(--fg3)">${h.total} req${h.flagged?' · <span style="color:var(--accent)">'+h.flagged+'⚑</span>':''}</span></div><div class="u">${esc(h.target||'')}</div></div>`).join('');
+  box.innerHTML=intrHistory.map((h,i)=>`<div class="h" data-i="${i}" title="re-open this run + its config"><div><span style="font-weight:700;text-transform:capitalize">${esc(intrTypeLabel(h.type))}</span> <span style="color:var(--fg3)">${h.total} req${h.flagged?' · <span style="color:var(--accent)">'+h.flagged+'⚑</span>':''}</span></div><div class="u">${esc(h.target||'')}</div></div>`).join('');
   box.querySelectorAll('.h').forEach(el=>el.onclick=()=>intrLoadHistory(Number(el.dataset.i)));
 }
 function intrLoadHistory(i){
@@ -203,27 +262,50 @@ $('#intrHistToggle')&&($('#intrHistToggle').onclick=()=>{const h=$('#intrHistory
 
 function intrModeText(){
   if(intrState.type==='repeat')
-    return 'Race — sends the request as-is N times, no payloads or § markers needed. For a race condition set a high thread count and 0 ms delay so the requests hit together.';
+    return 'Null — resend the template verbatim with no payloads or § markers. Use for duplicate submits, idempotency checks, rate limits, or concurrent replays (raise threads, 0 ms delay).';
   return intrState.type==='pitchfork'
-    ? 'Pitchfork — one payload list per § marker (colour-matched below). Lists advance together, so mark N injection points → fill N lists; fires min(list lengths) requests.'
-    : 'Sniper — a single payload list, tried at each § marker one position at a time (the others keep their original value).';
+    ? 'Pitchfork — one payload list per § marker (colour-matched below). Lists advance together, so mark N injection points → fill N lists; fires min(list lengths) requests. Load each list from a file with 📂 / ＋.'
+    : 'Sniper — a single payload list, tried at each § marker one position at a time (the others keep their original value). Load payloads from a file with 📂 / ＋.';
+}
+const INTR_FILE_BTNS=`<div class="spacer"></div><button type="button" class="btn intr-file-load" data-mode="replace" title="Load payloads from file">📂</button><button type="button" class="btn intr-file-load" data-mode="append" title="Append payloads from file">＋</button>`;
+async function intrLoadPayloadFile(ta, append){
+  try{
+    const got=await pickTextFile();
+    if(!got||!ta) return;
+    applyTextList(ta, got.text, {append});
+    const p=ta.dataset.pos;
+    if(p==='s') intrState.sniper=ta.value;
+    else intrState.pos[Number(p)]=ta.value;
+    updateIntrCount();
+    intrTouch();
+    const n=countListLines(got.text);
+    toast((append?'appended ':'loaded ')+n+' payload'+(n===1?'':'s')+' from '+got.name);
+  }catch(e){ toast(e.message); }
+}
+function wireIntrPayloadFileButtons(wrap){
+  if(!wrap) return;
+  wrap.querySelectorAll('.intr-file-load').forEach(btn=>btn.onclick=e=>{
+    e.stopPropagation();
+    const ta=btn.closest('.intr-pl')?.querySelector('textarea');
+    if(ta) intrLoadPayloadFile(ta, btn.dataset.mode==='append');
+  });
 }
 // Build the payload inputs: one shared list for Sniper, one colour-coded list per
 // marker for Pitchfork. Values persist in intrState across re-renders.
 function renderPayloadInputs(){
   const wrap=$('#intrPayloadsWrap');if(!wrap)return;
   if(intrState.type==='repeat'){
-    wrap.innerHTML='<div class="hint">Race mode needs no payloads — the request above is sent verbatim <b>×'+(parseInt($('#intrRepeat').value,10)||0)+'</b> times across <b>'+(parseInt($('#intrThreads').value,10)||1)+'</b> threads. Tune the count and threads in the bar above.</div>';
+    wrap.innerHTML='<div class="hint">Null mode — no payload lists. The request above is sent verbatim <b>×'+(parseInt($('#intrRepeat').value,10)||0)+'</b> times across <b>'+(parseInt($('#intrThreads').value,10)||1)+'</b> threads.</div>';
     updateIntrCount();return;
   }
   if(intrState.type!=='pitchfork'){
-    wrap.innerHTML=`<div class="intr-pl"><div class="intr-pl-h"><span class="sw" style="background:var(--accent)"></span>ALL § POSITIONS</div><textarea class="rep-edit" data-pos="s" spellcheck="false" placeholder="one payload per line"></textarea></div>`;
+    wrap.innerHTML=`<div class="intr-pl"><div class="intr-pl-h"><span class="sw" style="background:var(--accent)"></span>ALL § POSITIONS${INTR_FILE_BTNS}</div><textarea class="rep-edit" data-pos="s" spellcheck="false" placeholder="one payload per line"></textarea></div>`;
   }else{
     const mk=intrMarkers();
     if(!mk.length){wrap.innerHTML='<div class="hint">Mark injection points with <b>§…§</b> in the template (select text → <b>§ Mark</b>). Each marker gets its own colour-matched payload list here.</div>';updateIntrCount();return;}
     wrap.innerHTML=mk.map((content,i)=>{const c=POS_COLORS[i%POS_COLORS.length];
       return `<div class="intr-pl" style="border-top:2px solid ${c}">
-        <div class="intr-pl-h" title="payloads for the ${ordinal(i+1)} § marker${content?' (currently '+esc(content)+')':''}"><span class="sw" style="background:${c}"></span>§${i+1}${content?' · '+esc(content):''}</div>
+        <div class="intr-pl-h" title="payloads for the ${ordinal(i+1)} § marker${content?' (currently '+esc(content)+')':''}"><span class="sw" style="background:${c}"></span>§${i+1}${content?' · '+esc(content):''}${INTR_FILE_BTNS}</div>
         <textarea class="rep-edit" data-pos="${i}" spellcheck="false" placeholder="payloads for §${i+1}"></textarea></div>`;}).join('');
   }
   wrap.querySelectorAll('textarea').forEach(ta=>{
@@ -231,8 +313,20 @@ function renderPayloadInputs(){
     ta.value=p==='s'?(intrState.sniper||''):(intrState.pos[Number(p)]||'');
     ta.addEventListener('input',()=>{if(p==='s')intrState.sniper=ta.value;else intrState.pos[Number(p)]=ta.value;updateIntrCount();intrTouch();});
   });
+  wireIntrPayloadFileButtons(wrap);
   updateIntrCount();
 }
+async function intrLoadTemplateFile(){
+  try{
+    const got=await pickTextFile({accept:'.txt,.http,.req,text/plain'});
+    if(!got) return;
+    $('#intrTemplate').value=normalizeListText(got.text);
+    intrTemplateChanged();
+    intrTouch();
+    toast('loaded template from '+got.name);
+  }catch(e){toast(e.message);}
+}
+if($('#intrTplLoad'))$('#intrTplLoad').onclick=intrLoadTemplateFile;
 function ordinal(n){return n+({1:'st',2:'nd',3:'rd'}[n%10>3||(n%100>=11&&n%100<=13)?0:n%10]||'th');}
 // Live payload/request count on the PAYLOADS header + attack bar.
 function updateIntrCount(){
@@ -281,7 +375,7 @@ export async function intrStart(){
     body.repeat=Math.max(1,parseInt($('#intrRepeat').value,10)||1);
   }else{
     const mk=intrMarkers();
-    if(!mk.length){toast('mark at least one § injection point — or use Race mode for payload-free resends');return;}
+    if(!mk.length){toast('mark at least one § injection point — or use Null mode for payload-free resends');return;}
     if(intrState.type==='pitchfork'){
       body.payloads=mk.map((_,i)=>lines(intrState.pos[i]||''));
       if(body.payloads.some(l=>!l.length)){toast('add payloads for every § position');return;}

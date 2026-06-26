@@ -19,7 +19,42 @@ func (h *Hub) listChecks(w http.ResponseWriter, r *http.Request) {
 			checks = got
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"checks": checks, "dir": h.ChecksDir})
+	writeJSON(w, http.StatusOK, map[string]any{"checks": checks, "dir": h.ChecksDir, "disabled": h.checksDisabledList()})
+}
+
+func (h *Hub) checksDisabledList() []string {
+	raw, ok, _ := h.st.GetSetting("checks.disabled")
+	if !ok || raw == "" {
+		return nil
+	}
+	var ids []string
+	_ = json.Unmarshal([]byte(raw), &ids)
+	return ids
+}
+
+func (h *Hub) checksDisabledSet() map[string]bool {
+	dis := map[string]bool{}
+	for _, id := range h.checksDisabledList() {
+		dis[id] = true
+	}
+	return dis
+}
+
+func (h *Hub) setChecksDisabled(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Disabled []string `json:"disabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		httpErr(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	b, _ := json.Marshal(in.Disabled)
+	if err := h.st.SetSetting("checks.disabled", string(b)); err != nil {
+		httpErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.broadcast(map[string]any{"type": "checks.update"})
+	writeJSON(w, http.StatusOK, map[string]any{"disabled": in.Disabled})
 }
 
 func (h *Hub) getCheck(w http.ResponseWriter, r *http.Request) {

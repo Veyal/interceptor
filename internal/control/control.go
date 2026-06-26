@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"mime"
 	"net/http"
 	"os"
 	"sort"
@@ -63,7 +64,8 @@ type Hub struct {
 	// SetSuppressBrowserTelemetry toggles suppression of Chrome/Firefox telemetry. Set by cmd.
 	SetSuppressBrowserTelemetry func(bool)
 
-	// ChecksDir holds user-authored Starlark scanner checks ("" = none). Set by cmd.
+	// ChecksDir holds user-authored Starlark scanner checks (global, shared across
+	// projects — typically ~/.interceptor/checks). Set by cmd.
 	ChecksDir string
 
 	// SelfAddr is this control plane's own host:port (e.g. 127.0.0.1:9966). Set by
@@ -122,6 +124,7 @@ func New(st *store.Store, eng *intercept.Engine, ca *tlsca.CA, rebind Rebinder, 
 	h.disc.SetProbe(h.probeFor())
 	h.disc.SetScope(h.discInScope)
 	h.disc.SetNotifier(h.onDiscoveryUpdate)
+	h.disc.SetRecorder(h.discoveryRecord)
 	h.wireSessionRefresh()
 	h.refreshScope()
 	h.applySessionFromStore()
@@ -156,6 +159,7 @@ func (h *Hub) routes() {
 	h.mux.HandleFunc("GET /api/flows", h.listFlows)
 	h.mux.HandleFunc("GET /api/flows/{id}", h.getFlow)
 	h.mux.HandleFunc("GET /api/flows/{id}/raw", h.getFlowRaw)
+	h.mux.HandleFunc("GET /api/flows/{id}/body", h.getFlowBody)
 	h.mux.HandleFunc("GET /api/flows/{id}/ws", h.flowWS)
 	h.mux.HandleFunc("GET /api/flows/{id}/analyze", h.analyzeFlow)
 	h.mux.HandleFunc("GET /api/flows/{id}/curl", h.flowCurl)
@@ -190,6 +194,9 @@ func (h *Hub) routes() {
 	h.mux.HandleFunc("POST /api/session", h.setSession)
 	h.mux.HandleFunc("POST /api/session/login/run", h.runLoginMacro)
 	h.mux.HandleFunc("POST /api/session/login/from-flow/{id}", h.loginMacroFromFlow)
+	h.mux.HandleFunc("POST /api/ai/notes/organize", h.aiNotesOrganize)
+	h.mux.HandleFunc("POST /api/ai/notes/organize/stream", h.aiNotesOrganizeStream)
+	h.mux.HandleFunc("POST /api/ai/checks/generate", h.aiChecksGenerate)
 	h.mux.HandleFunc("POST /api/ai/assist", h.aiAssist)
 	h.mux.HandleFunc("POST /api/ai/assist/stream", h.aiAssistStream)
 	h.mux.HandleFunc("POST /api/ai/actions", h.aiActions)
@@ -206,6 +213,8 @@ func (h *Hub) routes() {
 	h.mux.HandleFunc("DELETE /api/oob/interactions", h.oobClear)
 	h.mux.HandleFunc("GET /api/authz", h.getAuthz)
 	h.mux.HandleFunc("POST /api/authz", h.setAuthz)
+	h.mux.HandleFunc("GET /api/authz/flow-auth/{id}", h.authzFlowAuth)
+	h.mux.HandleFunc("POST /api/authz/check-sessions", h.authzCheckSessions)
 	h.mux.HandleFunc("POST /api/authz/run", h.authzRun)
 	h.mux.HandleFunc("POST /api/discovery/start", h.discoveryStart)
 	h.mux.HandleFunc("POST /api/discovery/stop", h.discoveryStop)
@@ -214,10 +223,13 @@ func (h *Hub) routes() {
 	h.mux.HandleFunc("GET /api/discovery/seeds", h.discoverySeeds)
 	h.mux.HandleFunc("GET /api/discovery/suggest", h.discoverySuggest)
 	h.mux.HandleFunc("GET /api/discovery/scope-targets", h.discoveryScopeTargets)
+	h.mux.HandleFunc("POST /api/discovery/inspect", h.discoveryInspect)
 	h.mux.HandleFunc("POST /api/scanner/run", h.scannerRun)
 	h.mux.HandleFunc("GET /api/scanner/issues", h.scannerIssues)
 	h.mux.HandleFunc("GET /api/scanner/report", h.scannerReport)
 	h.mux.HandleFunc("GET /api/checks", h.listChecks)
+	h.mux.HandleFunc("PUT /api/checks/disabled", h.setChecksDisabled)
+	h.mux.HandleFunc("GET /api/checks/reference", h.checksReference)
 	h.mux.HandleFunc("POST /api/checks/test", h.testCheck)
 	h.mux.HandleFunc("GET /api/checks/{id}", h.getCheck)
 	h.mux.HandleFunc("PUT /api/checks/{id}", h.saveCheck)
@@ -325,6 +337,8 @@ type settingsJSON struct {
 	AiProvider                  string `json:"aiProvider"`
 	AiModel                     string `json:"aiModel"`
 	AiHasKey                    bool   `json:"aiHasKey"` // never returns the key itself
+	AiDisabled                  bool   `json:"aiDisabled"`
+	OobEnabled                  bool   `json:"oobEnabled"`
 	CaptureScopeOnly            bool   `json:"captureScopeOnly"`
 	SuppressBrowserTelemetry    bool   `json:"suppressBrowserTelemetry"`
 }
@@ -394,14 +408,19 @@ func (h *Hub) listEndpoints(w http.ResponseWriter, r *http.Request) {
 	f := store.EndpointFilter{
 		Host:         q.Get("host"),
 		Search:       q.Get("search"),
+		SearchScope:  q.Get("searchScope"),
 		ExcludeFlags: store.FlagIntruder | store.FlagActiveScan,
 	}
 	key := endpointsCacheKey(f)
-	if eps, ok := h.epsCache.get(key); ok {
-		writeJSON(w, http.StatusOK, map[string]any{"endpoints": eps})
+	if eps, note, ok := h.epsCache.get(key); ok {
+		out := map[string]any{"endpoints": eps}
+		if note != "" {
+			out["searchNote"] = note
+		}
+		writeJSON(w, http.StatusOK, out)
 		return
 	}
-	eps, err := h.st.Endpoints(f)
+	eps, note, err := h.st.Endpoints(f)
 	if err != nil {
 		httpErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -409,8 +428,12 @@ func (h *Hub) listEndpoints(w http.ResponseWriter, r *http.Request) {
 	if eps == nil {
 		eps = []store.Endpoint{}
 	}
-	h.epsCache.set(key, eps)
-	writeJSON(w, http.StatusOK, map[string]any{"endpoints": eps})
+	h.epsCache.set(key, eps, note)
+	out := map[string]any{"endpoints": eps}
+	if note != "" {
+		out["searchNote"] = note
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // ---- Flows ----
@@ -429,7 +452,7 @@ func (h *Hub) listFlows(w http.ResponseWriter, r *http.Request) {
 	}
 	// AI-originated sends carry FlagAI on top of those flags; exempt them from the
 	// exclusion so the human can watch the AI work inline in History. ?ai=0 hides them.
-	if q.Get("ai") != "0" {
+	if !h.aiDisabled() && q.Get("ai") != "0" {
 		f.IncludeFlags = store.FlagAI
 	}
 	if q.Get("discovery") == "1" {
@@ -437,6 +460,25 @@ func (h *Hub) listFlows(w http.ResponseWriter, r *http.Request) {
 	}
 	if sc := q.Get("status"); sc != "" {
 		f.StatusClass = atoiOr(sc, 0)
+	}
+	searchScope := strings.ToLower(q.Get("searchScope"))
+	var searchNote string
+	if searchScope == "body" && strings.TrimSpace(f.Search) != "" {
+		ids, note, err := h.st.FlowIDsBodySearch(f, 8000)
+		if err != nil {
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		searchNote = note
+		f.Search = ""
+		f.FlowIDs = ids
+		if len(ids) == 0 {
+			writeJSON(w, http.StatusOK, map[string]any{"flows": []flowJSON{}, "truncated": false, "searchNote": note})
+			return
+		}
+	}
+	if q.Get("hasNote") == "1" {
+		f.HasNote = true
 	}
 	// Negative filters (repeatable): notMethod, notHost, notPath, notStatus.
 	f.NotMethods, f.NotHosts, f.NotPaths = q["notMethod"], q["notHost"], q["notPath"]
@@ -462,7 +504,11 @@ func (h *Hub) listFlows(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, toFlowJSON(fl))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"flows": out, "truncated": truncated})
+	resp := map[string]any{"flows": out, "truncated": truncated}
+	if searchNote != "" {
+		resp["searchNote"] = searchNote
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Hub) loadFlow(w http.ResponseWriter, r *http.Request) (*store.Flow, bool) {
@@ -505,6 +551,65 @@ func (h *Hub) getFlowRaw(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.Write(h.rawRequest(f))
 	}
+}
+
+// getFlowBody streams just the (decoded) body bytes with Content-Type and a
+// filename extension derived from the MIME type — for downloads when the UI
+// won't render the payload inline.
+func (h *Hub) getFlowBody(w http.ResponseWriter, r *http.Request) {
+	f, ok := h.loadFlow(w, r)
+	if !ok {
+		return
+	}
+	side := r.URL.Query().Get("side")
+	var mimeType string
+	var body []byte
+	if side == "res" {
+		mimeType = f.Mime
+		_, body = decodeForDisplay(f.ResHeaders, h.bodyBytes(f.ResBodyHash))
+	} else {
+		_, body = decodeForDisplay(f.ReqHeaders, h.bodyBytes(f.ReqBodyHash))
+		mimeType = headerContentType(f.ReqHeaders)
+	}
+	if mimeType == "" {
+		w.Header().Set("Content-Type", "application/octet-stream")
+	} else {
+		w.Header().Set("Content-Type", mimeType)
+	}
+	sideLabel := "req"
+	if side == "res" {
+		sideLabel = "res"
+	}
+	fn := flowBodyFilename(f.ID, sideLabel, mimeType)
+	w.Header().Set("Content-Disposition", `attachment; filename="`+fn+`"`)
+	_, _ = w.Write(body)
+}
+
+func headerContentType(hdr map[string][]string) string {
+	for k, v := range hdr {
+		if strings.EqualFold(k, "content-type") && len(v) > 0 {
+			return strings.TrimSpace(v[0])
+		}
+	}
+	return ""
+}
+
+func flowBodyFilename(id int64, side, mimeType string) string {
+	ext := "bin"
+	if mimeType != "" {
+		base := strings.TrimSpace(strings.Split(mimeType, ";")[0])
+		if exts, _ := mime.ExtensionsByType(base); len(exts) > 0 {
+			ext = strings.TrimPrefix(exts[0], ".")
+		} else if strings.HasPrefix(base, "text/") {
+			sub := strings.TrimPrefix(base, "text/")
+			if sub != "" && sub != "plain" {
+				ext = sub
+			} else {
+				ext = "txt"
+			}
+		}
+	}
+	return fmt.Sprintf("flow-%d-%s.%s", id, side, ext)
 }
 
 func (h *Hub) rawRequest(f *store.Flow) []byte {
@@ -894,13 +999,16 @@ func (h *Hub) getSettings(w http.ResponseWriter, r *http.Request) {
 	suppressTelemetry, stOK, _ := h.st.GetSetting("capture.suppressBrowserTelemetry")
 	// Default to true when the key has never been written (first run).
 	suppressTelemetryOn := !stOK || suppressTelemetry == "1"
+	aiDisabled, _, _ := h.st.GetSetting("ai.disabled")
 	writeJSON(w, http.StatusOK, settingsJSON{
 		ProxyAddr:                h.currentProxyAddr(),
 		InterceptEnabled:         h.eng != nil && h.eng.Enabled(),
 		UpstreamProxy:            up,
 		AiProvider:               aiProvider,
 		AiModel:                  aiModel,
-		AiHasKey:                 aiKey != "" || envKey != "",
+		AiHasKey:                 !h.aiDisabled() && (aiKey != "" || envKey != ""),
+		AiDisabled:               aiDisabled == "1",
+		OobEnabled:               h.oobEnabled(),
 		CaptureScopeOnly:         scopeOnly == "1",
 		SuppressBrowserTelemetry: suppressTelemetryOn,
 	})
@@ -913,6 +1021,8 @@ func (h *Hub) putSettings(w http.ResponseWriter, r *http.Request) {
 		AiProvider                  *string `json:"aiProvider"`
 		AiApiKey                    *string `json:"aiApiKey"`
 		AiModel                     *string `json:"aiModel"`
+		AiDisabled                  *bool   `json:"aiDisabled"`
+		OobEnabled                  *bool   `json:"oobEnabled"`
 		CaptureScopeOnly            *bool   `json:"captureScopeOnly"`
 		SuppressBrowserTelemetry    *bool   `json:"suppressBrowserTelemetry"`
 	}
@@ -921,6 +1031,10 @@ func (h *Hub) putSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.AiProvider != nil || in.AiApiKey != nil || in.AiModel != nil {
+		if h.aiDisabled() && (in.AiDisabled == nil || *in.AiDisabled) {
+			httpErr(w, http.StatusForbidden, aiDisabledMsg)
+			return
+		}
 		prov, _, _ := h.st.GetSetting("ai.provider")
 		if prov == "" {
 			prov = aiassist.ProviderAnthropic
@@ -954,6 +1068,22 @@ func (h *Hub) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.AiModel != nil {
 		_ = h.st.SetSetting("ai.model", *in.AiModel)
+	}
+	if in.AiDisabled != nil {
+		v := "0"
+		if *in.AiDisabled {
+			v = "1"
+		}
+		_ = h.st.SetSetting("ai.disabled", v)
+		h.broadcast(map[string]any{"type": "settings.update"})
+	}
+	if in.OobEnabled != nil {
+		v := "0"
+		if *in.OobEnabled {
+			v = "1"
+		}
+		_ = h.st.SetSetting("oob.enabled", v)
+		h.broadcast(map[string]any{"type": "settings.update"})
 	}
 	if in.CaptureScopeOnly != nil {
 		v := "0"

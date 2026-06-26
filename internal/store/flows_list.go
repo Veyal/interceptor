@@ -113,5 +113,16 @@ func buildFlowFilterWhere(f FlowFilter) ([]string, []any) {
 		where = append(where, "status <> ?")
 		args = append(args, st)
 	}
+	if f.HasNote {
+		where = append(where, "note IS NOT NULL AND note != ''")
+	}
+	if len(f.FlowIDs) > 0 {
+		ph := make([]string, len(f.FlowIDs))
+		for i, id := range f.FlowIDs {
+			ph[i] = "?"
+			args = append(args, id)
+		}
+		where = append(where, "id IN ("+strings.Join(ph, ",")+")")
+	}
 	return where, args
 }

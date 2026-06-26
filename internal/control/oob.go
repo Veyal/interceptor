@@ -20,6 +20,10 @@ func (h *Hub) oobBase(r *http.Request) string {
 // oobCatch records a blind out-of-band callback. It is public (the security guard
 // lets /oob/ through) and only stores request metadata, returning a tiny response.
 func (h *Hub) oobCatch(w http.ResponseWriter, r *http.Request) {
+	if !h.oobEnabled() {
+		http.NotFound(w, r)
+		return
+	}
 	prev := ""
 	if r.Body != nil {
 		b, _ := io.ReadAll(io.LimitReader(r.Body, 512))
@@ -33,6 +37,9 @@ func (h *Hub) oobCatch(w http.ResponseWriter, r *http.Request) {
 
 // oobState returns the current base URL and recorded interactions.
 func (h *Hub) oobState(w http.ResponseWriter, r *http.Request) {
+	if h.denyIfOOBDisabled(w) {
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"baseUrl":      h.oobBase(r),
 		"interactions": h.oob.List(),
@@ -41,12 +48,18 @@ func (h *Hub) oobState(w http.ResponseWriter, r *http.Request) {
 
 // oobNew mints a fresh token and returns a ready-to-paste payload URL.
 func (h *Hub) oobNew(w http.ResponseWriter, r *http.Request) {
+	if h.denyIfOOBDisabled(w) {
+		return
+	}
 	tok := h.oob.Token()
 	writeJSON(w, http.StatusOK, map[string]any{"token": tok, "url": h.oobBase(r) + "/" + tok})
 }
 
 // oobSetBase persists the public base URL (operator sets a target-reachable host).
 func (h *Hub) oobSetBase(w http.ResponseWriter, r *http.Request) {
+	if h.denyIfOOBDisabled(w) {
+		return
+	}
 	var in struct {
 		BaseURL string `json:"baseUrl"`
 	}
@@ -62,6 +75,9 @@ func (h *Hub) oobSetBase(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Hub) oobClear(w http.ResponseWriter, r *http.Request) {
+	if h.denyIfOOBDisabled(w) {
+		return
+	}
 	h.oob.Clear()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

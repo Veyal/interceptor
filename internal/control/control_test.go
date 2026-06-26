@@ -310,6 +310,39 @@ func TestFlowRawRequest(t *testing.T) {
 	}
 }
 
+func TestFlowBodyDownload(t *testing.T) {
+	h, s, _ := newHub(t)
+	payload := `{"large":true}`
+	hash, n := h.storeBody([]byte(payload))
+	id, _ := s.InsertFlow(&store.Flow{
+		TS: time.UnixMilli(1), Method: "POST", Scheme: "https", Host: "x.com", Path: "/api",
+		HTTPVersion: "HTTP/1.1", Status: 200, Mime: "application/json",
+		ReqHeaders: map[string][]string{
+			"Host":         {"x.com"},
+			"Content-Type": {"application/json"},
+		},
+		ReqBodyHash: hash, ReqLen: n,
+	})
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/flows/" + itoa(id) + "/body?side=req")
+	if err != nil {
+		t.Fatalf("GET body: %v", err)
+	}
+	defer resp.Body.Close()
+	if got := readAll(resp.Body); got != payload {
+		t.Fatalf("body = %q, want %q", got, payload)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Fatalf("content-type = %q", ct)
+	}
+	disp := resp.Header.Get("Content-Disposition")
+	if !strings.Contains(disp, "flow-"+itoa(id)+"-req.json") {
+		t.Fatalf("content-disposition = %q", disp)
+	}
+}
+
 func TestRuleCreateAndList(t *testing.T) {
 	h, _, eng := newHub(t)
 	ts := httptest.NewServer(h.Handler())

@@ -83,3 +83,39 @@ func Delete(dir, id string) error {
 	}
 	return os.Remove(filepath.Join(dir, id+".star"))
 }
+
+// MergeDir copies *.star files from src into dst without overwriting files
+// already in dst. A missing src dir is not an error. Returns how many were copied.
+func MergeDir(src, dst string) (int, error) {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return 0, err
+	}
+	var n int
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".star") {
+			continue
+		}
+		dstPath := filepath.Join(dst, e.Name())
+		if _, err := os.Stat(dstPath); err == nil {
+			continue // keep existing global check
+		} else if !os.IsNotExist(err) {
+			return n, err
+		}
+		data, err := os.ReadFile(filepath.Join(src, e.Name()))
+		if err != nil {
+			return n, err
+		}
+		if err := os.WriteFile(dstPath, data, 0o644); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}

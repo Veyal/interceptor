@@ -1,13 +1,98 @@
-import { $, $$, esc, escAttr, state, toast, api, methodColor, statusColor, statusText, mimeLabel, fmtSize, fmtBytes, fmtTime, fmtDur, FLAG_WS, FLAG_AI, FLAG_DISCOVERY, RENDER_CAP, highlightHTTP, prettify, copyText, uiPrompt, uiConfirm, closeModals, isBinaryMime, bodyMime, headerBlockText } from './core.js';
+import { $, $$, esc, escAttr, state, toast, api, methodColor, statusColor, statusText, mimeLabel, fmtSize, fmtBytes, fmtTime, fmtDur, FLAG_WS, FLAG_AI, FLAG_DISCOVERY, RENDER_CAP, highlightHTTP, prettify, copyText, saveFile, uiPrompt, uiConfirm, closeModals, openModal, closeModal, isBinaryMime, bodyMime, headerBlockText, hideCtxMenu, openCtxMenu, flowBodyDownloadName, flowBodyDownloadHref, selectionWithin, wireSelectionDecode } from './core.js';
 import { sendToRepeater, sendToIntruder } from './tools.js';
 import { retentionStats, loadRetention } from './settings.js';
 import { openAi } from './ai.js';
 import { openAuthz } from './authz.js';
-import { openDecoder } from './scanner.js';
+import { openDecoder, prefillScanner } from './scanner.js';
 import { prefillDiscovery } from './discovery.js';
+import { focusMapFromFlow, focusMapSearch } from './map.js';
 
 const FLOW_LIMIT=500;
 const EXCLUDE_NORM=64|128|512; // repeater, intruder, active scan
+const FLOW_COLS_KEY='proxy.cols';
+const FLOW_COLUMNS=[
+  {key:'id',label:'#',sort:'id',w:'44px'},
+  {key:'method',label:'Method',sort:'method',w:'64px'},
+  {key:'host',label:'Host',sort:'host',w:'minmax(110px,1.2fr)'},
+  {key:'path',label:'Path',sort:'path',w:'minmax(150px,2.4fr)'},
+  {key:'status',label:'St',sort:'status',w:'52px',align:'center'},
+  {key:'mime',label:'Type',sort:'mime',w:'70px',defaultVisible:false},
+  {key:'size',label:'Size',sort:'size',w:'64px',align:'right'},
+  {key:'time',label:'Time',sort:'time',w:'60px',align:'right'},
+];
+function defaultFlowCols(){return FLOW_COLUMNS.filter(c=>c.defaultVisible!==false).map(c=>c.key);}
+function normalizeFlowCols(cols){
+  const set=new Set(cols);
+  return FLOW_COLUMNS.map(c=>c.key).filter(k=>set.has(k));
+}
+function flowColGrid(){return state.flowCols.map(k=>FLOW_COLUMNS.find(c=>c.key===k).w).join(' ');}
+function loadFlowCols(){
+  try{
+    const raw=JSON.parse(localStorage.getItem(FLOW_COLS_KEY)||'null');
+    if(Array.isArray(raw)&&raw.length){
+      const valid=normalizeFlowCols(raw.filter(k=>FLOW_COLUMNS.some(c=>c.key===k)));
+      state.flowCols=valid.length?valid:defaultFlowCols();
+    }else state.flowCols=defaultFlowCols();
+  }catch(e){state.flowCols=defaultFlowCols();}
+}
+function saveFlowCols(){try{localStorage.setItem(FLOW_COLS_KEY,JSON.stringify(state.flowCols));}catch(e){}}
+function wireFlowSort(){
+  $$('.thead [data-sort]').forEach(h=>h.onclick=()=>{
+    const k=h.dataset.sort;
+    if(state.sort.key===k)state.sort.dir*=-1;
+    else{state.sort.key=k;state.sort.dir=k==='id'||k==='time'?-1:1;}
+    renderRows();
+  });
+}
+export function renderFlowHead(){
+  const head=$('#flowHead')||$('.thead');
+  if(!head)return;
+  const grid=flowColGrid();
+  head.style.gridTemplateColumns=grid;
+  head.innerHTML=state.flowCols.map(k=>{
+    const c=FLOW_COLUMNS.find(x=>x.key===k);
+    const align=c.align?` style="text-align:${c.align}"`:'';
+    const title=k==='id'?' title="Shift+click range · Ctrl+Shift+click toggle · Ctrl+Shift+A select all"':'';
+    return `<div data-sort="${c.sort}"${align}${title}>${esc(c.label)}</div>`;
+  }).join('');
+  wireFlowSort();
+}
+function setFlowCol(key,on){
+  if(on){
+    if(state.flowCols.includes(key))return;
+    state.flowCols=normalizeFlowCols([...state.flowCols,key]);
+  }else{
+    if(state.flowCols.length<=1){toast('at least one column must stay visible');return;}
+    state.flowCols=state.flowCols.filter(k=>k!==key);
+  }
+  saveFlowCols();
+  renderFlowHead();
+  renderRows();
+  renderColPicker();
+}
+function renderColPicker(){
+  const menu=$('#colPicker');
+  if(!menu)return;
+  menu.innerHTML=FLOW_COLUMNS.map(c=>`<label><input type="checkbox" data-col="${c.key}"${state.flowCols.includes(c.key)?' checked':''}> ${esc(c.label)}</label>`).join('');
+  menu.querySelectorAll('input[data-col]').forEach(inp=>inp.onchange=()=>setFlowCol(inp.dataset.col,inp.checked));
+}
+function toggleColPicker(){
+  const menu=$('#colPicker'),btn=$('#colPickerBtn');
+  if(!menu||!btn)return;
+  const open=menu.style.display==='none'||!menu.style.display;
+  if(open){
+    renderColPicker();
+    const r=btn.getBoundingClientRect();
+    menu.style.display='block';
+    const left=Math.min(r.left,window.innerWidth-menu.offsetWidth-8);
+    menu.style.left=Math.max(8,left)+'px';
+    menu.style.top=(r.bottom+4)+'px';
+    btn.setAttribute('aria-expanded','true');
+  }else{
+    menu.style.display='none';
+    btn.setAttribute('aria-expanded','false');
+  }
+}
 
 function flowExcluded(f){return (f.flags&EXCLUDE_NORM)!==0&&(f.flags&FLAG_AI)===0;}
 function canIncremental(){
@@ -37,16 +122,22 @@ function flowMatchesFilters(f){
 function flowRowHTML(f){
   const intercepted=(f.flags&1)!==0;
   const pending=!f.status&&!f.error;
+  const hasNote=!!(f.note&&String(f.note).trim());
   const stHTML=f.status?String(f.status):(f.error?'ERR':'<span class="blink" style="color:var(--fg3)" title="waiting for response">•••</span>');
-  return `<div class="trow ${f.id===state.selId?'sel':''}${state.selected.has(f.id)?' msel':''}${pending?' pending':''}" data-id="${f.id}" title="Click inspect · Shift+click range · Ctrl+Shift+click toggle">
-      <div class="tr-id" data-field="id">${f.id}</div>
-      <div class="tr-m" data-field="method" style="color:${methodColor(f.method)}">${esc(f.method)}</div>
-      <div class="tr-host" data-field="host">${esc(f.scheme==='https'?'🔒 ':'')}${esc(f.host)}</div>
-      <div class="tr-path" data-field="path">${esc(f.path)}${intercepted?' <span style="color:var(--accent)" title="intercepted">●</span>':''}${(f.flags&FLAG_AI)?'<span class="ai-tag" title="sent by the AI assistant">AI</span>':''}${(f.flags&FLAG_DISCOVERY)?'<span class="ai-tag" style="background:var(--violetDim);color:var(--violet)" title="found by content discovery">DSC</span>':''}${f.note?' <span title="has a note" style="cursor:help">📝</span>':''}</div>
-      <div class="tr-st" data-field="status" style="color:${statusColor(f.status)}">${stHTML}</div>
-      <div class="tr-mime" data-field="mime">${esc(mimeLabel(f.mime))}</div>
-      <div class="tr-len" data-field="size">${f.status?fmtSize(f.resLen):''}</div>
-      <div class="tr-t" data-field="time">${fmtTime(f.ts)}</div>
+  const grid=flowColGrid();
+  const rowTitle=(hasNote?String(f.note).trim()+' · ':'')+'Click inspect · Shift+click range · Ctrl+Shift+click toggle';
+  const cells={
+    id:`<div class="tr-id" data-field="id">${f.id}</div>`,
+    method:`<div class="tr-m" data-field="method" style="color:${methodColor(f.method)}">${esc(f.method)}</div>`,
+    host:`<div class="tr-host" data-field="host">${esc(f.scheme==='https'?'🔒 ':'')}${esc(f.host)}</div>`,
+    path:`<div class="tr-path" data-field="path">${esc(f.path)}${intercepted?' <span style="color:var(--accent)" title="intercepted">●</span>':''}${(f.flags&FLAG_AI)?'<span class="ai-tag" title="sent by the AI assistant">AI</span>':''}${(f.flags&FLAG_DISCOVERY)?'<span class="ai-tag" style="background:var(--violetDim);color:var(--violet)" title="found by content discovery">DSC</span>':''}</div>`,
+    status:`<div class="tr-st" data-field="status" style="color:${statusColor(f.status)}">${stHTML}</div>`,
+    mime:`<div class="tr-mime" data-field="mime">${esc(mimeLabel(f.mime))}</div>`,
+    size:`<div class="tr-len" data-field="size">${f.status?fmtSize(f.resLen):''}</div>`,
+    time:`<div class="tr-t" data-field="time">${fmtTime(f.ts)}</div>`,
+  };
+  return `<div class="trow ${f.id===state.selId?'sel':''}${state.selected.has(f.id)?' msel':''}${pending?' pending':''}${hasNote?' has-note':''}" data-id="${f.id}" style="grid-template-columns:${grid}" title="${escAttr(rowTitle)}">
+      ${state.flowCols.map(k=>cells[k]).join('')}
     </div>`;
 }
 function wireFlowRow(r){
@@ -139,8 +230,8 @@ export function getStartedCard(){
     <ol style="color:var(--fg2);line-height:2;font-size:12.5px;padding-left:20px;margin:0">
       <li>Point your browser/client at the proxy <b style="color:var(--accent);font-family:var(--mono)">${esc(state.proxyAddr)}</b></li>
       <li>To intercept <b>HTTPS</b>, <a href="/api/ca.crt" download style="color:var(--accent)">download the CA</a> and trust it (details in Settings)</li>
-      <li>Browse — flows stream in here. <b style="color:var(--fg)">Right-click</b> a row to filter, copy as cURL, send to Repeater/Intruder, or ✨ ask AI</li>
-      <li>Using an AI assistant? <button id="gsMcp" class="btn accent" style="padding:2px 9px;vertical-align:middle">Connect it via MCP</button></li>
+      <li>Browse — flows stream in here. <b style="color:var(--fg)">Right-click</b> a row to filter, copy as cURL, send to Repeater/Intruder${state.aiDisabled?'':', or ✨ ask AI'}</li>
+      ${state.aiDisabled?'':`<li>Using an AI assistant? <button id="gsMcp" class="btn accent" style="padding:2px 9px;vertical-align:middle">Connect it via MCP</button></li>`}
     </ol>
     <div class="hint" style="margin-top:14px">Tip: press <b style="color:var(--fg)">Ctrl/⌘ K</b> for the command palette — jump to any tab, search flows, or run an action.</div></div>`;
 }
@@ -208,11 +299,20 @@ export function toggleSelectAllShown(){
   if(all)state.selected.clear();else list.forEach(f=>state.selected.add(f.id));
   updateSelBar();renderRows();
 }
+function updateSearchNoteBanner(){
+  const el=$('#flowSearchNote');if(!el)return;
+  if(state.flowSearchNote){el.style.display='';el.textContent=state.flowSearchNote;}
+  else el.style.display='none';
+}
 export async function loadFlows(){
   const q=new URLSearchParams();
   const f=state.filters;
   if(f.scheme)q.set('scheme',f.scheme);
-  if(f.search)q.set('search',f.search);
+  if(f.search){
+    q.set('search',f.search);
+    if(f.searchScope==='body')q.set('searchScope','body');
+  }
+  if(state.notesOnly)q.set('hasNote','1');
   if(f.method)q.set('method',f.method);
   if(f.status)q.set('status',f.status);
   if(f.host)q.set('host',f.host);
@@ -225,8 +325,10 @@ export async function loadFlows(){
     const d=await api('/api/flows?'+q.toString());
     state.flows=d.flows||[];
     state.flowTruncated=!!d.truncated;
+    state.flowSearchNote=d.searchNote||'';
     renderRows();
     updateTruncBanner();
+    updateSearchNoteBanner();
     refreshMethodFilter();
   }catch(e){toast('flows: '+e.message);}
 }
@@ -298,10 +400,14 @@ async function wsReplay(url){
 }
 export async function renderSide(side){
   const el=side==='req'?$('#reqView'):$('#resView');
+  const dec=side==='req'?$('#reqDecode'):$('#resDecode');
+  if(dec)dec.hidden=true;
   if(!state.selId){return;}
   const draw=async()=>{
     try{const raw=await api('/api/flows/'+state.selId+'/raw?side='+side);
-      el.innerHTML=highlightHTTP(state.view[side]==='pretty'?prettify(raw):raw,state.view[side]==='pretty');
+      el._rawText=raw;
+      el._pretty=state.view[side]==='pretty';
+      el.innerHTML=highlightHTTP(state.view[side]==='pretty'?prettify(raw):raw,state.view[side]==='pretty',mime);
     }catch(e){el.textContent='(error: '+e.message+')';}
   };
   const len=state.detail?(side==='req'?state.detail.reqLen:state.detail.resLen):0;
@@ -309,17 +415,19 @@ export async function renderSide(side){
   // aren't readable as text. Built from the detail DTO, so the body isn't fetched.
   const mime=bodyMime(state.detail,side);
   if(isBinaryMime(mime)){
+    const dl=flowBodyDownloadName(state.selId,side,mime), href=flowBodyDownloadHref(state.selId,side);
     el.innerHTML=highlightHTTP(headerBlockText(state.detail,side))+
       `<div class="hint" style="padding:14px 0 0;line-height:1.7">Body is <b>${esc(mime)}</b>${len?' · '+fmtSize(len):''} — binary, not rendered.<br>
-        <a class="btn" style="margin-top:8px;display:inline-block" href="/api/flows/${state.selId}/raw?side=${side}" download="flow-${state.selId}-${side}">⤓ Download body</a>
+        <a class="btn" style="margin-top:8px;display:inline-block" href="${href}" download="${escAttr(dl)}">⤓ Download body</a>
         <button class="btn" data-bin="1" style="margin-top:8px;margin-left:6px">Show raw anyway</button></div>`;
     const b=el.querySelector('[data-bin]');
     if(b)b.onclick=()=>{el.innerHTML='<span class="hint" style="padding:16px">rendering…</span>';setTimeout(draw,10);};
     return;
   }
   if(len>RENDER_CAP){
+    const dl=flowBodyDownloadName(state.selId,side,mime), href=flowBodyDownloadHref(state.selId,side);
     el.innerHTML=`<div class="hint" style="padding:18px;line-height:1.8">${side==='req'?'Request':'Response'} body is <b>${fmtSize(len)}</b> — not shown, to keep the browser responsive.<br>
-      <a class="btn" style="margin-top:8px;display:inline-block" href="/api/flows/${state.selId}/raw?side=${side}" download="flow-${state.selId}-${side}.txt">⤓ Download raw</a>
+      <a class="btn" style="margin-top:8px;display:inline-block" href="${href}" download="${escAttr(dl)}">⤓ Download body</a>
       <button class="btn" data-bigshow="1" style="margin-top:8px">Show anyway</button></div>`;
     const b=el.querySelector('[data-bigshow]');
     if(b)b.onclick=()=>{el.innerHTML='<span class="hint" style="padding:16px">rendering…</span>';setTimeout(draw,10);};
@@ -333,20 +441,39 @@ export async function renderSide(side){
 $$('.seg[data-side]').forEach(seg=>{const side=seg.dataset.side;seg.querySelectorAll('button').forEach(b=>b.onclick=()=>{
   state.view[side]=b.dataset.view;seg.querySelectorAll('button').forEach(x=>{x.classList.toggle('on',x===b);x.setAttribute('aria-pressed',x===b?'true':'false');});renderSide(side);});});
 
-$$('.thead [data-sort]').forEach(h=>h.onclick=()=>{
-  const k=h.dataset.sort;if(state.sort.key===k)state.sort.dir*=-1;else{state.sort.key=k;state.sort.dir=k==='id'||k==='time'?-1:1;}renderRows();});
+loadFlowCols();
+renderFlowHead();
+{const b=$('#colPickerBtn');if(b)b.onclick=e=>{e.stopPropagation();toggleColPicker();};}
+{const m=$('#colPicker');if(m)m.onclick=e=>e.stopPropagation();}
+document.addEventListener('click',()=>{const menu=$('#colPicker'),btn=$('#colPickerBtn');if(menu&&menu.style.display==='block'){menu.style.display='none';if(btn)btn.setAttribute('aria-expanded','false');}});
 
 $('#fScheme').onchange=e=>setFilter('scheme',e.target.value);
 $('#fMethod').onchange=e=>setFilter('method',e.target.value);
 $('#fStatus').onchange=e=>setFilter('status',e.target.value);
 $('#fSearch').oninput=e=>{state.filters.search=e.target.value;renderChips();scheduleReload();};
-$('#refreshBtn').onclick=loadFlows;
+if($('#fSearchScope'))$('#fSearchScope').onchange=e=>{state.filters.searchScope=e.target.value||'path';if(state.filters.search)loadFlows();};
+if($('#notesFilter'))$('#notesFilter').onclick=()=>{state.notesOnly=!state.notesOnly;$('#notesFilter').classList.toggle('accent',state.notesOnly);loadFlows();};
 // Inspector header actions — operate on the currently-selected flow.
 function inspectorFlow(){return state.detail||state.flows.find(x=>x.id===state.selId)||null;}
 {const b=$('#insRepeater');if(b)b.onclick=()=>{const f=inspectorFlow();if(f)sendToRepeater(f);else toast('select a flow first');};}
 {const b=$('#insIntruder');if(b)b.onclick=()=>{const f=inspectorFlow();if(f)sendToIntruder(f);else toast('select a flow first');};}
 {const b=$('#insCurl');if(b)b.onclick=()=>{const f=inspectorFlow();if(f)copyCurl(f);else toast('select a flow first');};}
-$('#exportHar').onclick=()=>{$('#exportHar').href='/api/export/har'+(state.inScopeOnly?'?inScope=1':'');toast('History exported — .har downloaded');};
+async function exportHar(){
+  try{
+    const url='/api/export/har'+(state.inScopeOnly?'?inScope=1':'');
+    const r=await fetch(url);
+    if(!r.ok){let m=r.statusText;try{m=(await r.json()).error||m;}catch(e){}throw new Error(m);}
+    const blob=await r.blob();
+    const stamp=new Date().toISOString().slice(0,10);
+    const name='interceptor-'+stamp+'.har';
+    const saved=await saveFile(blob,name,'application/json');
+    toast('saved '+saved);
+  }catch(e){
+    if(e&&e.name==='AbortError')return;
+    toast('export: '+e.message);
+  }
+}
+$('#exportHar').onclick=()=>exportHar();
 $('#importHarBtn').onclick=()=>$('#importHarFile').click();
 $('#importHarFile').onchange=async e=>{
   const f=e.target.files[0];if(!f)return;
@@ -364,6 +491,8 @@ export async function saveNote(){
   try{
     await api('/api/flows/'+state.selId+'/note',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({note})});
     if(state.detail)state.detail.note=note;
+    const fl=state.flows.find(x=>x.id===state.selId);
+    if(fl){fl.note=note;patchFlowRow(fl);}
     const s=$('#noteSaved');s.style.opacity='1';setTimeout(()=>{s.style.opacity='0';},1200);
   }catch(e){toast('note: '+e.message);}
 }
@@ -372,10 +501,15 @@ $('#noteInput').addEventListener('blur',saveNote);
 /* ---- saved views ---- */
 export async function loadViews(){try{const d=await api('/api/views');state.views=d.views||[];renderViews();}catch(e){}}
 export function renderViews(){
-  const sel=$('#viewsSelect'),cur=sel.value;
+  const sel=$('#viewsSelect');
+  if(!sel)return;
+  const hasViews=state.views.length>0;
+  sel.style.display=hasViews?'':'none';
+  const cur=sel.value;
   sel.innerHTML='<option value="">views…</option>'+state.views.map(v=>`<option value="${v.id}">${esc(v.name)}</option>`).join('');
   if(state.views.find(v=>String(v.id)===cur))sel.value=cur;
-  $('#delViewBtn').style.display=(state.views.length&&sel.value)?'inline-block':'none';
+  const del=$('#delViewBtn');
+  if(del)del.style.display=(hasViews&&sel.value)?'inline-block':'none';
 }
 $('#viewsSelect').onchange=()=>{
   const id=$('#viewsSelect').value;$('#delViewBtn').style.display=id?'inline-block':'none';
@@ -432,10 +566,16 @@ export function syncControls(){
   $('#fMethod').value=state.filters.method;
   $('#fStatus').value=state.filters.status;
   $('#fSearch').value=state.filters.search;
+  const ss=$('#fSearchScope');if(ss)ss.value=state.filters.searchScope||'path';
 }
 export function setFilter(key,val){state.filters[key]=val;syncControls();renderChips();loadFlows();}
 export function clearFilter(key){setFilter(key,'');}
-export function clearAllFilters(){state.filters={scheme:'',search:'',method:'',status:'',host:'',exclude:[]};syncControls();renderChips();loadFlows();}
+export function clearAllFilters(){
+  state.filters={scheme:'',search:'',searchScope:'path',method:'',status:'',host:'',exclude:[]};
+  state.notesOnly=false;
+  $('#notesFilter')?.classList.remove('accent');
+  syncControls();renderChips();loadFlows();
+}
 export function anyFilter(){const f=state.filters;return !!(f.scheme||f.method||f.status||f.host||f.search||(f.exclude&&f.exclude.length));}
 // Negative filters: exclude rows matching {field,value}. Toggles off if already present.
 export function addExclude(field,value){
@@ -453,7 +593,7 @@ export function renderChips(){
   add('method','method',f.method);
   add('status','status',f.status?f.status+'xx':'');
   add('host','host',f.host);
-  add('search','path',f.search);
+  add('search',f.searchScope==='body'?'body':'path',f.search);
   (f.exclude||[]).forEach((e,i)=>{items.push(`<span class="chip not"><span>${esc(e.field)} ≠ <b>${esc(e.value)}</b></span><span class="x" data-ex="${i}" title="remove">✕</span></span>`);});
   const hasFilters=items.length>0;
   if(hasFilters)items.push(`<button class="chip-clear" id="chipsClear" title="Remove all filters">Clear all ✕</button>`);
@@ -467,46 +607,8 @@ export function renderChips(){
 }
 /* ---- right-click context menu ---- */
 export const ctx=$('#ctxmenu');
-function hideCtx(){
-  if(ctx._keyHandler){document.removeEventListener('keydown',ctx._keyHandler);ctx._keyHandler=null;}
-  ctx.classList.remove('show');ctx._acts=null;
-}
-// openMenu renders a sectioned context menu. Each section is {head?, items:[…]};
-// each item is {label, val?, act, on?, danger?} or {sep:true}. It positions the
-// menu and flips it on-screen if it would overflow the viewport.
-function openMenu(x,y,sections){
-  const acts=[];let html='';
-  sections.forEach(sec=>{
-    const items=(sec.items||[]).filter(Boolean);
-    if(!items.length)return;
-    if(sec.head)html+=`<div class="ctx-head">${esc(sec.head)}</div>`;
-    items.forEach(it=>{
-      if(it.sep){html+='<div class="ctx-sep"></div>';return;}
-      const dStyle=it.danger?' style="color:var(--red)"':'';
-      const right=it.val!=null?`<span class="mono"${dStyle}>${esc(it.val)}</span>`:'';
-      html+=`<div class="ctx-item${it.on?' on':''}" data-i="${acts.length}"${it.danger&&it.val==null?dStyle:''}><span class="lbl"${dStyle}>${esc(it.label)}</span>${right}</div>`;
-      acts.push(it.act);
-    });
-  });
-  ctx.innerHTML=html;ctx._acts=acts;ctx._sel=0;
-  const items=ctx.querySelectorAll('.ctx-item');
-  items.forEach((el,i)=>el.classList.toggle('on',i===0));
-  ctx.querySelectorAll('[data-i]').forEach(el=>el.onclick=()=>{const fn=ctx._acts[Number(el.dataset.i)];hideCtx();if(fn)fn();});
-  ctx.style.left=x+'px';ctx.style.top=y+'px';ctx.classList.add('show');
-  const r=ctx.getBoundingClientRect();
-  if(r.right>innerWidth)ctx.style.left=Math.max(4,x-r.width)+'px';
-  if(r.bottom>innerHeight)ctx.style.top=Math.max(4,y-r.height)+'px';
-  const paintSel=()=>{items.forEach((el,i)=>el.classList.toggle('on',i===ctx._sel));const cur=items[ctx._sel];if(cur)cur.scrollIntoView({block:'nearest'});};
-  ctx._keyHandler=e=>{
-    if(!ctx.classList.contains('show'))return;
-    if(e.key==='ArrowDown'){e.preventDefault();ctx._sel=Math.min(items.length-1,ctx._sel+1);paintSel();}
-    else if(e.key==='ArrowUp'){e.preventDefault();ctx._sel=Math.max(0,ctx._sel-1);paintSel();}
-    else if(e.key==='Enter'){e.preventDefault();const fn=ctx._acts[ctx._sel];hideCtx();if(fn)fn();}
-    else if(e.key==='Escape'){e.preventDefault();hideCtx();}
-  };
-  document.addEventListener('keydown',ctx._keyHandler);
-}
-
+const hideCtx=hideCtxMenu;
+const openMenu=openCtxMenu;
 // isIPHost reports whether h is an IP literal / localhost (so "domain" actions,
 // which only make sense for DNS names, are suppressed).
 function isIPHost(h){return !h||/^\d{1,3}(\.\d{1,3}){3}$/.test(h)||h.includes(':')||h==='localhost';}
@@ -540,17 +642,23 @@ function deleteHost(f){
 // flowGlobalSection — the flow-wide actions present in every history/inspector
 // menu regardless of which column was clicked (send, copy, AI, authz).
 function flowGlobalSection(f,head){
-  return {head:head||'REQUEST', items:[
+  const items=[
     {label:'Send to Repeater',act:()=>sendToRepeater(f)},
     {label:'Send to Intruder',act:()=>sendToIntruder(f)},
     {label:'Copy URL',act:()=>copyURL(f)},
     {label:'Copy as cURL',act:()=>copyCurl(f)},
-    {sep:true},
-    {label:'✨ Ask AI',val:'explain',act:()=>openAi('explain',[f.id])},
-    {label:'✨ Ask AI',val:'payloads',act:()=>openAi('suggest',[f.id])},
+  ];
+  if(!state.aiDisabled){
+    items.push({sep:true},
+      {label:'✨ Ask AI',val:'explain',act:()=>openAi('explain',[f.id])},
+      {label:'✨ Ask AI',val:'payloads',act:()=>openAi('suggest',[f.id])});
+  }
+  items.push({sep:true},
+    {label:'🗺 Show in Map',act:()=>focusMapFromFlow(f)},
+    {label:'🔍 Scan this host',val:f.host,act:()=>prefillScanner(f.host, (f.path||'').split('?')[0])},
     {label:'🔓 Authz test',val:'roles',act:()=>openAuthz(f.id)},
-    {label:'🔑 Use as login macro',act:()=>saveLoginMacroFromFlow(f.id)},
-  ]};
+    {label:'🔑 Use as login macro',act:()=>saveLoginMacroFromFlow(f.id)});
+  return {head:head||'REQUEST', items};
 }
 
 async function saveLoginMacroFromFlow(id){
@@ -618,17 +726,6 @@ export function showCtx(x,y,f,field){
 // showInspectorCtx builds the request/response pane menu: a SELECTION section
 // (only when text is highlighted) for copy/decode/search/scope, plus the global
 // flow actions.
-// selectionWithin returns the trimmed selected text if the selection lies inside
-// el. It falls back to the range's text because Selection.toString() returns ""
-// when the document isn't focused (e.g. automation) even though a range exists.
-function selectionWithin(el){
-  const s=window.getSelection&&window.getSelection();
-  if(!s||!s.rangeCount)return '';
-  if(el&&s.anchorNode&&!el.contains(s.anchorNode))return '';
-  let t=String(s);
-  if(!t)t=s.getRangeAt(0).toString();
-  return t.trim();
-}
 export function showInspectorCtx(x,y,side){
   const f=state.flows.find(z=>z.id===state.selId)||state.detail;
   if(!f)return;
@@ -642,6 +739,7 @@ export function showInspectorCtx(x,y,side){
       {label:'Search in history',val:short,act:()=>setFilter('search',sel)},
     ];
     if(looksLikeHost(sel))items.push({label:'Add to scope',val:sel,act:()=>addHostToScope(sel)});
+    items.push({label:'Search in Map (body)',val:short,act:()=>focusMapSearch(sel,'body')});
     sections.push({head:'SELECTION', items});
   }
   sections.push(flowGlobalSection(f, side==='req'?'REQUEST':'RESPONSE'));
@@ -668,6 +766,9 @@ window.addEventListener('blur',hideCtx);
   const el=$('#'+id);
   if(el)el.addEventListener('contextmenu',e=>{e.preventDefault();e.stopPropagation();showInspectorCtx(e.clientX,e.clientY,id==='reqView'?'req':'resp');});
 });
+const hideReqDec=wireSelectionDecode($('#reqView'),$('#reqDecode'),{onDecoder:openDecoder});
+const hideResDec=wireSelectionDecode($('#resView'),$('#resDecode'),{onDecoder:openDecoder});
+export function hideInspectorDecodeBars(){hideReqDec&&hideReqDec();hideResDec&&hideResDec();}
 export function flowURL(f){const def=(f.scheme==='https'&&f.port===443)||(f.scheme==='http'&&f.port===80);return `${f.scheme}://${f.host}${def?'':':'+f.port}${f.path}`;}
 export function copyURL(f){copyText(flowURL(f),'URL copied');}
 function shq(s){return "'"+String(s).replace(/'/g,"'\\''")+"'";}
@@ -685,7 +786,37 @@ export async function copyCurl(f){
   }catch(e){toast('cURL: '+e.message);}
 }
 // ---- History multi-select actions ----
-export function updateSelBar(){const n=state.selected.size;$('#selBar').style.display=n?'flex':'none';$('#selCount').textContent=n+' selected';}
+export function updateSelBar(){
+  const n=state.selected.size;
+  $('#selBar').style.display=n?'flex':'none';
+  $('#selCount').textContent=n+' selected';
+  const cmp=$('#selCompare');if(cmp)cmp.style.display=n===2?'':'none';
+}
+function compareLineDiff(a,b){
+  const la=a.split('\n'),lb=b.split('\n'),n=Math.max(la.length,lb.length),rows=[];
+  for(let i=0;i<n&&rows.length<200;i++){
+    const x=la[i]??'',y=lb[i]??'';
+    if(x===y)rows.push(`<div style="color:var(--fg3);font-family:var(--mono);font-size:11px;white-space:pre-wrap">${esc(x||' ')}</div>`);
+    else rows.push(`<div style="font-family:var(--mono);font-size:11px"><span style="color:var(--red);white-space:pre-wrap">${esc(x||'∅')}</span><br><span style="color:var(--accent);white-space:pre-wrap">${esc(y||'∅')}</span></div>`);
+  }
+  return rows.join('')+(n>200?'<div class="hint">…truncated</div>':'');
+}
+async function openCompare(){
+  const ids=[...state.selected].sort((a,b)=>a-b);
+  if(ids.length!==2){toast('select exactly 2 flows');return;}
+  openModal($('#compareModal'));
+  const box=$('#compareBody');if(box)box.innerHTML='<div class="hint">loading…</div>';
+  try{
+    const [fa,fb]=await Promise.all(ids.map(id=>api('/api/flows/'+id)));
+    const [ra,rb]=await Promise.all(ids.map(id=>api('/api/flows/'+id+'/raw?side=res')));
+    const split=s=>{const i=s.indexOf('\r\n\r\n');return i>=0?s.slice(i+4):s;};
+    const ba=split(ra),bb=split(rb);
+    $('#compareTitle').textContent='Compare responses · #'+ids[0]+' vs #'+ids[1];
+    if(box)box.innerHTML=`<div class="row" style="gap:12px;margin-bottom:8px;font-size:11px"><span><b style="color:var(--red)">#${ids[0]}</b> ${esc(fa.method)} ${esc(fa.status||'—')} · ${fmtSize(fa.resLen)}</span><span><b style="color:var(--accent)">#${ids[1]}</b> ${esc(fb.method)} ${esc(fb.status||'—')} · ${fmtSize(fb.resLen)}</span></div>`+compareLineDiff(ba.slice(0,32000),bb.slice(0,32000));
+  }catch(e){if(box)box.innerHTML='<div class="hint" style="color:var(--red)">'+esc(e.message)+'</div>';}
+}
+if($('#selCompare'))$('#selCompare').onclick=openCompare;
+if($('#compareClose'))$('#compareClose').onclick=()=>closeModal($('#compareModal'));
 $('#selClear').onclick=()=>{state.selected.clear();state.lastSelIdx=-1;renderRows();updateSelBar();};
 $('#selAsk').onclick=()=>{const ids=[...state.selected];if(ids.length)openAi('summarize',ids);};
 $('#selScope').onclick=async()=>{

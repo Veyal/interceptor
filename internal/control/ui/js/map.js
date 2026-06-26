@@ -1,6 +1,6 @@
-import { $, esc, escAttr, state, toast, api, methodColor, statusColor, statusText, fmtSize, fmtDur, highlightHTTP, prettify, RENDER_CAP, openModal, closeModal, isBinaryMime, bodyMime, headerBlockText } from './core.js';
-import { syncControls, renderChips, loadFlows, selectFlow } from './proxy.js';
+import { $, esc, escAttr, state, toast, api, methodColor, statusColor, statusText, fmtSize, fmtDur } from './core.js';
 import { sendToRepeater } from './tools.js';
+import { flowPopup } from './flowmodal.js';
 
 const GRAPH_NODE_CAP = 150;
 const MAP_VIEW_KEY = 'mapView';
@@ -15,15 +15,63 @@ function restoreMapView(){
 }
 
 export const mapState = {
-  eps: [], domain: null, method: '', search: '', statusClass: 0, expandAll: false,
+  eps: [], domain: null, method: '', search: '', searchScope: 'path', searchNote: '',
+  statusClass: 0, expandAll: false,
   view: restoreMapView(), collapsed: new Set(), zoom: { k: 1, x: 12, y: 12 }, _needFit: true,
   sort: { key: 'path', dir: 1 },
 };
 
+function mapUsesServerSearch(){
+  return mapState.searchScope !== 'path' && mapState.search.trim().length > 0;
+}
+
+export function focusMapFromFlow(f){
+  if(!f) return;
+  document.querySelector('.tab[data-tab="map"]')?.click();
+  mapState.domain=f.host||'';
+  mapState.search=(f.path||'/').split('?')[0];
+  mapState.searchScope='path';
+  mapState.searchNote='';
+  mapState.view='table';
+  setMapView('table');
+  const dom=$('#mapDomain'), sr=$('#mapSearch'), sc=$('#mapSearchScope');
+  if(dom) dom.value=mapState.domain;
+  if(sr) sr.value=mapState.search;
+  if(sc) sc.value='path';
+  loadEndpoints();
+  toast('Map · '+f.method+' '+f.host+mapState.search);
+}
+
+export function focusMapSearch(term, scope='body'){
+  term=String(term||'').trim();
+  if(!term){ toast('nothing to search'); return; }
+  document.querySelector('.tab[data-tab="map"]')?.click();
+  mapState.domain='';
+  mapState.search=term;
+  mapState.searchScope=scope||'body';
+  mapState.view='table';
+  setMapView('table');
+  const dom=$('#mapDomain'), sr=$('#mapSearch'), sc=$('#mapSearchScope');
+  if(dom) dom.value='';
+  if(sr) sr.value=term;
+  if(sc) sc.value=mapState.searchScope;
+  loadEndpoints();
+}
+
 export async function loadEndpoints(){
+  const warn=$('#mapWarn');
+  if(warn&&mapUsesServerSearch()){warn.style.display='block';warn.textContent='Searching bodies…';}
   try{
-    const d = await api('/api/endpoints');
+    const params = new URLSearchParams();
+    if(mapState.domain) params.set('host', mapState.domain);
+    if(mapUsesServerSearch()){
+      params.set('search', mapState.search.trim());
+      params.set('searchScope', mapState.searchScope);
+    }
+    const q = params.toString();
+    const d = await api('/api/endpoints' + (q ? '?' + q : ''));
     mapState.eps = d.endpoints || [];
+    mapState.searchNote = d.searchNote || '';
     mapState._needFit = true;
     fillMapDomains();
     fillMapMethods();
@@ -66,11 +114,12 @@ export function epMatchesSearch(e, q){
 
 export function mapFiltered(){
   const q = mapState.search.toLowerCase();
+  const serverFiltered = mapUsesServerSearch();
   return mapState.eps.filter(e => {
     if(mapState.domain && e.host !== mapState.domain) return false;
     if(mapState.method && e.method !== mapState.method) return false;
     if(mapState.statusClass && Math.floor((e.lastStatus || 0) / 100) !== mapState.statusClass) return false;
-    if(q && !epMatchesSearch(e, q)) return false;
+    if(!serverFiltered && q && !epMatchesSearch(e, q)) return false;
     return true;
   });
 }
@@ -144,7 +193,7 @@ function renderMapCrumb(eps){
   }else{
     parts.push(`<span>${hostN} host${hostN === 1 ? '' : 's'}</span>`);
   }
-  if(mapState.search) parts.push(`<span>search: <b style="color:var(--accent)">${esc(mapState.search)}</b></span>`);
+  if(mapState.search) parts.push(`<span>search (${esc(mapScopeLabel(mapState.searchScope))}): <b style="color:var(--accent)">${esc(mapState.search)}</b></span>`);
   el.innerHTML = parts.join(' <span style="color:var(--fg3)">›</span> ');
   el.style.display = 'block';
   el.querySelectorAll('[data-crumb]').forEach(a => {
@@ -163,6 +212,10 @@ function renderMapCrumb(eps){
   });
 }
 
+function mapScopeLabel(scope){
+  return ({path:'path/host',headers:'headers',body:'body',all:'all'})[scope] || scope;
+}
+
 export function renderMap(){
   const eps = mapFiltered();
   const hostN = new Set(eps.map(e => e.host)).size;
@@ -170,6 +223,17 @@ export function renderMap(){
   $('#mapCount').textContent = eps.length
     ? `${eps.length} endpoint${eps.length === 1 ? '' : 's'} · ${hostN} host${hostN === 1 ? '' : 's'}`
     : (mapState.eps.length ? (filtered ? 'No endpoints match the filters' : 'No endpoints') : 'No endpoints captured yet');
+  const warn = $('#mapWarn');
+  if(warn && mapState.searchNote){
+    warn.style.display = 'block';
+    warn.textContent = mapState.searchNote;
+  }else if(warn && mapUsesServerSearch() && (mapState.searchScope === 'body' || mapState.searchScope === 'all') && mapState.view !== 'graph'){
+    warn.style.display = 'block';
+    warn.textContent = 'Body search scans stored bodies (content-deduped, latest 8000 flows max). Filter by domain to narrow.';
+  }else if(warn && mapState.view !== 'graph'){
+    warn.style.display = 'none';
+    warn.textContent = '';
+  }
   renderMapCrumb(eps);
   if(mapState.view === 'graph') renderMapGraph(eps);
   else if(mapState.view === 'table') renderMapTable(eps);
@@ -251,18 +315,34 @@ function renderMapTable(eps){
   });
 }
 
-$('#mapSearch').oninput = e => {
-  mapState.search = e.target.value.trim();
+let mapSearchTimer = null;
+function mapApplySearch(){
+  if(mapUsesServerSearch()){
+    loadEndpoints();
+    return;
+  }
+  mapState.searchNote = '';
   if(mapState.search) mapExpandForSearch(mapFiltered());
   mapState._needFit = true;
   renderMap();
+}
+$('#mapSearch').oninput = e => {
+  mapState.search = e.target.value.trim();
+  clearTimeout(mapSearchTimer);
+  if(mapUsesServerSearch()) mapSearchTimer = setTimeout(mapApplySearch, 350);
+  else mapApplySearch();
 };
+$('#mapSearchScope') && ($('#mapSearchScope').onchange = e => {
+  mapState.searchScope = e.target.value || 'path';
+  mapApplySearch();
+});
 $('#mapDomain') && ($('#mapDomain').onchange = e => {
   mapState.domain = e.target.value;
   if(mapState.domain) mapState.collapsed.clear();
   else mapCollapseHosts();
   mapState._needFit = true;
-  renderMap();
+  if(mapUsesServerSearch()) loadEndpoints();
+  else renderMap();
 });
 $('#mapMethod').onchange = e => { mapState.method = e.target.value; mapState._needFit = true; renderMap(); };
 $('#mapRefresh').onclick = loadEndpoints;
@@ -396,10 +476,15 @@ export function renderMapGraph(eps){
   const lay = graphLayout(buildGraphTree(eps).children);
   mapState._g = lay;
   if(warn){
-    if(lay.nodes.length > GRAPH_NODE_CAP){
+    if(mapState.searchNote){
+      warn.style.display = 'block';
+      warn.textContent = mapState.searchNote;
+    }else if(lay.nodes.length > GRAPH_NODE_CAP){
       warn.style.display = 'block';
       warn.textContent = `Graph has ${lay.nodes.length} nodes — hard to read. Filter by domain, use Table view, or search to narrow.`;
-    }else warn.style.display = 'none';
+    }else if(!mapUsesServerSearch() || (mapState.searchScope !== 'body' && mapState.searchScope !== 'all')){
+      warn.style.display = 'none';
+    }
   }
   let h = '';
   lay.edges.forEach(([a, b]) => {
@@ -486,52 +571,3 @@ $('#mapFit') && ($('#mapFit').onclick = mapFitNow);
 
 // Apply saved view on load (DOM ready — this module loads after index.html paints).
 setMapView(mapState.view);
-
-/* ---- flow popup ---- */
-export async function flowPopup(id){
-  let d;
-  try{ d = await api('/api/flows/'+id); }catch(e){ toast('flow: '+e.message); return; }
-  state.fm = { id, detail: d, pretty: true };
-  $('#fmTitle').innerHTML = `<span style="color:${methodColor(d.method)};font-weight:700">${esc(d.method)}</span> <span style="font-family:var(--mono);color:var(--fg2)">${esc((d.scheme||'http')+'://'+d.host+d.path)}</span>`;
-  $('#fmStatus').textContent = d.status ? `${d.status} ${statusText(d.status)}`+(d.durationMs ? ` · ${fmtDur(d.durationMs)}` : '') : (d.error || '');
-  $('#fmStatus').style.color = statusColor(d.status);
-  $('#fmSeg').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === 'pretty'));
-  openModal($('#flowModal'));
-  fmRenderSide('req'); fmRenderSide('res');
-}
-
-export async function fmRenderSide(side){
-  const el = side === 'req' ? $('#fmReq') : $('#fmRes');
-  const d = state.fm.detail;
-  const len = side === 'req' ? d.reqLen : d.resLen;
-  const mime = bodyMime(d, side);
-  if(isBinaryMime(mime)){
-    el.innerHTML = highlightHTTP(headerBlockText(d, side))+`<div class="hint" style="padding:14px 0 0;line-height:1.7">Body is <b>${esc(mime)}</b>${len ? ' · '+fmtSize(len) : ''} — binary, not rendered.<br><a class="btn" style="margin-top:8px;display:inline-block" href="/api/flows/${state.fm.id}/raw?side=${side}" download="flow-${state.fm.id}-${side}">⤓ Download body</a></div>`;
-    return;
-  }
-  if(len > RENDER_CAP){
-    el.innerHTML = `<div class="hint" style="padding:14px;line-height:1.7">${side === 'req' ? 'Request' : 'Response'} body is <b>${fmtSize(len)}</b> — not rendered.<br><a class="btn" style="margin-top:8px;display:inline-block" href="/api/flows/${state.fm.id}/raw?side=${side}" download="flow-${state.fm.id}-${side}.txt">⤓ Download raw</a></div>`;
-    return;
-  }
-  el.innerHTML = '<span class="hint" style="padding:12px">loading…</span>';
-  try{
-    const raw = await api('/api/flows/'+state.fm.id+'/raw?side='+side);
-    el.innerHTML = highlightHTTP(state.fm.pretty ? prettify(raw) : raw, state.fm.pretty);
-  }catch(e){ el.textContent = '(error: '+e.message+')'; }
-}
-
-$('#fmClose') && ($('#fmClose').onclick = () => closeModal($('#flowModal')));
-$('#fmProxy') && ($('#fmProxy').onclick = () => {
-  const d = state.fm && state.fm.detail, id = state.fm && state.fm.id;
-  closeModal($('#flowModal'));
-  if(!d) return;
-  document.querySelector('.tab[data-tab="proxy"]').click();
-  state.filters = { scheme: '', method: d.method || '', status: '', host: d.host || '', search: (d.path || '').split('?')[0], exclude: [] };
-  syncControls(); renderChips(); loadFlows();
-  if(id) selectFlow(id);
-});
-$('#fmSeg') && $('#fmSeg').querySelectorAll('button').forEach(b => b.onclick = () => {
-  state.fm.pretty = b.dataset.v === 'pretty';
-  $('#fmSeg').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
-  fmRenderSide('req'); fmRenderSide('res');
-});

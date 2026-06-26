@@ -107,7 +107,7 @@ func (h *Hub) recordDiscovered(runID int64, results []discovery.Result) {
 	hdr := toHeaderValues(headers)
 	go func() {
 		for _, r := range results {
-			if r.Status == 0 || r.Error != "" {
+			if r.FlowID != 0 || r.Status == 0 || r.Error != "" {
 				continue
 			}
 			_, _ = h.snd.Send(sender.Request{
@@ -184,6 +184,62 @@ func (h *Hub) discoveryStop(w http.ResponseWriter, r *http.Request) {
 
 func (h *Hub) discoveryStateHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.disc.State())
+}
+
+// discoveryRecord persists one found URL as a flow when recording is enabled.
+func (h *Hub) discoveryRecord(r discovery.Result) int64 {
+	h.ds.mu.Lock()
+	record := h.ds.record
+	headers := h.ds.headers
+	h.ds.mu.Unlock()
+	if !record {
+		return 0
+	}
+	flow, err := h.snd.Send(sender.Request{
+		Method:    "GET",
+		URL:       r.URL,
+		Headers:   toHeaderValues(headers),
+		Flags:     store.FlagDiscovery,
+		NoSession: true,
+	})
+	if err != nil {
+		return 0
+	}
+	return flow.ID
+}
+
+type discoveryInspectIn struct {
+	URL string `json:"url"`
+}
+
+// discoveryInspect re-issues one discovered URL through the sender so the UI
+// can open the flow inspect modal even when the run did not record hits.
+func (h *Hub) discoveryInspect(w http.ResponseWriter, r *http.Request) {
+	var in discoveryInspectIn
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		httpErr(w, http.StatusBadRequest, "bad JSON")
+		return
+	}
+	raw := strings.TrimSpace(in.URL)
+	if raw == "" {
+		httpErr(w, http.StatusBadRequest, "url required")
+		return
+	}
+	h.ds.mu.Lock()
+	headers := h.ds.headers
+	h.ds.mu.Unlock()
+	flow, err := h.snd.Send(sender.Request{
+		Method:    "GET",
+		URL:       raw,
+		Headers:   toHeaderValues(headers),
+		Flags:     store.FlagDiscovery,
+		NoSession: true,
+	})
+	if err != nil {
+		httpErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"flowId": flow.ID})
 }
 
 // discoveryWordlist serves the built-in default wordlist so the UI can prefill

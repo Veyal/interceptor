@@ -82,6 +82,9 @@ type FlowFilter struct {
 	NotHosts    []string // exclude rows whose host contains any of these
 	NotPaths    []string // exclude rows whose path contains any of these
 	NotStatuses []int    // exclude these exact status codes
+
+	FlowIDs []int64 // when set, only these ids (used for body search results)
+	HasNote bool    // only rows with a non-empty note
 }
 
 // QueryFlowsFilter returns flows matching f, newest first. Filtering and paging

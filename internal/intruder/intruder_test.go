@@ -211,6 +211,18 @@ func TestRepeatModeRequiresCount(t *testing.T) {
 	}
 }
 
+func TestNullAttackTypeAlias(t *testing.T) {
+	e := newEngine(t)
+	err := e.Start(Spec{Target: "http://x", Template: "GET / HTTP/1.1\nHost: x\n\n", AttackType: "null", Repeat: 2, Threads: 1})
+	if err != nil {
+		t.Fatalf("Start (null alias): %v", err)
+	}
+	st := waitDone(t, e)
+	if st.Total != 2 || len(st.Results) != 2 {
+		t.Fatalf("expected 2 results, got total=%d len=%d", st.Total, len(st.Results))
+	}
+}
+
 func TestDelayThrottlesDispatch(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, "ok")

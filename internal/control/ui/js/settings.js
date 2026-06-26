@@ -15,6 +15,10 @@ let savedAiModel='';
 
 export async function loadSettings(){try{const s=await api('/api/settings');state.proxyAddr=s.proxyAddr;$('#proxyAddr').textContent=s.proxyAddr;$('#setAddr').value=s.proxyAddr;
   if($('#setUpstream'))$('#setUpstream').value=s.upstreamProxy||'';
+  state.aiDisabled=!!s.aiDisabled;
+  state.oobEnabled=!!s.oobEnabled;
+  if($('#setAiDisabled'))$('#setAiDisabled').checked=state.aiDisabled;
+  if($('#setOobEnabled'))$('#setOobEnabled').checked=state.oobEnabled;
   if($('#setAiProvider'))$('#setAiProvider').value=s.aiProvider||'anthropic';
   savedAiModel=s.aiModel||'';
   if($('#setAiModel'))$('#setAiModel').value=savedAiModel;
@@ -22,7 +26,55 @@ export async function loadSettings(){try{const s=await api('/api/settings');stat
   if($('#capScopeToggle'))setCapScope(!!s.captureScopeOnly);
   if($('#suppressTelemetryToggle'))setSuppressTelemetry(s.suppressBrowserTelemetry!==false);
   aiSyncProviderUI();
+  applyAiDisabledUI();
+  applyOobDisabledUI();
   state.intercept.enabled=s.interceptEnabled;}catch(e){}}
+
+export function applyOobDisabledUI(){
+  const on=!!state.oobEnabled;
+  document.documentElement.classList.toggle('oob-disabled',!on);
+  const hint=$('#oobDisabledHint');
+  if(hint)hint.style.display=on?'none':'block';
+  if(!on&&$('#oobModal')&&$('#oobModal').style.display==='flex')closeModal($('#oobModal'));
+}
+
+$('#setOobEnabled')&&($('#setOobEnabled').onchange=async()=>{
+  const enabled=$('#setOobEnabled').checked;
+  try{
+    await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({oobEnabled:enabled})});
+    state.oobEnabled=enabled;
+    applyOobDisabledUI();
+    toast(enabled?'OOB catcher enabled':'OOB catcher disabled');
+  }catch(e){toast(e.message);loadSettings();}
+});
+
+export function applyAiDisabledUI(){
+  const off=!!state.aiDisabled;
+  document.documentElement.classList.toggle('ai-disabled',off);
+  const fields=$('#aiSettingsFields'),hint=$('#aiDisabledHint');
+  if(fields)fields.style.display=off?'none':'';
+  if(hint)hint.style.display=off?'block':'none';
+  if(off){
+    const act=document.querySelector('.panel[data-panel="activity"]');
+    if(act&&act.classList.contains('active'))document.querySelector('.tab[data-tab="proxy"]')?.click();
+    const mcpBtn=document.querySelector('#apiSub button[data-s="mcp"]');
+    if(mcpBtn&&mcpBtn.classList.contains('on'))document.querySelector('#apiSub button[data-s="keys"]')?.click();
+    state.actUnseen=0;
+    const b=$('#actBadge');if(b)b.style.display='none';
+    if(state.showAI){state.showAI=false;const t=$('#aiToggle');if(t)t.classList.remove('accent');}
+  }
+}
+
+$('#setAiDisabled')&&($('#setAiDisabled').onchange=async()=>{
+  const disabled=$('#setAiDisabled').checked;
+  try{
+    await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({aiDisabled:disabled})});
+    state.aiDisabled=disabled;
+    applyAiDisabledUI();
+    if(disabled){toast('AI features disabled');loadFlows();}
+    else toast('AI features enabled');
+  }catch(e){toast(e.message);$('#setAiDisabled').checked=!disabled;}
+});
 
 function aiIsOpenRouter(){return ($('#setAiProvider')||{}).value==='openrouter';}
 
@@ -319,8 +371,12 @@ $('#saveAddrBtn').onclick=async()=>{
     $('#proxyAddr').textContent=s.proxyAddr;toast('proxy now on '+s.proxyAddr);}catch(e){toast(e.message);}
 };
 export async function loadSysProxy(){
-  try{const s=await api('/api/sysproxy');const b=$('#sysProxyToggle');
-    if(!s.supported){b.disabled=true;b.textContent='Auto-config: macOS only';$('#sysProxyHint').textContent='Set your OS/browser proxy to '+s.proxy+' manually.';return;}
+  try{const s=await api('/api/sysproxy');const sec=$('#sysProxySection');const b=$('#sysProxyToggle');
+    if(!s.supported){
+      if(sec)sec.style.display='none';
+      return;
+    }
+    if(sec)sec.style.display='';
     b.classList.toggle('on',s.enabled);b.setAttribute('aria-pressed',s.enabled?'true':'false');b.textContent=s.enabled?'System proxy is on':'System proxy is off';
     $('#sysProxyHint').textContent=s.enabled?'Traffic routes through '+s.proxy:'';
   }catch(e){}

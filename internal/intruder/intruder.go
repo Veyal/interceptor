@@ -28,10 +28,10 @@ var marker = regexp.MustCompile(`§[^§]*§`)
 type Spec struct {
 	Target       string     // scheme://host[:port]
 	Template     string     // raw request with §…§ fuzz points
-	AttackType   string     // "sniper" | "pitchfork" | "repeat"
+	AttackType   string     // "sniper" | "pitchfork" | "repeat" (alias: "null")
 	Payloads     [][]string // sniper: one list; pitchfork: one list per position
-	Repeat       int        // "repeat" mode: send the template this many times (race testing)
-	Threads      int        // max concurrent in-flight requests (default 1; raise for race conditions)
+	Repeat       int        // repeat/null mode: send the template this many times (no payloads)
+	Threads      int        // max concurrent in-flight requests (default 1)
 	DelayMs      int        // delay between dispatching each request (throttling); 0 = none
 	GrepMatch    string     // flag a result if its response matches this regex (or contains this literal)
 	GrepExtract  string     // extract group 1 of this regex from each response into the result
@@ -136,13 +136,24 @@ type job struct {
 	payloads []string // one per position
 }
 
+// normalizeAttackType maps UI/API aliases to engine attack types.
+func normalizeAttackType(t string) string {
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "null":
+		return "repeat"
+	default:
+		return t
+	}
+}
+
 // Start validates the spec, builds the job list, and runs the attack in the
 // background. It errors if an attack is already running or the spec is invalid.
 func (e *Engine) Start(spec Spec) error {
+	spec.AttackType = normalizeAttackType(spec.AttackType)
 	positions := marker.FindAllString(spec.Template, -1)
 	if spec.AttackType == "repeat" {
-		// Race/repeat mode: send the template verbatim N times — no markers or
-		// payloads required (raise Threads to fire them concurrently).
+		// Null/repeat mode: send the template verbatim N times — no markers or
+		// payloads required (raise Threads for concurrent replays).
 		if spec.Repeat < 1 {
 			return errors.New("set how many times to send (repeat count)")
 		}

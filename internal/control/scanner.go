@@ -26,6 +26,7 @@ func (h *Hub) scannerRun(w http.ResponseWriter, r *http.Request) {
 
 	// Compile user checks once; surface compile failures without aborting.
 	var checks []*checkscript.Check
+	disabled := h.checksDisabledSet()
 	if h.ChecksDir != "" {
 		var cerrs map[string]error
 		checks, cerrs = checkscript.LoadDir(h.ChecksDir)
@@ -50,6 +51,9 @@ func (h *Hub) scannerRun(w http.ResponseWriter, r *http.Request) {
 				ReqBody: string(req), ResBody: string(res),
 			}
 			for _, c := range checks {
+				if disabled[c.ID] {
+					continue
+				}
 				iss, err := c.Run(cf)
 				if err != nil {
 					log.Printf("scanner: custom check %s on flow %d: %v", c.ID, f.ID, err)

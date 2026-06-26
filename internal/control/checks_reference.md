@@ -1,8 +1,5 @@
 # Writing custom scanner checks
 
-> The control UI embeds [`internal/control/checks_reference.md`](../internal/control/checks_reference.md)
-> for the in-app **Docs** tab — keep both files in sync when editing this guide.
-
 Interceptor's passive scanner is extensible: drop a check written in **Starlark** (a small,
 Python-like language) into your checks folder and it runs on every scan, right alongside the
 built-in checks. This page is the **standard** every check is written against.
@@ -69,7 +66,7 @@ def check(flow):
     return []
 ```
 
-More ready-to-copy examples live in [`examples/checks/`](../examples/checks/).
+More ready-to-copy examples ship in the repo under `examples/checks/`.
 
 ## Limits & safety
 
@@ -79,3 +76,10 @@ More ready-to-copy examples live in [`examples/checks/`](../examples/checks/).
   aborts that one check instead of hanging the scan.
 - **Isolated failures:** a check that fails to compile or errors at runtime is logged and skipped —
   it never aborts the scan or the other checks.
+
+## AI-assisted authoring
+
+When AI is enabled in **Settings → AI assist**, open **Scanner → ✎ Custom checks** and use the
+**✨ Describe** tab: write what you want to detect in plain English, click **Generate & test**, then
+**Save** once the test output looks right. The **Code** tab shows the Starlark; **Docs** (this page)
+lists the API the generator must follow.

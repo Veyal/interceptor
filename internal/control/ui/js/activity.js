@@ -39,7 +39,7 @@ export function flashAiPulse(tool){
   aiPulseTimer=setTimeout(()=>{p.classList.remove('live');if(lbl)lbl.textContent='AI active';},2500);
 }
 export function onActivity(it){
-  if(!it)return;
+  if(!it||state.aiDisabled)return;
   state.activity.unshift(it);
   if(state.activity.length>ACT_MAX)state.activity.length=ACT_MAX;
   const onTab=document.querySelector('.tab[data-tab="activity"]').classList.contains('active');

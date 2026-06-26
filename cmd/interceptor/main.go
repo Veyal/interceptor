@@ -134,8 +134,9 @@ func run() error {
 	sc := scope.New() // one shared target-scope matcher: control owns CRUD, the proxy gate reads it
 	pm := &proxyManager{}
 	hub := control.New(st, eng, ca, pm, sc)
-	// User-authored Starlark scanner checks live here (created so it's discoverable).
-	checksDir := filepath.Join(dir, "checks")
+	// User-authored Starlark scanner checks are global (shared across projects).
+	checksDir := filepath.Join(globalDir, "checks")
+	migrateGlobalChecks(globalDir, filepath.Join(globalDir, "projects"))
 	_ = os.MkdirAll(checksDir, 0o755)
 	hub.ChecksDir = checksDir
 	hub.SelfAddr = controlAddr // so the active scanner never targets our own API

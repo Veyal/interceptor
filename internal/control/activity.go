@@ -20,6 +20,9 @@ func (h *Hub) recordActivity(a store.Activity) store.Activity {
 // postActivity records one AI tool call (POSTed by the MCP server after every
 // call), persists it, and pushes it to all live UI subscribers.
 func (h *Hub) postActivity(w http.ResponseWriter, r *http.Request) {
+	if h.denyIfAIDisabled(w) {
+		return
+	}
 	var in struct {
 		Tool    string `json:"tool"`
 		Summary string `json:"summary"`
@@ -38,6 +41,10 @@ func (h *Hub) postActivity(w http.ResponseWriter, r *http.Request) {
 
 // listActivity returns the persisted AI activity, newest first.
 func (h *Hub) listActivity(w http.ResponseWriter, r *http.Request) {
+	if h.aiDisabled() {
+		writeJSON(w, http.StatusOK, map[string]any{"activity": []store.Activity{}})
+		return
+	}
 	items, err := h.st.ListActivity(atoiOr(r.URL.Query().Get("limit"), 300))
 	if err != nil {
 		httpErr(w, http.StatusInternalServerError, err.Error())

@@ -21,6 +21,9 @@ const aiNoKeyMsg = "no AI API key — set one in Settings → AI assist (or the 
 // aiCreds resolves the provider and key from Settings, falling back to the
 // provider's env var. ok is false when no key is available (assist is disabled).
 func (h *Hub) aiCreds() (provider, key string, ok bool) {
+	if h.aiDisabled() {
+		return "", "", false
+	}
 	provider, _, _ = h.st.GetSetting("ai.provider")
 	if provider == "" {
 		provider = aiassist.ProviderAnthropic
@@ -92,6 +95,9 @@ func (h *Hub) collectAssistFlows(ids []int64, kind string) []assistFlow {
 // consume the SSE stream). Disabled unless an API key is configured. The exchange
 // is sent to the provider only here, on an explicit request.
 func (h *Hub) aiAssist(w http.ResponseWriter, r *http.Request) {
+	if h.denyIfAIDisabled(w) {
+		return
+	}
 	provider, key, ok := h.aiCreds()
 	if !ok {
 		httpErr(w, http.StatusBadRequest, aiNoKeyMsg)
@@ -126,6 +132,9 @@ func (h *Hub) aiAssist(w http.ResponseWriter, r *http.Request) {
 // terminal `event: done` or `event: error`). This is the primary path — it makes
 // the assistant feel responsive instead of stalling on a full completion.
 func (h *Hub) aiAssistStream(w http.ResponseWriter, r *http.Request) {
+	if h.denyIfAIDisabled(w) {
+		return
+	}
 	provider, key, ok := h.aiCreds()
 	if !ok {
 		httpErr(w, http.StatusBadRequest, aiNoKeyMsg)
@@ -191,6 +200,9 @@ const actionsSystem = "You are a web-app security testing assistant. Reply with 
 // if the model wraps the JSON in prose or fences, extractJSONArray recovers it; an
 // unparseable reply yields an empty list rather than an error.
 func (h *Hub) aiActions(w http.ResponseWriter, r *http.Request) {
+	if h.denyIfAIDisabled(w) {
+		return
+	}
 	provider, key, ok := h.aiCreds()
 	if !ok {
 		httpErr(w, http.StatusBadRequest, aiNoKeyMsg)
@@ -295,6 +307,9 @@ func clip(s string, n int) string {
 // aiOpenRouterModels returns the OpenRouter model catalog and optionally validates
 // an API key (?key= for an unsaved key, else stored key / OPENROUTER_API_KEY).
 func (h *Hub) aiOpenRouterModels(w http.ResponseWriter, r *http.Request) {
+	if h.denyIfAIDisabled(w) {
+		return
+	}
 	key := strings.TrimSpace(r.URL.Query().Get("key"))
 	if key == "" {
 		key, _, _ = h.st.GetSetting("ai.apiKey")

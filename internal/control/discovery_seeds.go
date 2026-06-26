@@ -120,6 +120,9 @@ func mergePaths(a, b []string) []string {
 
 // aiDiscoveryPaths asks the configured LLM for extra path guesses (best-effort).
 func (h *Hub) aiDiscoveryPaths(host string, seeds []string) ([]string, string) {
+	if h.aiDisabled() {
+		return nil, "AI disabled in Settings"
+	}
 	provider, key, ok := h.aiCreds()
 	if !ok {
 		return nil, "no AI key — returning history seeds only"

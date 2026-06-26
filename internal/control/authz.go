@@ -5,12 +5,13 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Veyal/interceptor/internal/sender"
 	"github.com/Veyal/interceptor/internal/store"
 )
 
-// Authorization (access-control) testing: replay one captured request under each
+// Authorization (access-control) testing: replay captured request(s) under each
 // saved identity (role) and diff the responses. If a lower-privileged identity
 // still gets a successful, ~same-size response as the baseline, that's a strong
 // signal of broken access control (IDOR / privilege escalation — OWASP #1).
@@ -19,6 +20,27 @@ import (
 type identity struct {
 	Name    string `json:"name"`
 	Headers string `json:"headers"` // "Key: Value" lines (Cookie / Authorization / …)
+}
+
+type authzResult struct {
+	Name           string `json:"name"`
+	Status         int    `json:"status"`
+	Length         int64  `json:"length"`
+	Mime           string `json:"mime"`
+	Error          string `json:"error"`
+	FlowID         int64  `json:"flowId"`
+	BodyHash       string `json:"bodyHash,omitempty"`
+	Same           bool   `json:"sameAsBaseline"`
+	SessionInvalid bool   `json:"sessionInvalid,omitempty"`
+}
+
+type authzRunOut struct {
+	FlowID         int64         `json:"flowId,omitempty"`
+	Method         string        `json:"method,omitempty"`
+	Host           string        `json:"host,omitempty"`
+	Path           string        `json:"path,omitempty"`
+	BaselineStatus int           `json:"baselineStatus"`
+	Results        []authzResult `json:"results"`
 }
 
 func (h *Hub) authzIdentities() []identity {
@@ -50,15 +72,37 @@ func (h *Hub) setAuthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"identities": in.Identities})
 }
 
-// authzRun replays a flow's request under each identity and reports the per-identity
-// status/length plus a "same access as baseline" flag (the first identity is the
-// baseline — typically your most-privileged role).
-func (h *Hub) authzRun(w http.ResponseWriter, r *http.Request) {
+// authzFlowAuth returns Cookie/Authorization from a flow's request plus optional
+// expiry hints parsed from the captured response Set-Cookie headers.
+func (h *Hub) authzFlowAuth(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		httpErr(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	f, err := h.st.GetFlow(id)
+	if err != nil {
+		httpErr(w, http.StatusNotFound, "flow not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"requestAuth":  extractAuthHeaders(f.ReqHeaders),
+		"cookieHints":  cookieExpiryHints(f.ResHeaders),
+	})
+}
+
+// authzCheckSessions replays one flow under each identity and reports whether
+// each session still looks valid (401/403 when auth headers are set = invalid).
+func (h *Hub) authzCheckSessions(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		FlowID int64 `json:"flowId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		httpErr(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	if in.FlowID == 0 {
+		httpErr(w, http.StatusBadRequest, "flowId required — pick a session probe (e.g. GET /api/me)")
 		return
 	}
 	f, err := h.st.GetFlow(in.FlowID)
@@ -68,53 +112,264 @@ func (h *Hub) authzRun(w http.ResponseWriter, r *http.Request) {
 	}
 	ids := h.authzIdentities()
 	if len(ids) == 0 {
+		httpErr(w, http.StatusBadRequest, "no identities configured")
+		return
+	}
+	type check struct {
+		Name           string `json:"name"`
+		Status         int    `json:"status"`
+		Error          string `json:"error"`
+		SessionInvalid bool   `json:"sessionInvalid"`
+		HasAuth        bool   `json:"hasAuth"`
+	}
+	var out []check
+	for _, id := range ids {
+		hasAuth := identityHasAuth(id)
+		rr := h.authzReplay(f, id)
+		out = append(out, check{
+			Name:           id.Name,
+			Status:         rr.Status,
+			Error:          rr.Error,
+			SessionInvalid: sessionLooksInvalid(rr.Status, hasAuth),
+			HasAuth:        hasAuth,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"flowId": in.FlowID, "checks": out})
+}
+
+// authzRun replays flow(s) under each identity and reports per-identity diffs.
+func (h *Hub) authzRun(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		FlowID      int64 `json:"flowId"`
+		InScope     bool  `json:"inScope"`
+		MaxFlows    int   `json:"maxFlows"`
+		SkipStatic  *bool `json:"skipStatic"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		httpErr(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	if in.FlowID == 0 && !in.InScope {
+		httpErr(w, http.StatusBadRequest, "specify flowId or inScope:true")
+		return
+	}
+	if in.InScope && !h.sc.HasIncludes() {
+		httpErr(w, http.StatusBadRequest, "define a target-scope include rule before an “all in-scope” authz run — with no scope it would replay every captured endpoint")
+		return
+	}
+	ids := h.authzIdentities()
+	if len(ids) == 0 {
 		httpErr(w, http.StatusBadRequest, "no identities configured — add at least one (name + auth headers) first")
 		return
 	}
+
+	var flows []*store.Flow
+	skipStatic := in.InScope
+	if in.SkipStatic != nil {
+		skipStatic = *in.SkipStatic
+	}
+	if in.FlowID > 0 {
+		f, err := h.st.GetFlow(in.FlowID)
+		if err != nil {
+			httpErr(w, http.StatusNotFound, "flow not found")
+			return
+		}
+		flows = []*store.Flow{f}
+	} else {
+		limit := in.MaxFlows
+		if limit <= 0 {
+			limit = 30
+		}
+		if limit > 100 {
+			limit = 100
+		}
+		raw, _ := h.st.QueryFlowsFilter(store.FlowFilter{
+			Limit:        limit * 5, // over-fetch; authzTargets dedupes + static filter
+			ExcludeFlags: store.FlagRepeater | store.FlagIntruder | store.FlagActiveScan,
+		})
+		flows = h.authzTargets(raw, skipStatic)
+		if len(flows) > limit {
+			flows = flows[:limit]
+		}
+	}
+	if len(flows) == 0 {
+		httpErr(w, http.StatusBadRequest, "no in-scope endpoints to test")
+		return
+	}
+
+	var runs []authzRunOut
+	flagged := 0
+	for _, f := range flows {
+		ro := h.authzRunOne(f, ids)
+		runs = append(runs, ro)
+		for i, rr := range ro.Results {
+			if i > 0 && rr.Same {
+				flagged++
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"runs": runs,
+		"summary": map[string]any{
+			"endpoints": len(runs),
+			"flagged":   flagged,
+		},
+	})
+}
+
+func (h *Hub) authzRunOne(f *store.Flow, ids []identity) authzRunOut {
+	ro := authzRunOut{
+		FlowID: f.ID, Method: f.Method, Host: f.Host, Path: f.Path,
+	}
+	var baseLen int64
+	var baseHash, baseMime string
+	haveBase := false
+	for i, id := range ids {
+		hasAuth := identityHasAuth(id)
+		rr := h.authzReplay(f, id)
+		rr.Name = id.Name
+		rr.SessionInvalid = sessionLooksInvalid(rr.Status, hasAuth)
+		if !haveBase {
+			ro.BaselineStatus, baseLen, baseHash, baseMime, haveBase = rr.Status, rr.Length, rr.BodyHash, rr.Mime, true
+		} else if i > 0 {
+			rr.Same = authzSameAccess(ro.BaselineStatus, baseLen, baseHash, baseMime, rr)
+		}
+		ro.Results = append(ro.Results, rr)
+	}
+	return ro
+}
+
+func (h *Hub) authzReplay(f *store.Flow, id identity) authzResult {
 	url := flowURLStr(f)
 	body := h.bodyBytes(f.ReqBodyHash)
+	hdrs := applyIdentityHeaders(f.ReqHeaders, id)
+	flow, _ := h.snd.Send(sender.Request{Method: f.Method, URL: url, Headers: hdrs, Body: body, Flags: store.FlagAuthz, NoSession: true})
+	rr := authzResult{Name: id.Name}
+	if flow != nil {
+		rr.Status, rr.Length, rr.Mime, rr.Error, rr.FlowID = flow.Status, flow.ResLen, flow.Mime, flow.Error, flow.ID
+		if flow.ResBodyHash != "" {
+			resBody := h.bodyBytes(flow.ResBodyHash)
+			rr.BodyHash = bodySHA256(resBody)
+		}
+	}
+	return rr
+}
 
-	type result struct {
-		Name   string `json:"name"`
-		Status int    `json:"status"`
-		Length int64  `json:"length"`
-		Mime   string `json:"mime"`
-		Error  string `json:"error"`
-		FlowID int64  `json:"flowId"`
-		Same   bool   `json:"sameAsBaseline"`
+// authzTargets keeps in-scope flows deduped by method+host+path.
+func (h *Hub) authzTargets(flows []*store.Flow, skipStatic bool) []*store.Flow {
+	seen := map[string]bool{}
+	var out []*store.Flow
+	for _, f := range flows {
+		if !h.sc.InScope(f) || h.isOwnListener(f) {
+			continue
+		}
+		if skipStatic && authzSkipStatic(f) {
+			continue
+		}
+		key := f.Method + " " + f.Host + f.Path
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, f)
 	}
-	var out []result
-	var baseLen int64
-	var baseStatus int
-	haveBase := false
-	for _, id := range ids {
-		hdrs := cloneHeaders(f.ReqHeaders)
-		for _, line := range strings.Split(id.Headers, "\n") {
-			line = strings.TrimRight(line, "\r")
-			if strings.TrimSpace(line) == "" {
+	return out
+}
+
+func applyIdentityHeaders(base map[string][]string, id identity) map[string][]string {
+	out := cloneHeaders(base)
+	if strings.TrimSpace(id.Headers) == "" {
+		stripAuthHeaders(out)
+		return out
+	}
+	for _, line := range strings.Split(id.Headers, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		if k = strings.TrimSpace(k); k != "" {
+			out[http.CanonicalHeaderKey(k)] = []string{strings.TrimSpace(v)}
+		}
+	}
+	return out
+}
+
+func identityHasAuth(id identity) bool {
+	if strings.TrimSpace(id.Headers) == "" {
+		return false
+	}
+	for _, line := range strings.Split(id.Headers, "\n") {
+		line = strings.TrimRight(line, "\r")
+		k, _, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		k = strings.ToLower(strings.TrimSpace(k))
+		if isAuthHeaderKey(k) {
+			return true
+		}
+	}
+	return false
+}
+
+// sessionLooksInvalid is true when a replay with auth headers got 401/403.
+func sessionLooksInvalid(status int, hasAuth bool) bool {
+	return hasAuth && (status == http.StatusUnauthorized || status == http.StatusForbidden)
+}
+
+// cookieExpiryHints parses Set-Cookie attributes from a captured response.
+func cookieExpiryHints(resHdr map[string][]string) []string {
+	if resHdr == nil {
+		return nil
+	}
+	var hints []string
+	for _, raw := range resHdr["Set-Cookie"] {
+		name := cookieName(raw)
+		if name == "" {
+			continue
+		}
+		if exp := cookieAttr(raw, "expires"); exp != "" {
+			if t, err := http.ParseTime(exp); err == nil && t.Before(time.Now()) {
+				hints = append(hints, name+": expired at capture ("+exp+")")
 				continue
 			}
-			k, v, ok := strings.Cut(line, ":")
-			if !ok {
-				continue
-			}
-			if k = strings.TrimSpace(k); k != "" {
-				hdrs[http.CanonicalHeaderKey(k)] = []string{strings.TrimSpace(v)}
-			}
+			hints = append(hints, name+": Expires "+exp)
+			continue
 		}
-		flow, _ := h.snd.Send(sender.Request{Method: f.Method, URL: url, Headers: hdrs, Body: body, Flags: store.FlagAuthz, NoSession: true})
-		rr := result{Name: id.Name}
-		if flow != nil {
-			rr.Status, rr.Length, rr.Mime, rr.Error, rr.FlowID = flow.Status, flow.ResLen, flow.Mime, flow.Error, flow.ID
+		if age := cookieAttr(raw, "max-age"); age != "" {
+			hints = append(hints, name+": Max-Age "+age)
 		}
-		if !haveBase {
-			baseStatus, baseLen, haveBase = rr.Status, rr.Length, true
-		} else if rr.Status > 0 && rr.Status < 400 && abs64(rr.Length-baseLen) <= max64(64, baseLen/20) {
-			rr.Same = true // succeeded with a ~same-size body as the privileged baseline
-		}
-		out = append(out, rr)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"baselineStatus": baseStatus, "results": out})
+	return hints
+}
+
+func cookieName(setCookie string) string {
+	nameVal, _, _ := strings.Cut(setCookie, ";")
+	nameVal = strings.TrimSpace(nameVal)
+	if nameVal == "" {
+		return ""
+	}
+	name, _, ok := strings.Cut(nameVal, "=")
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(name)
+}
+
+func cookieAttr(setCookie, key string) string {
+	key = strings.ToLower(key)
+	for _, part := range strings.Split(setCookie, ";") {
+		part = strings.TrimSpace(part)
+		k, v, ok := strings.Cut(part, "=")
+		if ok && strings.EqualFold(strings.TrimSpace(k), key) {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 // flowURLStr reconstructs the absolute URL of a captured flow.

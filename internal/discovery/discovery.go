@@ -74,6 +74,7 @@ type Result struct {
 	Depth       int    `json:"depth"`
 	Dir         bool   `json:"dir"`
 	Error       string `json:"error,omitempty"`
+	FlowID      int64  `json:"flowId,omitempty"` // set when the control layer records this hit as a flow
 }
 
 // Probe issues a single request and reports the outcome. It must be safe for
@@ -94,10 +95,11 @@ type State struct {
 
 // Engine runs content-discovery jobs (one at a time).
 type Engine struct {
-	mu      sync.Mutex
-	probe   Probe
-	inScope func(rawURL string) bool
-	notify  func()
+	mu       sync.Mutex
+	probe    Probe
+	inScope  func(rawURL string) bool
+	notify   func()
+	recorder Recorder
 
 	running   bool
 	baseURL   string
@@ -108,6 +110,10 @@ type Engine struct {
 	note      string
 	cancel    context.CancelFunc
 }
+
+// Recorder is an optional hook the control layer uses to persist a found URL as a
+// flow when recording is enabled. It runs outside the engine lock and may block.
+type Recorder func(Result) int64
 
 // New returns an idle engine. Wire a Probe (and optionally scope/notifier) before Start.
 func New() *Engine { return &Engine{} }
@@ -122,6 +128,10 @@ func (e *Engine) SetScope(fn func(rawURL string) bool) { e.mu.Lock(); e.inScope 
 // SetNotifier registers a callback fired (outside the lock) whenever results or
 // running-state change, so the control layer can push SSE updates.
 func (e *Engine) SetNotifier(fn func()) { e.mu.Lock(); e.notify = fn; e.mu.Unlock() }
+
+// SetRecorder registers an optional callback that persists each found result as
+// a flow and returns its store id (0 when recording is off or fails).
+func (e *Engine) SetRecorder(fn Recorder) { e.mu.Lock(); e.recorder = fn; e.mu.Unlock() }
 
 func (e *Engine) fireNotify() {
 	e.mu.Lock()
@@ -311,6 +321,14 @@ func (e *Engine) calibrate(ctx context.Context, dir string, exts []string, heade
 }
 
 func (e *Engine) appendResult(res Result) {
+	e.mu.Lock()
+	rec := e.recorder
+	e.mu.Unlock()
+	if rec != nil && res.Status != 0 && res.Error == "" {
+		if id := rec(res); id > 0 {
+			res.FlowID = id
+		}
+	}
 	e.mu.Lock()
 	e.results = append(e.results, res)
 	// Keep results stably ordered by depth then path for a readable, deterministic UI.

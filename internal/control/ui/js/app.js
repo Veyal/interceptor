@@ -6,16 +6,17 @@ import { $, $$, esc, state, api, toast, MODAL_IDS, openModal, closeModal } from 
 import { selectFlow, renderChips, loadFlows, loadScope, loadViews, scheduleReload, renderWSFrames, clearAllFilters, walkFlowNav, toggleSelectAllShown, handleFlowNew, handleFlowUpdate } from './proxy.js';
 import { renderIntercept, toggleIntercept, loadRules } from './intercept.js';
 import { repInit, repSend, sendToRepeater, sendToIntruder, scheduleIntr } from './tools.js';
-import { loadIssues, runScan, loadScanTargets, openActive, openDecoder, loadActive, loadChecksList, loadOob } from './scanner.js';
-import { loadEndpoints } from './map.js';
+import { loadIssues, runScan, loadScanTargets, openActive, openDecoder, openChecks, loadActive, loadChecksList, loadOob, renderAsScopePanel } from './scanner.js';
+import { loadEndpoints, focusMapFromFlow } from './map.js';
 import { loadDiscovery, refreshDiscovery } from './discovery.js';
-import { loadSettings, loadSysProxy, loadSession, loadProject, openProjectModal } from './settings.js';
-import { loadNotes, flushNotesSave, focusNotes } from './notes.js';
+import { loadSettings, loadSysProxy, loadSession, loadProject, openProjectModal, applyAiDisabledUI, applyOobDisabledUI } from './settings.js';
+import { loadNotes, flushNotesSave, focusNotes, organizeNotes } from './notes.js';
 import { loadApiKeys, loadReference, loadMCP } from './apipanel.js';
 import { renderActivity, onActivity, loadActivity, clearActSeen } from './activity.js';
+import './flowmodal.js'; // side-effect: flow inspect popup + modal handlers
 import './ai.js'; // side-effect: wires the AI assist modal (its openAi is also imported by proxy.js)
 import './authz.js'; // side-effect: wires authz modal buttons
-import { openAuthz } from './authz.js';
+import { openAuthz, renderAuthzScopePanel } from './authz.js';
 
 /* ---- tabs ---- */
 function activateTab(t){
@@ -108,11 +109,19 @@ function renderIcptStat(){
 }
 setInterval(renderCapStat,1000);
 
+let mapRefreshT=null;
+function scheduleMapRefresh(){
+  clearTimeout(mapRefreshT);
+  mapRefreshT=setTimeout(()=>{
+    if(document.querySelector('.tab[data-tab="map"]')?.classList.contains('active')) loadEndpoints();
+  },900);
+}
+
 /* ---- live events ---- */
 function connectEvents(){
   const es=new EventSource('/api/events');
   es.onmessage=e=>{let m;try{m=JSON.parse(e.data);}catch(err){return;}
-    if(m.type==='flow.new'){if(m.flow)handleFlowNew(m.flow);else scheduleReload();onCapture();}
+    if(m.type==='flow.new'){if(m.flow)handleFlowNew(m.flow);else scheduleReload();onCapture();scheduleMapRefresh();}
     else if(m.type==='flow.update'){if(m.flow)handleFlowUpdate(m.flow);else scheduleReload();if(m.flow&&m.flow.id===state.selId)selectFlow(state.selId);}
     else if(m.type==='activity')onActivity(m.item);
     else if(m.type==='activity.clear'){state.activity=[];if(document.querySelector('.tab[data-tab="activity"]').classList.contains('active'))renderActivity();clearActSeen();}
@@ -121,14 +130,14 @@ function connectEvents(){
     else if(m.type==='intruder.update')scheduleIntr();
     else if(m.type==='scanner.update')loadIssues();
     else if(m.type==='ws.frame'){if(m.flowId===state.selId)renderWSFrames(state.selId);}
-    else if(m.type==='scope.update'){loadScope();if(state.inScopeOnly)loadFlows();}
+    else if(m.type==='scope.update'){loadScope();if(state.inScopeOnly)loadFlows();if($('#activeModal')&&$('#activeModal').style.display==='flex')renderAsScopePanel();if($('#authzModal')&&$('#authzModal').style.display==='flex')renderAuthzScopePanel();}
     else if(m.type==='views.update')loadViews();
     else if(m.type==='session.update')loadSession();
     else if(m.type==='checks.update'){if($('#checksModal')&&$('#checksModal').style.display==='flex')loadChecksList();}
     else if(m.type==='activescan.update'){if($('#activeModal')&&$('#activeModal').style.display==='flex')loadActive();}
     else if(m.type==='oob.update'){if($('#oobModal')&&$('#oobModal').style.display==='flex')loadOob();}
     else if(m.type==='discovery.update'){if(document.querySelector('.tab[data-tab="discover"]').classList.contains('active'))refreshDiscovery();}
-    else if(m.type==='settings.update')loadSettings();
+    else if(m.type==='settings.update'){loadSettings();applyAiDisabledUI();applyOobDisabledUI();}
     else if(m.type==='notes.update')loadNotes();
   };
   es.onerror=()=>{/* browser auto-reconnects */};
@@ -162,22 +171,27 @@ function cmdkCommands(){
   const go=name=>()=>document.querySelector('.tab[data-tab="'+name+'"]').click();
   const goSet=sec=>()=>{document.querySelector('.tab[data-tab="settings"]').click();const b=document.querySelector('#setNav button[data-sec="'+sec+'"]');if(b)b.click();};
   return [
-    {t:'Go to Proxy / History',kw:'flows requests traffic inspect',run:go('proxy')},
+    {t:'Go to Proxy History',kw:'proxy history flows requests traffic inspect captured',run:go('proxy')},
     {t:'Go to Intercept',kw:'hold forward drop match replace rules',run:go('intercept')},
     {t:'Go to Repeater',kw:'resend craft edit request',run:go('repeater')},
     {t:'Go to Intruder',kw:'fuzz brute force payloads enumerate',run:go('intruder')},
     {t:'Go to Scanner',kw:'passive active scan checks findings issues vulnerabilities report',run:go('scanner')},
     {t:'Go to Discover',kw:'content discovery forced browse brute force dirbuster gobuster ffuf wordlist directories endpoints fuzz paths',run:go('discover')},
-    {t:'Go to Map',kw:'endpoints attack surface graph tree',run:go('map')},
+    {t:'Go to Map',kw:'endpoints attack surface graph tree headers body search',run:go('map')},
     {t:'Go to Notes',kw:'scratchpad markdown findings notebook',run:goToNotes},
+    {t:'Edit custom scanner checks',kw:'starlark checks passive custom rules',run:openChecks},
+    {t:'Open active scan',kw:'active attack payloads consent arm fuzz',run:openActive},
+    ...(state.oobEnabled?[{t:'Open OOB catcher',kw:'out of band blind ssrf callback collab',run:()=>{openModal($('#oobModal'));loadOob();}}]:[]),
+    ...(state.aiDisabled?[]:[{t:'Organize project notes with AI',kw:'notes structure sort clean headings findings todo',run:()=>{goToNotes();organizeNotes();}}]),
     {t:'Open Authz test',kw:'authorization access control roles identity',run:()=>{const f=selectedFlow();if(f)openAuthz(f.id);else toast('select a flow in History first');}},
-    {t:'Go to Activity',kw:'ai mcp glass box agent log',run:go('activity')},
+    ...(state.aiDisabled?[]:[{t:'Go to Activity',kw:'ai mcp glass box agent log',run:go('activity')}]),
     {t:'Go to API',kw:'keys tokens rest mcp reference',run:go('api')},
     {t:'Settings: Proxy & network',kw:'listener bind port upstream system proxy capture browser telemetry',run:goSet('proxy')},
     {t:'Settings: TLS / CA — download CA certificate',kw:'https certificate cert trust install ca download mitm',run:goSet('tls')},
     {t:'Settings: Target scope',kw:'include exclude host path in scope',run:goSet('scope')},
     {t:'Settings: AI assist — provider & API key',kw:'anthropic openrouter model api key llm',run:goSet('ai')},
     {t:'Settings: Session / auth headers',kw:'cookie token authorization bearer login',run:goSet('session')},
+    {t:'Settings: Scanner & OOB',kw:'scanner oob passive active checks enable',run:goSet('scanner')},
     {t:'Settings: Project & data — export, import, retention',kw:'export import har json switch project data retention delete purge gc reclaim space',run:goSet('project')},
     {t:'Open Decoder (base64 / url / jwt / hex…)',kw:'encode decode smart',run:()=>openDecoder()},
     {t:'Keyboard shortcuts',kw:'help cheatsheet keys hotkeys',run:()=>openModal($('#shortcutsModal'))},
@@ -230,6 +244,7 @@ document.addEventListener('keydown',e=>{
   if(mod&&e.key.toLowerCase()==='r'){const f=selectedFlow();if(f){e.preventDefault();sendToRepeater(f);}return;}
   if(!mod&&!typing&&e.key==='r'){const f=selectedFlow();if(f){const p=document.querySelector('.panel[data-panel="proxy"]');if(p&&p.classList.contains('active')){e.preventDefault();sendToRepeater(f);}}return;}
   if(mod&&e.key.toLowerCase()==='i'){const f=selectedFlow();if(f){e.preventDefault();sendToIntruder(f);}return;}
+  if(mod&&e.key.toLowerCase()==='m'){const f=selectedFlow();if(f){e.preventDefault();focusMapFromFlow(f);}return;}
   // Ctrl+Shift+F forward / Ctrl+D drop the selected held item — Intercept tab only
   if(document.querySelector('.tab[data-tab="intercept"]').classList.contains('active')){
     const drop=mod&&e.key.toLowerCase()==='d';

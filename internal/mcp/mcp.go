@@ -1018,4 +1018,67 @@ func (s *Server) registerTools() {
 		"Run the recorded login macro now — refreshes session Cookie/Authorization headers from the login response. Configure via Settings → Session or set_session with loginMacro.",
 		obj(map[string]any{}),
 		func(a map[string]any) (string, error) { return s.api(http.MethodPost, "/api/session/login/run", nil) })
+
+	s.add("get_authz", "List saved authorization-test identities (name + auth headers per role).", obj(map[string]any{}),
+		func(a map[string]any) (string, error) { return s.apiGet("/api/authz") })
+
+	s.add("set_authz", "Save authorization-test identities.",
+		obj(map[string]any{
+			"identities": p("array", "objects with name + headers (Cookie/Authorization lines)"),
+		}, "identities"),
+		func(a map[string]any) (string, error) {
+			return s.api(http.MethodPost, "/api/authz", map[string]any{"identities": a["identities"]})
+		})
+
+	s.add("authz_run",
+		"Replay captured endpoint(s) under each identity and diff responses — IDOR / broken access control.",
+		obj(map[string]any{
+			"flowId":     p("integer", "single flow to test"),
+			"inScope":    p("boolean", "bulk: deduped in-scope endpoints"),
+			"maxFlows":   p("integer", "bulk cap (default 30, max 100)"),
+			"skipStatic": p("boolean", "bulk: skip .js/.css/images (default true)"),
+		}),
+		func(a map[string]any) (string, error) {
+			body := map[string]any{}
+			if v := argInt(a, "flowId", 0); v > 0 {
+				body["flowId"] = v
+			}
+			if argBool(a, "inScope", false) {
+				body["inScope"] = true
+			}
+			if v := argInt(a, "maxFlows", 0); v > 0 {
+				body["maxFlows"] = v
+			}
+			if _, ok := a["skipStatic"]; ok {
+				body["skipStatic"] = argBool(a, "skipStatic", true)
+			}
+			raw, err := s.api(http.MethodPost, "/api/authz/run", body)
+			return boundJSON(raw, 600), err
+		})
+
+	s.add("authz_check_sessions",
+		"Replay one flow (e.g. GET /api/me) under each identity — 401/403 with auth headers marks session invalid.",
+		obj(map[string]any{"flowId": pt("integer")}, "flowId"),
+		func(a map[string]any) (string, error) {
+			id := argInt(a, "flowId", 0)
+			if id == 0 {
+				return "", fmt.Errorf("flowId is required")
+			}
+			return s.api(http.MethodPost, "/api/authz/check-sessions", map[string]any{"flowId": id})
+		})
+
+	s.add("oob_state", "Out-of-band callback catcher: enabled flag, base URL, recent interactions.", obj(map[string]any{}),
+		func(a map[string]any) (string, error) {
+			out, err := s.apiGet("/api/oob/state")
+			return boundJSON(out, 400), err
+		})
+
+	s.add("oob_new", "Generate a new blind-callback token/URL (requires OOB enabled + reachable base URL).", obj(map[string]any{}),
+		func(a map[string]any) (string, error) { return s.api(http.MethodPost, "/api/oob/new", nil) })
+
+	s.add("oob_set_base", "Set the public OOB base URL the target can reach (e.g. https://xyz.ngrok.io/oob).",
+		obj(map[string]any{"baseUrl": pt("string")}, "baseUrl"),
+		func(a map[string]any) (string, error) {
+			return s.api(http.MethodPost, "/api/oob/base", map[string]any{"baseUrl": argStr(a, "baseUrl")})
+		})
 }

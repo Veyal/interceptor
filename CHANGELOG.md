@@ -6,6 +6,139 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+### Changed
+### Fixed
+### Removed
+
+## [0.9.0] — 2026-06-26
+
+### Added
+- **History: body search.** Toolbar scope selector **path** vs **body** — body mode scans
+  request/response content (bounded; shows a note when truncated).
+- **History: notes filter.** **📝 notes** toggles flows-with-notes only (`hasNote=1`).
+- **History: response comparer.** Select exactly two flows → **⇄ Compare** in the
+  selection bar — line diff of response bodies.
+- **Custom checks: per-check enable.** Checkbox in the checks list; disabled ids persist
+  in settings and are skipped on passive scan.
+- **MCP: authz + OOB tools.** `get_authz`, `set_authz`, `authz_run`, `authz_check_sessions`,
+  `oob_state`, `oob_new`, `oob_set_base`.
+- **Project export: notebook + authz identities.** Portable bundle includes notes markdown
+  and `authz.identities`; import restores them.
+- **Discover: inspect found paths.** Click a result row to open the request/response
+  popup (same as Map/Scanner). **⧉ Copy URL** lives in that modal header. When
+  **Record hits in History** is on, each hit gets a `flowId` as it is found; otherwise
+  inspect re-sends the URL on demand via `POST /api/discovery/inspect`.
+- **AI organize project notes.** Notes tab **✨ Organize** sends your notebook to your
+  configured AI provider and streams a structured draft (Scope, Credentials, Findings,
+  To-do) in a side-by-side preview; **Apply** replaces the notebook. Also in the command
+  palette when AI is enabled.
+- **Disable all AI features (Settings → AI assist).** One checkbox turns off BYO-key
+  assist, the Activity tab, AI paths in Discover, History AI filter/buttons, and
+  context-menu AI actions. AI HTTP endpoints return 403; MCP and non-AI control APIs
+  stay available. Re-enable anytime from the same screen.
+- **Custom checks: Docs + AI describe.** The checks modal has a **Docs** tab
+  (embedded check authoring reference — flow API, builtins, examples) and a **✨ Describe**
+  tab (when AI is enabled): plain-text → `POST /api/ai/checks/generate` → Starlark source,
+  suggested id, and automatic **Test** against the selected flow.
+- **Custom checks shared across projects.** Scanner checks are stored in
+  `~/.interceptor/checks/` (global), not per-project. On startup, any checks found under
+  old project folders are merged into the global directory without overwriting existing files.
+- **Load list files in Discover & Intruder.** Discover wordlists and Intruder payload
+  lists have **Load file** / **Append file** buttons (native file picker, up to 16 MB).
+  SecLists-style `.txt` wordlists and one-per-line payload files work out of the box.
+- **Map search scopes.** Map search has **Path / host**, **Headers**, **Body**, and **All**
+  modes. Path/host filters client-side (instant); headers/body/all query the server — body
+  search is bounded (content-deduped, latest 8000 flows, 256 KiB per body) so it stays
+  practical on large projects.
+- **Cross-feature navigation & file loads.** History context menu: **Show in Map**, **Scan this
+  host**; inspector selection → **Search in Map (body)**. **Ctrl+M** jumps to Map table view.
+  Decoder **Load file**, Intruder **Load** raw HTTP template. Map auto-refreshes on new traffic.
+  Command palette: custom checks, active scan, OOB (when enabled), Scanner settings. Discover
+  remembers wordlist panel open/closed.
+- **Active scan: in-scope preview.** Choosing **all in-scope** in the active-scan
+  modal lists your include/exclude rules (from Settings → Target scope), captured
+  in-scope hosts, and a link to edit scope — bulk scan still requires at least one
+  include rule.
+- **Authz: bulk in-scope + session helpers.** Authorization test supports
+  **selected flow** or **all in-scope** (up to 30 endpoints, scope include required).
+  **⧉ From flow** fills Cookie/Authorization from the capture; **Check sessions**
+  probes 401/403 per identity; blank headers now truly mean anonymous (auth stripped).
+  Set-Cookie expiry hints shown when opening from a flow.
+
+### Fixed
+- **UI failed to load (`Unexpected token ':'` in `core.js`).** A malformed ternary in
+  `renderMD` (code-block `data-lang` attribute) broke ES module parsing and blanked the
+  whole app until fixed.
+
+### Changed
+- **Inspector: auto-decode on selection.** Highlight base64, URL-encoded, hex, JWT,
+  or other encoded text in the request/response panes (and the flow popup) — a slim
+  amber strip appears under the pane header with the decoded value. Hover to expand;
+  ⧉ copy or open the full text in Decoder. Right-click still works too.
+- **Proxy History: noted flows highlighted.** Rows with a flow note get an amber
+  background and left border instead of a small 📝 icon; hover the row to read
+  the note in the tooltip.
+- **Command palette: Proxy History label.** The History tab entry now read **Proxy History**
+  so Ctrl+K search for "proxy history" finds it easily.
+- **Authz: stronger diff + bulk polish.** Response body hash (SHA-256 prefix) improves
+  same-access detection; bulk runs skip static assets; anonymous identities strip all
+  auth headers (Cookie, Authorization, X-API-Key, …); scope panel lists captured in-scope hosts.
+- **Inspector decode in Pretty mode.** Selection maps back to raw source text so tokens
+  split across highlight spans still decode correctly.
+- **MCP when AI disabled.** `/mcp` and `GET /api/mcp` stay available — only BYO-key AI
+  endpoints return 403; agents can still drive flows, authz, OOB, etc.
+- **API reference expanded.** `/api/reference` now documents notes, endpoints, OOB, authz,
+  activity, project switch, and body search params.
+- **Settings: system proxy on Windows.** macOS-only auto-config section is hidden on
+  unsupported platforms (manual proxy hint remains in the Proxy section).
+- **Custom checks modal height.** The checks modal opens taller
+  (`88vh` / 820px) with a proper flex layout so the Starlark source area fills
+  the dialog instead of collapsing.
+- **OOB catcher disabled by default.** Blind callbacks need a URL the target can
+  reach — `127.0.0.1:9966/oob` is useless for remote apps. The **⚲ OOB** button
+  is hidden until you enable it in **Settings → Scanner** and set a reachable
+  base URL (ngrok, VPS, LAN IP). `/oob/` returns 404 while disabled.
+- **Notes AI organize: rich Markdown.** The organize prompt now asks for credential
+  tables, inline `` `code` `` for passwords/tokens, fenced blocks for JWTs/.env,
+  finding subsections with blockquotes, and `- [ ]` task checkboxes. The notes
+  preview renderer supports tables, blockquotes, ordered/task lists, italics, and
+  language-tagged code blocks.
+- **Repeater / Intruder tab selection.** Active tabs use a background fill, accent
+  text, and a bottom underline — no accent border that could clip or misalign with
+  neighbours. History sidebar selection uses the same fill + accent label (no left
+  border stripe).
+- **Proxy History: configurable columns.** **▦ Cols** in the toolbar opens a
+  checklist of history columns (#, Method, Host, Path, St, Type, Size, Time).
+  Choices persist in localStorage. **Type** is hidden by default.
+- **Body downloads use MIME extensions.** Oversized or binary request/response
+  bodies download via `GET /api/flows/{id}/body` (body bytes only, not the HTTP
+  envelope) as `flow-{id}-{side}.{ext}` — e.g. `.json`, `.html`, `.png`, `.pdf`.
+- **Pretty view syntax highlighting.** JSON bodies were already colorized; Pretty
+  mode now also highlights **HTML/XML** (tags, attributes, comments) and **CSS**
+  (selectors, properties, values), using Content-Type plus a quick body sniff.
+- **Flow inspect modal: Copy URL.** The shared request/response popup (Map, Scanner,
+  Discover) has a **⧉ Copy URL** button in the header.
+- **Scanner findings open flow popup.** Clicking an affected target (or an active-scan
+  finding) opens the same request/response inspect modal as Map — no jump to History.
+- **Intruder: “Race” renamed to Null.** The no-payload attack mode (verbatim resend ×N)
+  is labeled **Null** in the UI — useful for duplicate submits, idempotency, rate
+  limits, and concurrent replays, not only race conditions. API accepts
+  `attackType: "null"` as an alias for `"repeat"`.
+- **Repeater request body Raw/Pretty + encode menu.** Body has Raw/Pretty like the
+  response pane; Send always compacts JSON to raw wire form. Right-click selected
+  text in the URL, headers, or body for URL/Base64/Hex/HTML encode & decode.
+- **Proxy History export opens Save As.** The Export button fetches the HAR and
+  prompts for a filename (native save dialog on Chromium; download fallback elsewhere).
+- **Proxy History: no Refresh button.** History updates live over SSE (`flow.new` /
+  `flow.update`); the manual refresh control was removed. Removed the redundant
+  “right-click a row to filter” toolbar hint. The **views…** dropdown stays hidden until
+  at least one saved view exists.
+- **Desktop-first layout.** Toolbars stay on one row (horizontal scroll instead of
+  wrapping), the inspector keeps side-by-side request/response panes at normal window
+  sizes, and the **?** shortcuts panel uses a four-column card grid instead of a
+  narrow vertical list.
+
 ## [0.8.0] — 2026-06-26
 
 ### Changed

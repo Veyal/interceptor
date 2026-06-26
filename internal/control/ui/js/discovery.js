@@ -2,10 +2,19 @@
 // a wordlist against a base URL via /api/discovery/*, streaming results over the
 // SSE 'discovery.update' event. Found endpoints are (optionally) recorded as
 // flows server-side, so they also show up in History and the Map.
-import { $, esc, escAttr, api, toast, statusColor, fmtSize, copyText } from './core.js';
+import { $, esc, escAttr, api, toast, statusColor, fmtSize, pickTextFile, applyTextList, countListLines } from './core.js';
 import { sendToRepeater } from './tools.js';
+import { flowPopup } from './flowmodal.js';
 
 let wordlistLoaded = false;
+const DSC_WORD_OPEN = 'discover.wordOpen';
+
+function setWordlistOpen(open){
+  const w=$('#dscWordWrap'), btn=$('#dscWordBtn');
+  if(w) w.style.display=open?'block':'none';
+  if(btn) btn.setAttribute('aria-expanded', String(open));
+  try{ localStorage.setItem(DSC_WORD_OPEN, open?'1':'0'); }catch(e){}
+}
 
 export async function loadDiscovery(){
   if(!wordlistLoaded){
@@ -15,6 +24,9 @@ export async function loadDiscovery(){
       try{ ta.value = await (await fetch('/api/discovery/wordlist')).text(); }catch(e){}
     }
     updateWordCount();
+    try{
+      if(localStorage.getItem(DSC_WORD_OPEN)==='1') setWordlistOpen(true);
+    }catch(e){}
   }
   refreshDiscovery();
 }
@@ -38,6 +50,17 @@ function updateWordCount(){
   if(!ta || !out) return;
   const n = ta.value.split('\n').filter(l=>{const t=l.trim();return t && !t.startsWith('#');}).length;
   out.textContent = n ? n+' words' : '';
+}
+
+async function dscOpenResult(url, flowId){
+  let id = flowId;
+  if(!id){
+    try{
+      const d = await api('/api/discovery/inspect',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({url})});
+      id = d.flowId;
+    }catch(e){ toast(e.message); return; }
+  }
+  flowPopup(id);
 }
 
 function hostFromBase(){
@@ -113,17 +136,20 @@ function render(st){
     const dir = r.dir ? '<span title="directory" style="color:var(--fg3)"> /</span>' : '';
     const redir = r.redirect ? `<span class="hint" style="margin-left:8px">→ ${esc(r.redirect)}</span>` : '';
     const depth = r.depth ? `<span class="hint" style="margin-left:6px">d${r.depth}</span>` : '';
-    return `<div class="trow dsc-row" data-url="${escAttr(r.url)}" style="display:flex;align-items:center;gap:10px;padding:5px 12px;border-bottom:1px solid var(--line)">
+    return `<div class="trow dsc-row" data-url="${escAttr(r.url)}" data-flow="${r.flowId||''}" style="display:flex;align-items:center;gap:10px;padding:5px 12px;border-bottom:1px solid var(--line);cursor:pointer" title="${escAttr(r.url)} — click to inspect">
       <span style="font-weight:700;color:${c};min-width:34px">${r.status||'—'}</span>
       <span class="hint" style="min-width:74px;text-align:right">${fmtSize(r.length||0)}</span>
-      <span class="dsc-path" style="flex:1;font-family:var(--mono);font-size:12px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="${escAttr(r.url)} — click to copy">${esc(r.path)}${dir}${depth}${redir}</span>
+      <span class="dsc-path" style="flex:1;font-family:var(--mono);font-size:12px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.path)}${dir}${depth}${redir}</span>
       <span class="hint" style="min-width:90px">${esc((r.contentType||'').split(';')[0])}</span>
       <button class="btn dsc-rep" data-url="${escAttr(r.url)}" title="Send to Repeater">→ Rep</button>
     </div>`;
   }).join('');
   const note = st && st.note ? `<div class="hint" style="padding:6px 12px;color:var(--amber)">${esc(st.note)}</div>` : '';
   box.innerHTML = `<div style="position:sticky;top:0;background:var(--bg2);border-bottom:1px solid var(--line2);padding:5px 12px;display:flex;gap:10px;font-size:9px;font-weight:700;letter-spacing:.5px;color:var(--fg3)"><span style="min-width:34px">CODE</span><span style="min-width:74px;text-align:right">SIZE</span><span style="flex:1">PATH</span><span style="min-width:90px">TYPE</span><span style="min-width:52px"></span></div>${rows}${note}`;
-  box.querySelectorAll('.dsc-path').forEach(el=>el.onclick=e=>{e.stopPropagation();copyText(el.closest('.dsc-row').dataset.url,'URL copied');});
+  box.querySelectorAll('.dsc-row').forEach(row=>row.onclick=e=>{
+    if(e.target.closest('.dsc-rep')) return;
+    dscOpenResult(row.dataset.url, parseInt(row.dataset.flow,10)||0);
+  });
   box.querySelectorAll('.dsc-rep').forEach(btn=>btn.onclick=async e=>{
     e.stopPropagation();
     const url = btn.dataset.url;
@@ -132,6 +158,18 @@ function render(st){
       sendToRepeater(flow);
     }catch(err){ toast(err.message); }
   });
+}
+
+async function loadWordlistFile(append){
+  try{
+    const got=await pickTextFile();
+    if(!got) return;
+    const ta=$('#dscWords');
+    applyTextList(ta, got.text, {append});
+    updateWordCount();
+    const n=countListLines(got.text, true);
+    toast((append?'appended ':'loaded ')+n+' path'+(n===1?'':'s')+' from '+got.name);
+  }catch(e){ toast(e.message); }
 }
 
 async function start(){
@@ -162,5 +200,7 @@ async function stop(){
 {const b=$('#dscSeeds'); if(b) b.onclick=seedsFromHistory;}
 {const b=$('#dscAi'); if(b) b.onclick=suggestPaths;}
 {const b=$('#dscBase'); if(b) b.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();start();}});}
-{const b=$('#dscWordBtn'); if(b) b.onclick=()=>{const w=$('#dscWordWrap'); if(!w) return; const open=w.style.display==='none'; w.style.display=open?'block':'none'; b.setAttribute('aria-expanded',String(open));};}
+{const b=$('#dscWordBtn'); if(b) b.onclick=()=>{const w=$('#dscWordWrap'); if(!w) return; const open=w.style.display==='none'; setWordlistOpen(open);};}
+{const b=$('#dscWordLoad'); if(b) b.onclick=()=>loadWordlistFile(false);}
+{const b=$('#dscWordAppend'); if(b) b.onclick=()=>loadWordlistFile(true);}
 {const t=$('#dscWords'); if(t) t.addEventListener('input',updateWordCount);}
