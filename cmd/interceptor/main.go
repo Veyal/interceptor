@@ -77,13 +77,10 @@ func run() error {
 	if projectArg == "" {
 		projectArg = os.Getenv("INTERCEPTOR_PROJECT")
 	}
-	// Show the Burp-style picker only on a real TTY, and never when a project is
-	// preselected or prompting is explicitly suppressed (CI, scripted launches).
-	interactive := isInteractive() && os.Getenv("INTERCEPTOR_NO_PROMPT") == ""
-	projectName, dir, err := selectProject(os.Stdin, os.Stdout, globalDir, projectArg, home, interactive)
-	if errors.Is(err, errQuit) {
-		return nil
-	}
+	// No terminal prompt: selecting/creating/switching projects all happen in the
+	// web UI (top-bar project badge). A plain launch resumes the last project the
+	// UI switched to; --project still forces a specific one for scripts/CI.
+	projectName, dir, err := selectProject(globalDir, projectArg, home)
 	if err != nil {
 		return fmt.Errorf("select project: %w", err)
 	}
@@ -93,6 +90,12 @@ func run() error {
 		return err
 	}
 	defer st.Close()
+	// Remember the active project so the next plain launch resumes it. Only bare
+	// names (and "default") are remembered — an explicit --project /path is a
+	// one-off and must not clobber the UI-selected project.
+	if projectArg == "" || isBareProjectName(projectArg) {
+		writeLastProject(globalDir, projectName)
+	}
 
 	// The CA is global (lives outside any project) so trusting it once covers
 	// every project — switching projects never means re-installing a cert.

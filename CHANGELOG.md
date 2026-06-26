@@ -6,6 +6,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Request/response views default to Pretty.** The inspector, the Repeater response pane, and
+  the Map flow popup now beautify (and syntax-highlight) the body by default instead of showing
+  raw bytes — toggle back to **Raw** anytime. Large bodies still fall back to raw automatically.
+- **Context menus are now genuinely contextual.** Right-clicking a history row builds a
+  menu keyed to the **column you clicked**, with a persistent global section underneath:
+  - **Host** → filter/exclude this host, **filter domain** + **add domain to scope** (`*.example.com`,
+    with a registrable-domain heuristic that handles `co.uk`-style suffixes; suppressed for IP
+    literals), add host to scope, **🔎 Discover content** (prefills the Discover tab for that host),
+    and delete-all-from-host.
+  - **Status** → filter status class / exclude this exact status (no host clutter).
+  - **Method / Path** → their own filter/exclude (path adds copy-path).
+  - **Global section** (always): Send to Repeater/Intruder, Copy URL/cURL, ✨ Ask AI explain/payloads,
+    🔓 Authz test, Clear filters.
+- **The request/response inspector panes now have their own right-click menu.** A
+  **Selection** section (Copy, Decode/encode, Search in history, Add to scope when the text looks
+  like a host) appears when text is highlighted, above the same global flow actions; with no
+  selection it offers Open Decoder. Robust selection read (falls back to the range text).
+
+### Added
+- **Content discovery / forced-browse (new `Discover` tab).** A scope-aware
+  directory/file brute-forcer (think dirbuster/gobuster/ffuf, built in). Point it at
+  a base URL and it works a wordlist (a curated default ships built-in; paste your own
+  to go deeper), with **per-directory soft-404 calibration** so it doesn't drown in
+  false hits, optional **extensions** (`.php .bak …`), **recursion** into discovered
+  directories (depth-limited), a bounded **worker pool** (threads + delay, same model as
+  Intruder), and a manual **length filter**. Found paths stream into the results table
+  live and — by default — are re-issued and recorded as flows tagged `FlagDiscovery`, so
+  they also populate **History and the Map**. New engine in `internal/discovery` (fully
+  unit-tested), wired through `internal/control` (`/api/discovery/{start,stop,state,wordlist}`)
+  with SSE updates. Every probe is gated by target **scope** (with includes set, recursion
+  can't wander off-scope; with none, the operator-typed base URL is taken as authorization).
+- **Project selection is now entirely in the UI.** The top-bar project badge is a
+  clickable **Projects** picker (also reachable from the badge with <kbd>Enter</kbd>/<kbd>Space</kbd>):
+  it shows the active project and its data dir, lists every saved project as a one-click
+  **switch** row, and has a **Create & open** field for a new project. Switching reuses the
+  existing `/api/project/switch` restart-and-reconnect flow. Selecting, creating, and switching
+  projects no longer requires opening Settings.
+- **Last-active project is remembered across restarts.** The active project name is recorded in
+  `~/.interceptor/active-project`, so a plain `interceptor` launch resumes whatever the UI last
+  switched to (rather than always starting on `default`). An explicit `--project` still wins, and a
+  `--project /path` one-off never overwrites the remembered name.
+
+### Changed
+- **No more terminal project picker.** Startup no longer blocks on the interactive
+  "choose a project" prompt (`1) New · 2) Continue · [Enter] Default · q) Quit`). Interceptor
+  now boots straight into a project — the resolved `--project`/`INTERCEPTOR_PROJECT`, else the
+  remembered last project, else `default` — and all project management happens in the web UI.
+  The `INTERCEPTOR_NO_PROMPT` env var is obsolete (there is no prompt to suppress).
+
 ## [0.7.0] — 2026-06-26
 
 ### Added

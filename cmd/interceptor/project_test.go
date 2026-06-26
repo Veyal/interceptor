@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -44,6 +43,21 @@ func TestSanitizeProjectName(t *testing.T) {
 	}
 }
 
+func TestIsBareProjectName(t *testing.T) {
+	for _, c := range []struct {
+		in string
+		ok bool
+	}{
+		{"acme", true}, {"default", true}, {"my-scan_1", true},
+		{"", false}, {".", false}, {"..", false},
+		{"a/b", false}, {`a\b`, false}, {"~/x", false}, {"-flag", false},
+	} {
+		if got := isBareProjectName(c.in); got != c.ok {
+			t.Errorf("isBareProjectName(%q) = %v want %v", c.in, got, c.ok)
+		}
+	}
+}
+
 func TestListProjects(t *testing.T) {
 	root := t.TempDir()
 	projects := filepath.Join(root, "projects")
@@ -64,13 +78,14 @@ func TestListProjects(t *testing.T) {
 	}
 }
 
-func TestSelectProjectNonInteractiveDefault(t *testing.T) {
+func TestSelectProjectDefault(t *testing.T) {
 	root := t.TempDir()
-	name, dir, err := selectProject(strings.NewReader(""), &strings.Builder{}, root, "", root, false)
+	// No flag and no remembered project → the default project, which is the
+	// global root itself (backward compatible with single-project installs).
+	name, dir, err := selectProject(root, "", root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// default project keeps using the global root (backward compatible)
 	if name != "default" || dir != root {
 		t.Fatalf("got (%q,%q), want (default,%q)", name, dir, root)
 	}
@@ -78,7 +93,7 @@ func TestSelectProjectNonInteractiveDefault(t *testing.T) {
 
 func TestSelectProjectFlag(t *testing.T) {
 	root := t.TempDir()
-	name, dir, err := selectProject(strings.NewReader(""), &strings.Builder{}, root, "acme", root, false)
+	name, dir, err := selectProject(root, "acme", root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +111,7 @@ func TestSelectProjectDefaultFlagIsRoot(t *testing.T) {
 	// --project default (or switching back to "default") must return to the
 	// global root, not a separate projects/default — otherwise switching away
 	// and back would silently orphan the original project's data.
-	name, dir, err := selectProject(strings.NewReader(""), &strings.Builder{}, root, "default", root, false)
+	name, dir, err := selectProject(root, "default", root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,52 +120,21 @@ func TestSelectProjectDefaultFlagIsRoot(t *testing.T) {
 	}
 }
 
-func TestSelectProjectInteractiveEnterIsDefault(t *testing.T) {
+func TestSelectProjectResumesLastProject(t *testing.T) {
 	root := t.TempDir()
-	name, dir, err := selectProject(strings.NewReader("\n"), &strings.Builder{}, root, "", root, true)
+	// The UI switched to "saved1" earlier, recorded in active-project. A plain
+	// launch (no flag) must resume it instead of falling back to default.
+	writeLastProject(root, "saved1")
+	name, dir, err := selectProject(root, "", root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if name != "default" || dir != root {
-		t.Fatalf("Enter should pick default; got (%q,%q)", name, dir)
+	want := filepath.Join(root, "projects", "saved1")
+	if name != "saved1" || dir != want {
+		t.Fatalf("resume: got (%q,%q), want (saved1,%q)", name, dir, want)
 	}
-}
-
-func TestSelectProjectInteractiveNew(t *testing.T) {
-	root := t.TempDir()
-	// choose "1" (new), then type a name
-	name, dir, err := selectProject(strings.NewReader("1\nbrandnew\n"), &strings.Builder{}, root, "", root, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := filepath.Join(root, "projects", "brandnew")
-	if name != "brandnew" || dir != want {
-		t.Fatalf("got (%q,%q), want (brandnew,%q)", name, dir, want)
-	}
-	if _, err := os.Stat(want); err != nil {
-		t.Fatalf("new project dir not created: %v", err)
-	}
-}
-
-func TestSelectProjectInteractiveContinue(t *testing.T) {
-	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "projects", "saved1"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// choose "2" (continue), then pick item "1" from the list
-	name, dir, err := selectProject(strings.NewReader("2\n1\n"), &strings.Builder{}, root, "", root, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if name != "saved1" || dir != filepath.Join(root, "projects", "saved1") {
-		t.Fatalf("got (%q,%q), want saved1", name, dir)
-	}
-}
-
-func TestSelectProjectQuit(t *testing.T) {
-	root := t.TempDir()
-	_, _, err := selectProject(strings.NewReader("q\n"), &strings.Builder{}, root, "", root, true)
-	if err != errQuit {
-		t.Fatalf("quit: got err=%v want errQuit", err)
+	// An explicit flag still overrides the remembered project.
+	if name, _, _ := selectProject(root, "default", root); name != "default" {
+		t.Fatalf("flag should override remembered project, got %q", name)
 	}
 }

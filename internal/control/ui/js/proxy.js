@@ -3,6 +3,8 @@ import { sendToRepeater, sendToIntruder } from './tools.js';
 import { retentionStats, loadRetention } from './settings.js';
 import { openAi } from './ai.js';
 import { openAuthz } from './authz.js';
+import { openDecoder } from './scanner.js';
+import { prefillDiscovery } from './discovery.js';
 
 export function applySort(flows){
   const k=state.sort.key,dir=state.sort.dir;
@@ -330,48 +332,47 @@ export function renderChips(){
 /* ---- right-click context menu ---- */
 export const ctx=$('#ctxmenu');
 function hideCtx(){ctx.classList.remove('show');ctx._acts=null;}
-export function showCtx(x,y,f,field){
-  if(!f)return;
-  const cls=f.status?Math.floor(f.status/100):0;
-  const filters=[
-    {field:'host',label:'Filter host',val:f.host,act:()=>setFilter('host',f.host)},
-    {field:'method',label:'Filter method',val:f.method,act:()=>setFilter('method',f.method)},
-  ];
-  if(cls)filters.push({field:'status',label:'Filter status',val:cls+'xx',act:()=>setFilter('status',String(cls))});
-  filters.push({field:'scheme',label:'Filter scheme',val:f.scheme,act:()=>setFilter('scheme',f.scheme)});
-  if(field==='path')filters.unshift({field:'path',label:'Filter path',val:f.path,act:()=>setFilter('search',f.path)});
-  // Put the right-clicked column's filter first and highlight it.
-  filters.sort((a,b)=>(a.field===field?-1:0)-(b.field===field?-1:0));
+// openMenu renders a sectioned context menu. Each section is {head?, items:[…]};
+// each item is {label, val?, act, on?, danger?} or {sep:true}. It positions the
+// menu and flips it on-screen if it would overflow the viewport.
+function openMenu(x,y,sections){
+  const acts=[];let html='';
+  sections.forEach(sec=>{
+    const items=(sec.items||[]).filter(Boolean);
+    if(!items.length)return;
+    if(sec.head)html+=`<div class="ctx-head">${esc(sec.head)}</div>`;
+    items.forEach(it=>{
+      if(it.sep){html+='<div class="ctx-sep"></div>';return;}
+      const dStyle=it.danger?' style="color:var(--red)"':'';
+      const right=it.val!=null?`<span class="mono"${dStyle}>${esc(it.val)}</span>`:'';
+      html+=`<div class="ctx-item${it.on?' on':''}" data-i="${acts.length}"${it.danger&&it.val==null?dStyle:''}><span class="lbl"${dStyle}>${esc(it.label)}</span>${right}</div>`;
+      acts.push(it.act);
+    });
+  });
+  ctx.innerHTML=html;ctx._acts=acts;
+  ctx.querySelectorAll('[data-i]').forEach(el=>el.onclick=()=>{const fn=ctx._acts[Number(el.dataset.i)];hideCtx();if(fn)fn();});
+  ctx.style.left=x+'px';ctx.style.top=y+'px';ctx.classList.add('show');
+  const r=ctx.getBoundingClientRect();
+  if(r.right>innerWidth)ctx.style.left=Math.max(4,x-r.width)+'px';
+  if(r.bottom>innerHeight)ctx.style.top=Math.max(4,y-r.height)+'px';
+}
 
-  // Negative counterparts: hide everything matching the clicked value.
-  const excludes=[
-    {field:'host',label:'Exclude host',val:f.host,act:()=>addExclude('host',f.host)},
-    {field:'method',label:'Exclude method',val:f.method,act:()=>addExclude('method',f.method)},
-  ];
-  if(cls)excludes.push({field:'status',label:'Exclude status',val:String(f.status),act:()=>addExclude('status',String(f.status))});
-  if(field==='path')excludes.unshift({field:'path',label:'Exclude path',val:f.path,act:()=>addExclude('path',f.path)});
-  excludes.sort((a,b)=>(a.field===field?-1:0)-(b.field===field?-1:0));
-
-  const acts=[];
-  let html='<div class="ctx-head">FILTER</div>';
-  filters.forEach(it=>{html+=`<div class="ctx-item ${it.field===field?'on':''}" data-i="${acts.length}"><span class="lbl">${it.label}</span><span class="mono">${esc(it.val)}</span></div>`;acts.push(it.act);});
-  html+='<div class="ctx-head">EXCLUDE</div>';
-  excludes.forEach(it=>{html+=`<div class="ctx-item" data-i="${acts.length}"><span class="lbl">${it.label}</span><span class="mono" style="color:var(--red)">≠ ${esc(it.val)}</span></div>`;acts.push(it.act);});
-  html+='<div class="ctx-sep"></div>';
-  html+=`<div class="ctx-item" data-i="${acts.length}">Copy URL</div>`;acts.push(()=>copyURL(f));
-  html+=`<div class="ctx-item" data-i="${acts.length}">Copy as cURL</div>`;acts.push(()=>copyCurl(f));
-  html+='<div class="ctx-sep"></div>';
-  html+=`<div class="ctx-item" data-i="${acts.length}"><span class="lbl">Add to scope</span><span class="mono">${esc(f.host)}</span></div>`;acts.push(()=>addHostToScope(f.host));
-  html+='<div class="ctx-sep"></div>';
-  html+=`<div class="ctx-item" data-i="${acts.length}"><span class="lbl">Send to</span><span class="mono">Repeater</span></div>`;acts.push(()=>sendToRepeater(f));
-  html+=`<div class="ctx-item" data-i="${acts.length}"><span class="lbl">Send to</span><span class="mono">Intruder</span></div>`;acts.push(()=>sendToIntruder(f));
-  html+='<div class="ctx-sep"></div>';
-  html+=`<div class="ctx-item" data-i="${acts.length}"><span class="lbl">✨ Ask AI</span><span class="mono">explain</span></div>`;acts.push(()=>openAi('explain',[f.id]));
-  html+=`<div class="ctx-item" data-i="${acts.length}"><span class="lbl">✨ Ask AI</span><span class="mono">payloads</span></div>`;acts.push(()=>openAi('suggest',[f.id]));
-  html+=`<div class="ctx-item" data-i="${acts.length}"><span class="lbl">🔓 Authz test</span><span class="mono">roles</span></div>`;acts.push(()=>openAuthz(f.id));
-  html+='<div class="ctx-sep"></div>';
-  html+=`<div class="ctx-item" data-i="${acts.length}" style="color:var(--red)">🗑 <span class="lbl" style="color:var(--red)">Delete all from</span><span class="mono" style="color:var(--red)">${esc(f.host)}</span></div>`;
-  acts.push(async()=>{
+// isIPHost reports whether h is an IP literal / localhost (so "domain" actions,
+// which only make sense for DNS names, are suppressed).
+function isIPHost(h){return !h||/^\d{1,3}(\.\d{1,3}){3}$/.test(h)||h.includes(':')||h==='localhost';}
+// Second-level public suffixes so "domain" picks app.acme.co.uk → *.acme.co.uk,
+// not the useless *.co.uk. Heuristic, not a full PSL — good enough for filtering.
+const TWO_LEVEL_TLD=new Set(['co','com','org','net','gov','edu','ac','mil','or','ne','go']);
+function registrableDomain(host){
+  if(isIPHost(host))return '';
+  const p=host.split('.').filter(Boolean);
+  if(p.length<=2)return host;
+  if(p.length>=3&&TWO_LEVEL_TLD.has(p[p.length-2])&&p[p.length-1].length<=3)return p.slice(-3).join('.');
+  return p.slice(-2).join('.');
+}
+function looksLikeHost(s){return /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(s)&&!s.includes(' ');}
+function deleteHost(f){
+  return async()=>{
     const hstats=retentionStats&&retentionStats.hosts&&retentionStats.hosts.find(x=>x.host===f.host);
     const flowCount=hstats?hstats.flows:'all';
     const confirmed=await uiConfirm('Delete flows from '+esc(f.host),
@@ -383,15 +384,109 @@ export function showCtx(x,y,f,field){
       toast('deleted '+r.deleted+' flow'+(r.deleted===1?'':'s')+' · freed '+fmtBytes(r.freedBytes));
       loadRetention();loadFlows();
     }catch(e){toast('purge: '+e.message);}
-  });
-  if(anyFilter()){html+='<div class="ctx-sep"></div>';html+=`<div class="ctx-item" data-i="${acts.length}">Clear all filters</div>`;acts.push(clearAllFilters);}
+  };
+}
 
-  ctx.innerHTML=html;ctx._acts=acts;
-  ctx.querySelectorAll('[data-i]').forEach(el=>el.onclick=()=>{const fn=ctx._acts[Number(el.dataset.i)];hideCtx();if(fn)fn();});
-  ctx.style.left=x+'px';ctx.style.top=y+'px';ctx.classList.add('show');
-  const r=ctx.getBoundingClientRect();
-  if(r.right>innerWidth)ctx.style.left=Math.max(4,x-r.width)+'px';
-  if(r.bottom>innerHeight)ctx.style.top=Math.max(4,y-r.height)+'px';
+// flowGlobalSection — the flow-wide actions present in every history/inspector
+// menu regardless of which column was clicked (send, copy, AI, authz).
+function flowGlobalSection(f,head){
+  return {head:head||'REQUEST', items:[
+    {label:'Send to Repeater',act:()=>sendToRepeater(f)},
+    {label:'Send to Intruder',act:()=>sendToIntruder(f)},
+    {label:'Copy URL',act:()=>copyURL(f)},
+    {label:'Copy as cURL',act:()=>copyCurl(f)},
+    {sep:true},
+    {label:'✨ Ask AI',val:'explain',act:()=>openAi('explain',[f.id])},
+    {label:'✨ Ask AI',val:'payloads',act:()=>openAi('suggest',[f.id])},
+    {label:'🔓 Authz test',val:'roles',act:()=>openAuthz(f.id)},
+  ]};
+}
+
+// showCtx builds the history-row menu: a contextual top section keyed to the
+// clicked column (host / status / method / path) + the always-present global
+// flow actions. Right-clicking a host shows host/domain/scope/discover actions;
+// right-clicking a status shows status filters — not the other way around.
+export function showCtx(x,y,f,field){
+  if(!f)return;
+  const cls=f.status?Math.floor(f.status/100):0;
+  const dom=registrableDomain(f.host);
+  const def=(f.scheme==='https'&&f.port===443)||(f.scheme==='http'&&f.port===80);
+  const baseURL=`${f.scheme}://${f.host}${def?'':':'+f.port}/`;
+  const sections=[];
+
+  if(field==='host'||field==='scheme'||field==='id'){
+    const items=[
+      {label:'Filter this host',val:f.host,on:field==='host',act:()=>setFilter('host',f.host)},
+      {label:'Exclude this host',val:f.host,danger:true,act:()=>addExclude('host',f.host)},
+    ];
+    if(dom&&dom!==f.host){
+      items.push({label:'Filter domain',val:dom+' (+subs)',act:()=>setFilter('host',dom)});
+      items.push({label:'Add domain to scope',val:'*.'+dom,act:()=>addHostToScope('*.'+dom)});
+    }
+    items.push({label:'Add host to scope',val:f.host,act:()=>addHostToScope(f.host)});
+    items.push({label:'🔎 Discover content',val:f.host,act:()=>prefillDiscovery(baseURL)});
+    items.push({sep:true});
+    items.push({label:'🗑 Delete all from host',val:f.host,danger:true,act:deleteHost(f)});
+    sections.push({head:'HOST · '+f.host, items});
+  }else if(field==='status'){
+    const items=[];
+    if(cls){
+      items.push({label:'Filter status',val:cls+'xx',on:true,act:()=>setFilter('status',String(cls))});
+      items.push({label:'Exclude this status',val:String(f.status),danger:true,act:()=>addExclude('status',String(f.status))});
+    }else items.push({label:'No response yet',val:'pending'});
+    sections.push({head:'STATUS'+(f.status?' · '+f.status:''), items});
+  }else if(field==='method'){
+    sections.push({head:'METHOD · '+f.method, items:[
+      {label:'Filter method',val:f.method,on:true,act:()=>setFilter('method',f.method)},
+      {label:'Exclude method',val:f.method,danger:true,act:()=>addExclude('method',f.method)},
+    ]});
+  }else if(field==='path'){
+    sections.push({head:'PATH', items:[
+      {label:'Filter path',val:f.path,on:true,act:()=>setFilter('search',f.path)},
+      {label:'Exclude path',val:f.path,danger:true,act:()=>addExclude('path',f.path)},
+      {label:'Copy path',act:()=>copyText(f.path,'path copied')},
+    ]});
+  }
+  // mime/size/time columns have no column-specific filter — they fall through to
+  // the global section below.
+
+  sections.push(flowGlobalSection(f,'REQUEST'));
+  if(anyFilter())sections.push({items:[{label:'Clear all filters',act:clearAllFilters}]});
+  openMenu(x,y,sections);
+}
+
+// showInspectorCtx builds the request/response pane menu: a SELECTION section
+// (only when text is highlighted) for copy/decode/search/scope, plus the global
+// flow actions.
+// selectionWithin returns the trimmed selected text if the selection lies inside
+// el. It falls back to the range's text because Selection.toString() returns ""
+// when the document isn't focused (e.g. automation) even though a range exists.
+function selectionWithin(el){
+  const s=window.getSelection&&window.getSelection();
+  if(!s||!s.rangeCount)return '';
+  if(el&&s.anchorNode&&!el.contains(s.anchorNode))return '';
+  let t=String(s);
+  if(!t)t=s.getRangeAt(0).toString();
+  return t.trim();
+}
+export function showInspectorCtx(x,y,side){
+  const f=state.flows.find(z=>z.id===state.selId)||state.detail;
+  if(!f)return;
+  const sel=selectionWithin($(side==='req'?'#reqView':'#resView'));
+  const sections=[];
+  if(sel){
+    const short=sel.length>40?sel.slice(0,40)+'…':sel;
+    const items=[
+      {label:'Copy',act:()=>copyText(sel,'copied')},
+      {label:'Decode / encode',val:short,act:()=>openDecoder(sel)},
+      {label:'Search in history',val:short,act:()=>setFilter('search',sel)},
+    ];
+    if(looksLikeHost(sel))items.push({label:'Add to scope',val:sel,act:()=>addHostToScope(sel)});
+    sections.push({head:'SELECTION', items});
+  }
+  sections.push(flowGlobalSection(f, side==='req'?'REQUEST':'RESPONSE'));
+  if(!sel)sections.push({items:[{label:'Open Decoder',act:()=>openDecoder('')}]});
+  openMenu(x,y,sections);
 }
 document.addEventListener('click',e=>{if(!ctx.contains(e.target))hideCtx();});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(typeof closeModals==='function'&&closeModals())return;hideCtx();}});
@@ -406,6 +501,13 @@ document.addEventListener('contextmenu',e=>{
 });
 $('#rows').addEventListener('scroll',hideCtx,{passive:true});
 window.addEventListener('blur',hideCtx);
+// Request/response inspector panes get their own context menu (selection-aware).
+// stopPropagation keeps the app-wide handler from also firing, so the native
+// menu never double-shows over a selection.
+['reqView','resView'].forEach(id=>{
+  const el=$('#'+id);
+  if(el)el.addEventListener('contextmenu',e=>{e.preventDefault();e.stopPropagation();showInspectorCtx(e.clientX,e.clientY,id==='reqView'?'req':'resp');});
+});
 export function flowURL(f){const def=(f.scheme==='https'&&f.port===443)||(f.scheme==='http'&&f.port===80);return `${f.scheme}://${f.host}${def?'':':'+f.port}${f.path}`;}
 export function copyURL(f){copyText(flowURL(f),'URL copied');}
 function shq(s){return "'"+String(s).replace(/'/g,"'\\''")+"'";}

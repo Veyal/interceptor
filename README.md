@@ -43,6 +43,8 @@ tester's direction and **entirely on the local machine**.
   **grep-match/extract**, anomaly flagging, attack tabs and run history.
 - **Authorization testing** — replay a request as each saved identity (role) and diff for broken
   access control (IDOR). **OOB interaction catcher** for blind SSRF/XXE/SQLi/RCE.
+- **Content discovery** — scope-aware forced-browse (dirbuster/ffuf-style): wordlist + extensions,
+  per-directory soft-404 calibration, recursion, threads/delay; found endpoints feed History & the Map.
 - **AI assist** — BYO-key LLM explains requests, suggests payloads (with Repeater/Intruder routing),
   and summarizes findings; streamed, rendered as Markdown.
 - **Scanner** — 12 passive checks (missing CSP/HSTS/`nosniff`/clickjacking headers, wildcard CORS,
@@ -186,6 +188,7 @@ independently tested.
 | `internal/sender` | One-off direct request sender (+ session headers, CSRF/re-auth token macro, authz replays) — backs Repeater & Intruder |
 | `internal/intruder` | Sniper / Pitchfork / Race attack engine (threads, delay, grep-match/extract, payload processing) |
 | `internal/scanner` | Passive security checks over captured flows |
+| `internal/discovery` | Scope-aware content-discovery (forced-browse) engine: wordlist brute-force, soft-404 calibration, recursion, worker pool |
 | `internal/oob` | Out-of-band interaction catcher (blind SSRF/XXE/SQLi/RCE callbacks) |
 | `internal/checkscript` | Runs user-authored Starlark scanner checks (sandboxed, bounded) |
 | `internal/curlgen` · `internal/report` | Render a flow as `curl`; render findings as Markdown |

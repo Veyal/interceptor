@@ -8,7 +8,7 @@ function repStatusLine(f){
 
 /* ---- repeater (multi-tab; each tab = an endpoint with its own history) ---- */
 export let repSeq=1, repTabs=[], repActive=null;
-export function repBlank(){return {tid:repSeq++,title:'new tab',method:'GET',url:'',headers:'',body:'',resId:null,resView:'raw',status:'',color:''};}
+export function repBlank(){return {tid:repSeq++,title:'new tab',method:'GET',url:'',headers:'',body:'',resId:null,resView:'pretty',status:'',color:''};}
 export function repCur(){return repTabs.find(t=>t.tid===repActive)||null;}
 export function repTitle(t){if(!t.url)return 'new tab';try{const u=new URL(t.url);return t.method+' '+u.host+u.pathname;}catch(e){return t.method+' '+t.url.slice(0,46);}}
 export function repTabEndpoint(t){if(!t||!t.url)return null;try{const u=new URL(t.url);return u.host+u.pathname;}catch(e){return null;}}
@@ -38,7 +38,7 @@ export function repSaveEditor(){const t=repCur();if(!t)return;t.method=$('#repMe
 export function repLoadEditor(){
   const t=repCur();if(!t)return;
   $('#repMethod').value=t.method||'GET';$('#repUrl').value=t.url||'';$('#repHeaders').value=t.headers||'';$('#repBody').value=t.body||'';
-  $('#repResSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.view===(t.resView||'raw')));
+  $('#repResSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.view===(t.resView||'pretty')));
   if(t.resId){$('#repStatus').textContent=t.status||'';$('#repStatus').style.color=t.color||'var(--fg3)';renderRepResponse();}
   else{$('#repStatus').textContent='';$('#repResView').innerHTML='<span style="color:var(--fg3)">Send a request to see the response.</span>';}
   loadRepHistory();
@@ -111,7 +111,7 @@ export function repInit(){
   let ok=false;
   try{const d=JSON.parse(localStorage.getItem('rep.tabs')||'null');
     if(d&&d.tabs&&d.tabs.length){
-      repTabs=d.tabs.map(t=>({tid:t.tid,method:t.method||'GET',url:t.url||'',headers:t.headers||'',body:t.body||'',resView:t.resView||'raw',resId:null,status:'',color:'',title:''}));
+      repTabs=d.tabs.map(t=>({tid:t.tid,method:t.method||'GET',url:t.url||'',headers:t.headers||'',body:t.body||'',resView:t.resView||'pretty',resId:null,status:'',color:'',title:''}));
       repTabs.forEach(t=>t.title=repTitle(t));
       repActive=(d.active&&repTabs.find(x=>x.tid===d.active))?d.active:repTabs[0].tid;
       repSeq=Math.max(d.seq||0,Math.max.apply(null,repTabs.map(t=>t.tid))+1);ok=true;

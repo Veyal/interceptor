@@ -8,7 +8,8 @@ import { renderIntercept, toggleIntercept, loadRules } from './intercept.js';
 import { repInit, repSend, sendToRepeater, sendToIntruder, scheduleIntr } from './tools.js';
 import { loadIssues, runScan, loadScanTargets, openActive, openDecoder, loadActive, loadChecksList, loadOob } from './scanner.js';
 import { loadEndpoints } from './map.js';
-import { loadSettings, loadSysProxy, loadSession, loadProject } from './settings.js';
+import { loadDiscovery, refreshDiscovery } from './discovery.js';
+import { loadSettings, loadSysProxy, loadSession, loadProject, openProjectModal } from './settings.js';
 import { loadNotes } from './notes.js';
 import { loadApiKeys, loadReference, loadMCP } from './apipanel.js';
 import { renderActivity, onActivity, loadActivity, clearActSeen } from './activity.js';
@@ -24,6 +25,7 @@ function activateTab(t){
   try{localStorage.setItem('tab',t.dataset.tab);}catch(e){} // remember the open tab across refresh
   if(t.dataset.tab==='activity'){renderActivity();clearActSeen();}
   if(t.dataset.tab==='scanner')loadScanTargets();
+  if(t.dataset.tab==='discover')loadDiscovery();
   if(t.dataset.tab==='map')loadEndpoints();
   if(t.dataset.tab==='notes')loadNotes();
 }
@@ -104,6 +106,7 @@ function connectEvents(){
     else if(m.type==='checks.update'){if($('#checksModal')&&$('#checksModal').style.display==='flex')loadChecksList();}
     else if(m.type==='activescan.update'){if($('#activeModal')&&$('#activeModal').style.display==='flex')loadActive();}
     else if(m.type==='oob.update'){if($('#oobModal')&&$('#oobModal').style.display==='flex')loadOob();}
+    else if(m.type==='discovery.update'){if(document.querySelector('.tab[data-tab="discover"]').classList.contains('active'))refreshDiscovery();}
     else if(m.type==='settings.update')loadSettings();
     else if(m.type==='notes.update')loadNotes();
   };
@@ -143,6 +146,7 @@ function cmdkCommands(){
     {t:'Go to Repeater',kw:'resend craft edit request',run:go('repeater')},
     {t:'Go to Intruder',kw:'fuzz brute force payloads enumerate',run:go('intruder')},
     {t:'Go to Scanner',kw:'passive active scan checks findings issues vulnerabilities report',run:go('scanner')},
+    {t:'Go to Discover',kw:'content discovery forced browse brute force dirbuster gobuster ffuf wordlist directories endpoints fuzz paths',run:go('discover')},
     {t:'Go to Map',kw:'endpoints attack surface graph tree',run:go('map')},
     {t:'Go to Notes',kw:'scratchpad markdown findings',run:go('notes')},
     {t:'Go to Activity',kw:'ai mcp glass box agent log',run:go('activity')},
@@ -205,6 +209,12 @@ document.addEventListener('keydown',e=>{
   if(e.key==='?'&&!typing&&!mod){e.preventDefault();openModal($('#shortcutsModal'));return;} // ?: keyboard cheatsheet
 });
 $('#scClose').onclick=()=>closeModal($('#shortcutsModal'));
+
+/* ---- project badge → Projects picker (switch / create) ---- */
+{const pb=$('#projBadge');if(pb){
+  pb.addEventListener('click',openProjectModal);
+  pb.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openProjectModal();}});
+}}
 
 /* ---- version / update check ---- */
 async function loadVersion(retry){

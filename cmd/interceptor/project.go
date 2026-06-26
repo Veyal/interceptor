@@ -1,20 +1,12 @@
 package main
 
 import (
-	"bufio"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 )
-
-// errQuit is returned by selectProject when the user chooses to quit at the
-// startup project picker; run() treats it as a clean exit.
-var errQuit = errors.New("quit")
 
 // resolveProjectDir maps a --project / INTERCEPTOR_PROJECT value to a display
 // name and an absolute data directory. A bare token (no path separator) is a
@@ -46,6 +38,17 @@ func sanitizeProjectName(v string) (string, error) {
 	return v, nil
 }
 
+// isBareProjectName reports whether v is a plain, switchable project name (no
+// path separators, "~", or leading "-") rather than a filesystem path. Only
+// bare names — and "default" — are remembered as the active project, so a later
+// plain launch can resume them; explicit --project /paths are treated as
+// one-off and never overwrite the remembered name.
+func isBareProjectName(v string) bool {
+	v = strings.TrimSpace(v)
+	return v != "" && v != "." && v != ".." &&
+		!strings.ContainsAny(v, `/\`) && !strings.HasPrefix(v, "~") && !strings.HasPrefix(v, "-")
+}
+
 // listProjects returns the names of saved projects (immediate subdirectories of
 // projectsDir), sorted. A missing directory yields an empty list, not an error.
 func listProjects(projectsDir string) []string {
@@ -63,113 +66,57 @@ func listProjects(projectsDir string) []string {
 	return names
 }
 
-// selectProject decides which project directory to use. When flagOrEnv is set
-// the choice is non-interactive. Otherwise, if interactive, it prompts on
-// out/in (Burp-style: new project / continue saved / default); if not
-// interactive it falls back to the default project, which is the global root
-// itself so existing single-project installs keep working unchanged.
-func selectProject(in io.Reader, out io.Writer, globalDir, flagOrEnv, homeDir string, interactive bool) (name, dir string, err error) {
+// lastProjectPath is the file under globalDir that records the most recently
+// active project name, so a plain (no-flag) launch can resume it.
+func lastProjectPath(globalDir string) string {
+	return filepath.Join(globalDir, "active-project")
+}
+
+// readLastProject returns the remembered active-project name, or "" if none.
+func readLastProject(globalDir string) string {
+	b, err := os.ReadFile(lastProjectPath(globalDir))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// writeLastProject best-effort records name as the active project so the next
+// plain launch resumes it. Project selection lives entirely in the web UI now
+// (no terminal prompt), so this is what makes a UI switch survive a restart.
+func writeLastProject(globalDir, name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	_ = os.MkdirAll(globalDir, 0o755)
+	_ = os.WriteFile(lastProjectPath(globalDir), []byte(name+"\n"), 0o644)
+}
+
+// selectProject decides which project directory to use, with no terminal
+// interaction — selecting, creating, and switching projects all happen in the
+// web UI. Precedence: an explicit --project/INTERCEPTOR_PROJECT value wins;
+// otherwise the most recently active project (remembered across restarts) is
+// resumed; failing that, the "default" project, which is the global root itself
+// so existing single-project installs keep working unchanged.
+func selectProject(globalDir, flagOrEnv, homeDir string) (name, dir string, err error) {
 	projectsDir := filepath.Join(globalDir, "projects")
 
-	if v := strings.TrimSpace(flagOrEnv); v != "" {
-		// "default" always means the global root, matching the no-flag default —
-		// so switching to "default" returns to the original project, not a
-		// separate projects/default.
-		if strings.EqualFold(v, "default") {
-			return "default", globalDir, nil
-		}
-		name, dir = resolveProjectDir(projectsDir, v, homeDir)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return "", "", err
-		}
-		return name, dir, nil
+	v := strings.TrimSpace(flagOrEnv)
+	if v == "" {
+		// No explicit project: resume whatever the UI last switched to.
+		v = readLastProject(globalDir)
 	}
-
-	if !interactive {
+	// "default" always means the global root, matching the no-flag default — so
+	// switching to "default" returns to the original project, not a separate
+	// projects/default.
+	if v == "" || strings.EqualFold(v, "default") {
 		return "default", globalDir, nil
 	}
 
-	sc := bufio.NewScanner(in)
-	for {
-		fmt.Fprintln(out, "\nInterceptor — choose a project:")
-		fmt.Fprintln(out, "  1) New project")
-		fmt.Fprintln(out, "  2) Continue from a saved project")
-		fmt.Fprintln(out, "  [Enter] Default project")
-		fmt.Fprintln(out, "  q) Quit")
-		fmt.Fprint(out, "> ")
-		if !sc.Scan() {
-			// EOF (e.g. closed stdin) → fall back to the default project.
-			return "default", globalDir, nil
-		}
-		switch strings.TrimSpace(sc.Text()) {
-		case "":
-			return "default", globalDir, nil
-		case "1":
-			name, dir, err = promptNewProject(sc, out, projectsDir)
-			if err != nil {
-				fmt.Fprintf(out, "  %v\n", err)
-				continue
-			}
-			return name, dir, nil
-		case "2":
-			name, dir, ok := promptContinueProject(sc, out, projectsDir)
-			if !ok {
-				continue
-			}
-			return name, dir, nil
-		case "q", "Q":
-			return "", "", errQuit
-		default:
-			fmt.Fprintln(out, "  Please enter 1, 2, q, or press Enter.")
-		}
-	}
-}
-
-func promptNewProject(sc *bufio.Scanner, out io.Writer, projectsDir string) (string, string, error) {
-	fmt.Fprint(out, "Project name: ")
-	if !sc.Scan() {
-		return "", "", errQuit
-	}
-	name, err := sanitizeProjectName(sc.Text())
-	if err != nil {
-		return "", "", err
-	}
-	dir := filepath.Join(projectsDir, name)
+	name, dir = resolveProjectDir(projectsDir, v, homeDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", "", err
 	}
 	return name, dir, nil
-}
-
-func promptContinueProject(sc *bufio.Scanner, out io.Writer, projectsDir string) (string, string, bool) {
-	saved := listProjects(projectsDir)
-	if len(saved) == 0 {
-		fmt.Fprintln(out, "  No saved projects yet — choose 1 to create one.")
-		return "", "", false
-	}
-	fmt.Fprintln(out, "  Saved projects:")
-	for i, n := range saved {
-		fmt.Fprintf(out, "    %d) %s\n", i+1, n)
-	}
-	fmt.Fprint(out, "Pick a number: ")
-	if !sc.Scan() {
-		return "", "", false
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(sc.Text()))
-	if err != nil || n < 1 || n > len(saved) {
-		fmt.Fprintln(out, "  Invalid selection.")
-		return "", "", false
-	}
-	name := saved[n-1]
-	return name, filepath.Join(projectsDir, name), true
-}
-
-// isInteractive reports whether stdin is a terminal, so we only show the
-// project picker for real interactive launches (never under pipes/CI/tests).
-func isInteractive() bool {
-	fi, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return fi.Mode()&os.ModeCharDevice != 0
 }

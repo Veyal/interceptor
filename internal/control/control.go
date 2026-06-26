@@ -19,6 +19,7 @@ import (
 	"sync"
 
 	"github.com/Veyal/interceptor/internal/capture"
+	"github.com/Veyal/interceptor/internal/discovery"
 	"github.com/Veyal/interceptor/internal/intercept"
 	"github.com/Veyal/interceptor/internal/intruder"
 	"github.com/Veyal/interceptor/internal/mcp"
@@ -49,6 +50,8 @@ type Hub struct {
 	intr   *intruder.Engine
 	sc     *scope.Engine
 	oob    *oob.Catcher
+	disc   *discovery.Engine
+	ds     discoveryState
 	mux    *http.ServeMux
 
 	// Upstream applies a chained upstream-proxy URL ("" = direct). Set by cmd.
@@ -108,6 +111,10 @@ func New(st *store.Store, eng *intercept.Engine, ca *tlsca.CA, rebind Rebinder, 
 	h.intr.SetNotifier(func() { h.broadcast(map[string]any{"type": "intruder.update"}) })
 	h.oob = oob.New()
 	h.oob.SetNotifier(func() { h.broadcast(map[string]any{"type": "oob.update"}) })
+	h.disc = discovery.New()
+	h.disc.SetProbe(h.probeFor())
+	h.disc.SetScope(h.discInScope)
+	h.disc.SetNotifier(h.onDiscoveryUpdate)
 	h.refreshScope()
 	h.applySessionFromStore()
 	h.routes()
@@ -186,6 +193,10 @@ func (h *Hub) routes() {
 	h.mux.HandleFunc("GET /api/authz", h.getAuthz)
 	h.mux.HandleFunc("POST /api/authz", h.setAuthz)
 	h.mux.HandleFunc("POST /api/authz/run", h.authzRun)
+	h.mux.HandleFunc("POST /api/discovery/start", h.discoveryStart)
+	h.mux.HandleFunc("POST /api/discovery/stop", h.discoveryStop)
+	h.mux.HandleFunc("GET /api/discovery/state", h.discoveryStateHandler)
+	h.mux.HandleFunc("GET /api/discovery/wordlist", h.discoveryWordlist)
 	h.mux.HandleFunc("POST /api/scanner/run", h.scannerRun)
 	h.mux.HandleFunc("GET /api/scanner/issues", h.scannerIssues)
 	h.mux.HandleFunc("GET /api/scanner/report", h.scannerReport)

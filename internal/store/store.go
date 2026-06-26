@@ -58,6 +58,7 @@ const (
 	FlagActiveScan                     // a probe sent by the active scanner
 	FlagAI                             // request originated from the AI assistant (over MCP)
 	FlagAuthz                          // a request replayed by the authorization (access-control) tester
+	FlagDiscovery                      // an endpoint found by the content-discovery (forced-browse) engine
 )
 
 // flowColumns is the canonical SELECT column order; scanFlow consumes it.

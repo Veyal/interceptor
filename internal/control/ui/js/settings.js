@@ -1,4 +1,4 @@
-import { $, $$, esc, escAttr, state, toast, api, fmtBytes, uiConfirm } from './core.js';
+import { $, $$, esc, escAttr, state, toast, api, fmtBytes, uiConfirm, openModal, closeModal } from './core.js';
 import { loadFlows, loadScope } from './proxy.js';
 import { loadRules } from './intercept.js';
 
@@ -203,15 +203,47 @@ export async function loadProject(){
 }
 export async function doSwitchProject(target){
   if(!target)return;
-  const note=$('#projSwitchNote');if(note){note.style.display='block';note.textContent='Switching to "'+target+'" — restarting & reconnecting…';}
+  // Surface the "restarting…" message wherever it's visible — the Settings panel
+  // note and the top-bar Projects modal share this one switch path.
+  const notes=['#projSwitchNote','#pmNote'].map(s=>$(s)).filter(Boolean);
+  const setNote=t=>notes.forEach(n=>{n.style.display='block';n.textContent=t;});
+  setNote('Switching to "'+target+'" — restarting & reconnecting…');
   try{await api('/api/project/switch',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({target})});}catch(e){}
   let tries=0;const poll=setInterval(async()=>{tries++;
     try{await api('/api/version');clearInterval(poll);location.reload();}
-    catch(e){if(tries>60){clearInterval(poll);if(note)note.textContent='Still restarting… reload the page manually if it doesn’t return.';}}
+    catch(e){if(tries>60){clearInterval(poll);setNote('Still restarting… reload the page manually if it doesn’t return.');}}
   },500);
 }
 $('#projSwitchBtn').onclick=()=>{const v=($('#projSelect')||{}).value;if(v)doSwitchProject(v);else toast('no other project to open');};
 $('#projNewBtn').onclick=()=>{const v=(($('#projNew')||{}).value||'').trim();if(v)doSwitchProject(v);else toast('enter a project name or path');};
+
+// ---- top-bar Projects picker modal (click the project badge) ----
+// Same data + switch endpoint as the Settings panel, surfaced as a prominent,
+// first-class action so choosing a project never means opening Settings.
+async function renderProjModal(){
+  try{const d=await api('/api/project');
+    const cur=$('#pmCurrent');if(cur)cur.textContent=d.current||'default';
+    const dir=$('#pmDir');if(dir)dir.textContent=d.dir||'';
+    const list=$('#pmList');if(!list)return;
+    if(!d.canSwitch){list.innerHTML='<div class="hint">Project switching is unavailable in this build.</div>';const nb=$('#pmNewBtn');if(nb)nb.disabled=true;return;}
+    const others=(d.projects||[]).filter(p=>p!==d.current);
+    list.innerHTML=others.length
+      ?others.map(p=>`<button class="btn pm-row" data-proj="${escAttr(p)}" style="text-align:left;background:var(--bg3)">◧ ${esc(p)}</button>`).join('')
+      :'<div class="hint">No other saved projects yet — create one below.</div>';
+    list.querySelectorAll('.pm-row').forEach(b=>b.onclick=()=>doSwitchProject(b.dataset.proj));
+  }catch(e){}
+}
+export async function openProjectModal(){
+  const m=$('#projModal');if(!m)return;
+  const note=$('#pmNote');if(note){note.style.display='none';note.textContent='';}
+  const inp=$('#pmNew');if(inp)inp.value='';
+  openModal(m);
+  await renderProjModal();
+  if(inp)inp.focus();
+}
+{const c=$('#pmClose');if(c)c.onclick=()=>closeModal($('#projModal'));}
+{const nb=$('#pmNewBtn');if(nb)nb.onclick=()=>{const v=(($('#pmNew')||{}).value||'').trim();if(v)doSwitchProject(v);else toast('enter a project name');};}
+{const ni=$('#pmNew');if(ni)ni.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();const v=ni.value.trim();if(v)doSwitchProject(v);}});}
 $('#saveAddrBtn').onclick=async()=>{
   try{const s=await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({proxyAddr:$('#setAddr').value})});
     $('#proxyAddr').textContent=s.proxyAddr;toast('proxy now on '+s.proxyAddr);}catch(e){toast(e.message);}

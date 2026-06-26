@@ -170,11 +170,11 @@ $('#mapFit')&&($('#mapFit').onclick=mapFitNow);
 export async function flowPopup(id){
   let d;
   try{d=await api('/api/flows/'+id);}catch(e){toast('flow: '+e.message);return;}
-  state.fm={id,detail:d,pretty:false};
+  state.fm={id,detail:d,pretty:true};
   $('#fmTitle').innerHTML=`<span style="color:${methodColor(d.method)};font-weight:700">${esc(d.method)}</span> <span style="font-family:var(--mono);color:var(--fg2)">${esc((d.scheme||'http')+'://'+d.host+d.path)}</span>`;
   $('#fmStatus').textContent=d.status?`${d.status} ${statusText(d.status)}`+(d.durationMs?` · ${fmtDur(d.durationMs)}`:''):(d.error||'');
   $('#fmStatus').style.color=statusColor(d.status);
-  $('#fmSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.v==='raw'));
+  $('#fmSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.v==='pretty'));
   openModal($('#flowModal'));
   fmRenderSide('req');fmRenderSide('res');
 }

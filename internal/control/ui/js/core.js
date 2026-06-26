@@ -16,7 +16,7 @@ export const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'
 export const escAttr=s=>esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 
 export const state={flows:[],selId:null,detail:null,intercept:{enabled:false,queue:[]},selHeld:null,selRespHeld:null,
-  rules:[],scope:[],views:[],inScopeOnly:false,showAI:true,selected:new Set(),lastSelIdx:-1,aiIds:[],view:{req:'raw',res:'raw'},sort:{key:'id',dir:-1},proxyAddr:'127.0.0.1:8080',
+  rules:[],scope:[],views:[],inScopeOnly:false,showAI:true,selected:new Set(),lastSelIdx:-1,aiIds:[],view:{req:'pretty',res:'pretty'},sort:{key:'id',dir:-1},proxyAddr:'127.0.0.1:8080',
   filters:{scheme:'',search:'',method:'',status:'',host:'',exclude:[]},activity:[],actUnseen:0};
 
 export function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove('show'),2200);}
@@ -141,7 +141,7 @@ document.addEventListener('keydown',e=>{
 });
 
 /* ---- modals: close on Escape and on backdrop click (consistent across all) ---- */
-export const MODAL_IDS=['aiModal','checksModal','activeModal','oobModal','authzModal','decModal','flowModal','confirmModal','shortcutsModal'];
+export const MODAL_IDS=['aiModal','checksModal','activeModal','oobModal','authzModal','decModal','flowModal','confirmModal','shortcutsModal','projModal'];
 export function closeModals(){let n=0;MODAL_IDS.forEach(id=>{const m=$('#'+id);if(m&&m.style.display&&m.style.display!=='none'){closeModal(m);n++;}});return n>0;}
 MODAL_IDS.forEach(id=>{const m=$('#'+id);if(m)m.addEventListener('mousedown',e=>{if(e.target===m)closeModal(m);});});
 
