@@ -11,6 +11,11 @@ let aiLastText = '';        // last streamed/markdown text (for Copy)
 let aiAbort = null;         // AbortController for the in-flight stream
 let aiSeq = 0;              // bumped per request; stale runs must not touch the DOM
 
+// setStatus writes the small status line in the AI modal footer ("Thinking…",
+// "Streaming…", ""). It is called throughout the run; a missing definition threw
+// a ReferenceError before the request even fired, breaking the whole panel.
+function setStatus(s) { const el = $('#aiStatus'); if (el) el.textContent = s || ''; }
+
 export function openAi(kind, ids) {
   if (state.aiDisabled) { toast('AI features are disabled — enable in Settings → AI assist'); return; }
   state.aiIds = (ids && ids.length) ? ids.slice() : (state.selId != null ? [state.selId] : []);
