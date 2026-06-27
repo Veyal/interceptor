@@ -40,6 +40,12 @@ type FindingBlock struct {
 	Host   string `json:"host,omitempty"`
 	Path   string `json:"path,omitempty"`
 	Status int    `json:"status,omitempty"`
+
+	// Missing is set (type=="flow" only) when the referenced flow no longer exists
+	// in the flows table — e.g. it was purged via prune_history / GC. The block and
+	// its human annotation are preserved; the UI/report surface that the PoC
+	// evidence is gone rather than silently rendering an empty flow.
+	Missing bool `json:"missing,omitempty"`
 }
 
 // FindingFlow is one PoC flow attached to a finding, enriched with a compact flow
@@ -52,6 +58,10 @@ type FindingFlow struct {
 	Host   string `json:"host,omitempty"`
 	Path   string `json:"path,omitempty"`
 	Status int    `json:"status,omitempty"`
+
+	// Missing is true when the referenced flow row no longer exists in the flows
+	// table (purged via prune_history / GC). The attachment row and note survive.
+	Missing bool `json:"missing,omitempty"`
 }
 
 // blockRecord is the minimal form written to the body column (no enriched metadata).
@@ -96,6 +106,11 @@ func buildBlocks(body, detail, evidence string, flows []FindingFlow) []FindingBl
 						blocks[i].Host = fl.Host
 						blocks[i].Path = fl.Path
 						blocks[i].Status = fl.Status
+						blocks[i].Missing = fl.Missing
+					} else {
+						// No attachment row for this flow id at all — the referenced
+						// flow is gone (purged). Preserve the block; mark it missing.
+						blocks[i].Missing = true
 					}
 				}
 			}
@@ -115,6 +130,7 @@ func buildBlocks(body, detail, evidence string, flows []FindingFlow) []FindingBl
 		blocks = append(blocks, FindingBlock{
 			Type: "flow", FlowID: fl.FlowID, Note: fl.Note,
 			Method: fl.Method, Host: fl.Host, Path: fl.Path, Status: fl.Status,
+			Missing: fl.Missing,
 		})
 	}
 	return blocks
@@ -410,7 +426,7 @@ func (s *Store) DetachFlow(findingID, flowID int64) error {
 // findingFlows loads the PoC flows for a finding (for the sidebar count and block enrichment).
 func (s *Store) findingFlows(findingID int64) ([]FindingFlow, error) {
 	rows, err := s.db.Query(
-		`SELECT ff.flow_id, ff.ord, ff.note, f.method, f.host, f.path, f.status
+		`SELECT ff.flow_id, ff.ord, ff.note, f.method, f.host, f.path, f.status, f.id IS NOT NULL
 		 FROM finding_flows ff LEFT JOIN flows f ON f.id = ff.flow_id
 		 WHERE ff.finding_id=? ORDER BY ff.ord, ff.flow_id`, findingID)
 	if err != nil {
@@ -422,7 +438,8 @@ func (s *Store) findingFlows(findingID int64) ([]FindingFlow, error) {
 		var ff FindingFlow
 		var method, host, path *string
 		var status *int
-		if err := rows.Scan(&ff.FlowID, &ff.Ord, &ff.Note, &method, &host, &path, &status); err != nil {
+		var present bool
+		if err := rows.Scan(&ff.FlowID, &ff.Ord, &ff.Note, &method, &host, &path, &status, &present); err != nil {
 			return nil, err
 		}
 		if method != nil {
@@ -437,6 +454,9 @@ func (s *Store) findingFlows(findingID int64) ([]FindingFlow, error) {
 		if status != nil {
 			ff.Status = *status
 		}
+		// A LEFT JOIN miss (flow purged via prune_history / GC) yields a NULL flow
+		// id; the attachment row and its note survive but the evidence is gone.
+		ff.Missing = !present
 		out = append(out, ff)
 	}
 	return out, rows.Err()

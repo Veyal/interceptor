@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`crlf` active-scan check.** CRLF-injection / HTTP-response-splitting probe (High severity) injecting CR/LF in five encodings (raw, URL-encoded uppercase/lowercase, double-encoded); confirms via the injected header (or `Set-Cookie`) appearing in the *response headers* rather than body reflection, with a baseline guard.
+- **Stale PoC evidence flagging.** When a finding's PoC flow is purged from history (prune/GC), the body block and its annotation are preserved and shown as a dimmed "⚠ evidence deleted — re-capture this endpoint" badge (with a per-finding banner) in the UI and a "⚠ PoC flow #N — evidence no longer in history" note in the exported report, instead of a silently empty/broken PoC.
+- **Soft-404 auto-calibration in discovery.** Forced-browse fires 3 random-path probes per directory before each wordlist sweep; if they return a consistent fingerprint (status + body length within ~5%/32 bytes) it suppresses wordlist hits that match that baseline — killing soft-404 false positives. Best-effort (falls back to no suppression on error); opt out with `Spec.DisableSoft404Calibration`.
 - **Four new passive-scan checks.** CORS-with-credentials (both the `ACAO: *` wildcard and the reflected-Origin variant, High), sensitive token/credential in the request URL (Medium), `Set-Cookie` missing `SameSite` (Low), and authenticated responses that shared proxies may cache (Set-Cookie without `no-store`/`private`, Low). All conservative, with positive/negative tests.
 - **Better MCP argument errors.** MCP tool argument-validation now reports the expected type and the offending value (e.g. `flowId must be an integer (got string "abc")`), truncated to 60 chars with secret-named fields masked — so an AI agent can self-correct instead of looping on a bad call.
 - **`xxe` active-scan check.** XML request bodies are now enumerated as a `body/_xml` injection point and probed for in-band XML External Entity injection using a safe internal-entity canary (`<!ENTITY xxe "INTERCEPTOR_XXE_CANARY">`) — no external/SYSTEM file-read entities. Flags High severity when the entity resolves in the response, with a baseline false-positive guard. Skips non-XML requests.
@@ -62,6 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   are not written to localStorage.
 
 ### Changed
+- **Engagement report quality.** `internal/report` now orders findings by an explicit severity rank (Critical→High→Medium→Low→Info), adds an executive-summary table (counts by severity and by status), and moves `false_positive` findings out of the main body into a dedicated "Excluded — False Positives" section. Deterministic ordering; PoC rendering and the passive-scan appendix unchanged.
 - **Session injection is scope-gated by URL path** (not just host) — Repeater/Intruder sends only attach auth headers when the target URL matches scope rules; `session.unscoped` opt-in still sends everywhere (unsafe).
 - **System font stack** replaces Google Fonts JetBrains Mono — works offline/air-gapped.
 - **Windows proxy onboarding** in the get-started card (`Settings → Network → Proxy` / `netsh winhttp`).

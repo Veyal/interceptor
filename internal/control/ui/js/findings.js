@@ -56,10 +56,26 @@ function renderBlockEl(b, i, total) {
     </div>`;
   }
 
-  // flow block
+  // flow block. A missing flow (purged from history via prune_history / GC) is
+  // rendered as a dimmed, non-clickable "evidence deleted" badge — the reference
+  // and any annotation are preserved so the human knows the PoC is gone.
+  if (b.missing) {
+    return `<div class="find-block find-block-flow find-block-missing" data-i="${i}"
+      style="border:1px dashed var(--line2);border-radius:6px;padding:8px 10px;margin-bottom:8px;opacity:.65">
+      <div class="row" style="gap:8px;align-items:flex-start">
+        <span style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--amber);padding-top:2px;white-space:nowrap">⚠ FLOW</span>
+        <div style="flex:1;min-width:0">
+          <div style="margin-bottom:4px;color:var(--amber);font-size:12px">PoC flow #${esc(String(b.flowId))} — evidence deleted <span class="hint">(re-capture this endpoint)</span></div>
+          <input class="btn block-note" data-i="${i}" value="${escAttr(b.note || '')}"
+            placeholder="annotation (optional)" style="width:100%;font-size:11px;background:var(--bg3)">
+        </div>
+        <div class="row" style="gap:3px;flex-shrink:0">${upBtn}${dnBtn}${delBtn}</div>
+      </div>
+    </div>`;
+  }
   const flowLabel = b.method
     ? `<span style="color:var(--accent);font-weight:700">${esc(b.method)}</span> <span style="font-family:var(--mono);font-size:11px;color:var(--fg2)">${esc(b.host || '')}${esc(b.path || '')}</span> <span class="hint">${b.status ? '→ ' + b.status : ''}</span>`
-    : `<span class="hint">flow #${b.flowId} (deleted?)</span>`;
+    : `<span class="hint">flow #${esc(String(b.flowId))}</span>`;
   return `<div class="find-block find-block-flow" data-i="${i}" data-flow="${b.flowId}"
     style="border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin-bottom:8px;cursor:pointer">
     <div class="row" style="gap:8px;align-items:flex-start">
@@ -137,8 +153,8 @@ function renderBodyEditor(container, fid) {
     };
   });
 
-  // Flow click → open flow modal.
-  container.querySelectorAll('.find-block-flow').forEach(el => {
+  // Flow click → open flow modal. Missing (purged) flow blocks aren't clickable.
+  container.querySelectorAll('.find-block-flow:not(.find-block-missing)').forEach(el => {
     el.onclick = ev => {
       if (ev.target.closest('[data-del],[data-mv],.block-note')) return;
       flowPopup(Number(el.dataset.flow));
@@ -187,6 +203,10 @@ function renderFindingDetail() {
       <button class="btn danger" id="findDelete">Delete</button>
     </div>
     ${f.target ? `<div class="hint" style="margin:2px 0 10px">Target: ${esc(f.target)}</div>` : ''}
+    ${(() => {
+      const miss = (f.blocks || []).filter(b => b.type === 'flow' && b.missing).length;
+      return miss ? `<div class="find-missing-banner" style="margin:0 0 10px;padding:6px 10px;border:1px dashed var(--amber);border-radius:6px;background:var(--bg3);color:var(--amber);font-size:12px">⚠ ${miss} PoC flow${miss === 1 ? '' : 's'} deleted from history — re-capture the endpoint${miss === 1 ? '' : 's'} to restore evidence.</div>` : '';
+    })()}
     <div id="findBody" style="margin-bottom:4px"></div>
     <div class="row" style="gap:6px;margin-bottom:12px">
       <button class="btn" id="findAddText" style="font-size:11px;padding:3px 8px">＋ Text</button>

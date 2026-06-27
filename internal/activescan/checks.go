@@ -12,7 +12,7 @@ import (
 var Checks = []Check{
 	xssCheck, sqliErrorCheck, sqliBooleanCheck, sstiCheck,
 	openRedirectCheck, pathTraversalCheck, cmdInjectionCheck,
-	xxeCheck,
+	xxeCheck, crlfCheck,
 }
 
 // Reflected XSS: inject a marker wrapped in angle brackets/quotes and confirm it
@@ -166,6 +166,74 @@ var cmdInjectionCheck = Check{
 						Evidence: fmt.Sprintf("`sleep 6` delayed the response to %.1fs (baseline %.1fs)", r.Duration.Seconds(), base.Duration.Seconds()),
 						FlowID:   r.FlowID,
 					}
+				}
+			}
+		}
+		return nil
+	},
+}
+
+// crlfHeaderName is the injected header the CRLF check looks for in response headers.
+// Using a distinctive, unlikely-to-collide name minimises false positives.
+const crlfHeaderName = "Interceptorcrlfcanary"
+
+// crlfPayloads are the CRLF sequences tried, in several encodings, since web
+// servers and reverse proxies normalise input differently:
+//
+//   - raw:            literal CR+LF (caught by servers that do no URL-decoding before header splitting)
+//   - URL-encoded:    %0d%0a  (the most common server normalisation path)
+//   - double-encoded: %250d%250a (bypasses a single decode layer)
+//   - mixed:          %0d%0a mixed-case variants (case-insensitive hex decode)
+//
+// Each entry appends the injected header in the form "\r\nName: value" so that a
+// vulnerable server inserts it as an extra response header.
+var crlfPayloads = []string{
+	"x\r\n" + crlfHeaderName + ": canary",
+	"x\r\n" + strings.ToLower(crlfHeaderName) + ": canary",
+	"x%0d%0a" + crlfHeaderName + "%3a%20canary",
+	"x%0D%0A" + crlfHeaderName + "%3A%20canary",
+	"x%250d%250a" + crlfHeaderName + "%253a%2520canary",
+}
+
+// crlfCheck detects HTTP response-splitting / header injection by injecting
+// CR/LF sequences into query and body parameters and checking whether the
+// injected header (crlfHeaderName) appears in the *response headers* — the
+// high-signal, low-false-positive confirmation.  Body reflection alone is NOT
+// treated as a hit; it could be benign text echoing.
+//
+// A baseline guard prevents mis-flagging an endpoint that already emits the
+// canary header for some unrelated reason.
+var crlfCheck = Check{
+	Class: "crlf", Severity: "High", Title: "CRLF injection / HTTP response splitting",
+	Fix: "Strip or reject CR (\\r, %0d) and LF (\\n, %0a) characters from any input that is reflected into HTTP response headers. Use a framework that sets headers via a typed API rather than string concatenation.",
+	Run: func(p Point, base Response, probe Prober) *Hit {
+		// Baseline guard: if the canary header is already present in the
+		// baseline response headers we cannot attribute a later hit to us.
+		if base.Headers != nil && base.Headers.Get(crlfHeaderName) != "" {
+			return nil
+		}
+
+		for _, pl := range crlfPayloads {
+			r := probe(pl)
+			if r.Status == 0 {
+				continue // probe did not execute (budget or error)
+			}
+			if r.Headers == nil {
+				continue
+			}
+			// Primary signal: the injected header appears in the response headers.
+			if r.Headers.Get(crlfHeaderName) != "" {
+				return &Hit{
+					Evidence: fmt.Sprintf("injected header %q appeared in response headers after payload %q", crlfHeaderName, trunc(pl, 60)),
+					FlowID:   r.FlowID,
+				}
+			}
+			// Secondary signal: a Set-Cookie we injected (some servers split on
+			// the Set-Cookie header name rather than a generic header).
+			if sc := r.Headers.Get("Set-Cookie"); strings.Contains(sc, crlfHeaderName) {
+				return &Hit{
+					Evidence: fmt.Sprintf("injected Set-Cookie containing %q appeared in response headers", crlfHeaderName),
+					FlowID:   r.FlowID,
 				}
 			}
 		}

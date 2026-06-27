@@ -411,3 +411,97 @@ func hasBodyPoint(pts []Point) bool {
 	}
 	return false
 }
+
+// ---- CRLF injection / HTTP response splitting ----
+
+// TestCRLFDetector_HeaderSplitting verifies that when a server naively echoes a
+// query parameter into a response header (the classic response-splitting scenario)
+// the check raises a High finding.  The probe simulates a vulnerable endpoint by
+// URL-decoding the payload and using net/http's Header.Set so that if a
+// CR+LF sequence is present the extra header is actually added.
+func TestCRLFDetector_HeaderSplitting(t *testing.T) {
+	// Simulate a server that naively takes the payload value, url-decodes it, and
+	// sets it verbatim as (part of) a response header value.  A real vulnerable
+	// server would split on \r\n, producing additional headers.
+	vulnerable := func(payload string) Response {
+		// URL-decode the payload (one layer) to simulate what the server does.
+		decoded, err := url.QueryUnescape(payload)
+		if err != nil {
+			decoded = payload
+		}
+		hdrs := http.Header{}
+		// If the decoded payload contains \r\n followed by a header-like line,
+		// the server would emit that extra header.  Simulate by scanning for \r\n.
+		if idx := strings.Index(decoded, "\r\n"); idx >= 0 {
+			extra := decoded[idx+2:] // everything after the first CRLF
+			// extra is in the form "HeaderName: value" — parse and add it.
+			if colon := strings.Index(extra, ":"); colon > 0 {
+				name := strings.TrimSpace(extra[:colon])
+				value := strings.TrimSpace(extra[colon+1:])
+				hdrs.Set(name, value)
+			}
+		}
+		return Response{Status: 200, FlowID: 20, Headers: hdrs}
+	}
+	if crlfCheck.Run(Point{Kind: "query", Name: "redirect", Value: "home"}, Response{Status: 200, Headers: http.Header{}}, vulnerable) == nil {
+		t.Fatal("expected CRLF hit: server echoes param into header and CR+LF causes header injection")
+	}
+}
+
+// TestCRLFDetector_Stripped verifies no false positive when the server strips
+// CR/LF characters before using the parameter in a response header.
+func TestCRLFDetector_Stripped(t *testing.T) {
+	safe := func(payload string) Response {
+		// Safe server: strip \r and \n before using the value.
+		cleaned := strings.NewReplacer("\r", "", "\n", "").Replace(payload)
+		_ = cleaned // header value is used but canary header is never set
+		return Response{Status: 200, FlowID: 21, Headers: http.Header{"X-Safe": {"ok"}}}
+	}
+	if crlfCheck.Run(Point{Kind: "query", Name: "redirect", Value: "home"}, Response{Status: 200, Headers: http.Header{}}, safe) != nil {
+		t.Fatal("safe server (strips CR/LF) must not produce a CRLF finding")
+	}
+}
+
+// TestCRLFDetector_NoReflection verifies no false positive when the parameter is
+// not reflected into response headers at all (the common, non-vulnerable case).
+func TestCRLFDetector_NoReflection(t *testing.T) {
+	noReflect := func(payload string) Response {
+		// The response headers bear no relation to the input.
+		return Response{Status: 200, FlowID: 22, Headers: http.Header{"Content-Type": {"text/html"}}}
+	}
+	if crlfCheck.Run(Point{Kind: "query", Name: "q", Value: "test"}, Response{Status: 200, Headers: http.Header{}}, noReflect) != nil {
+		t.Fatal("non-reflective endpoint must not produce a CRLF finding")
+	}
+}
+
+// TestCRLFDetector_BaselineGuard verifies that an endpoint already emitting the
+// canary header in its baseline response is not mis-flagged.
+func TestCRLFDetector_BaselineGuard(t *testing.T) {
+	// Every probe response also contains the canary (it was already there).
+	alwaysCanary := func(payload string) Response {
+		return Response{Status: 200, FlowID: 23, Headers: http.Header{crlfHeaderName: {"canary"}}}
+	}
+	baseWithCanary := Response{Status: 200, Headers: http.Header{crlfHeaderName: {"canary"}}}
+	if crlfCheck.Run(Point{Kind: "query", Name: "q", Value: "x"}, baseWithCanary, alwaysCanary) != nil {
+		t.Fatal("must not flag CRLF when canary header already present in baseline")
+	}
+}
+
+// TestCRLFDetector_SetCookieInjection verifies that injecting a Set-Cookie
+// header via response splitting is also detected (secondary signal).
+func TestCRLFDetector_SetCookieInjection(t *testing.T) {
+	// Simulate a server that produces a Set-Cookie containing our canary name
+	// (some vulnerable servers split specifically on Set-Cookie lines).
+	setCookieVuln := func(payload string) Response {
+		decoded, _ := url.QueryUnescape(payload)
+		hdrs := http.Header{}
+		if strings.Contains(decoded, "\r\n") {
+			// The secondary signal: Set-Cookie contains the canary name.
+			hdrs.Set("Set-Cookie", crlfHeaderName+"=canary; Path=/")
+		}
+		return Response{Status: 200, FlowID: 24, Headers: hdrs}
+	}
+	if crlfCheck.Run(Point{Kind: "query", Name: "redirect", Value: "home"}, Response{Status: 200, Headers: http.Header{}}, setCookieVuln) == nil {
+		t.Fatal("expected CRLF hit via Set-Cookie secondary signal")
+	}
+}

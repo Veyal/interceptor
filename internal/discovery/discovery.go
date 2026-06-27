@@ -34,6 +34,7 @@ const (
 	defaultThreads = 20
 	defaultMaxReq  = 20000 // total request budget per run — a runaway backstop
 	maxDepthCap    = 8
+	calibProbes    = 3 // number of random-path probes used for soft-404 calibration
 )
 
 // Spec configures one discovery run.
@@ -51,6 +52,15 @@ type Spec struct {
 	Headers    map[string]string // sent on every probe (auth cookies, tokens, …)
 	MaxReq     int               // total request budget (0 = default)
 	AutoTagAPI bool              // auto-tag recorded API-looking endpoints (see IsAPIPath)
+
+	// DisableSoft404Calibration turns off the automatic soft-404 detection that
+	// fires before each wordlist sweep. By default (false) the engine issues
+	// calibProbes randomly-named requests per directory; if the server returns the
+	// same status and a similar body length for all of them it is treated as a
+	// soft-404 server and results matching that fingerprint are suppressed.
+	// Set to true to skip calibration entirely (e.g. when the server is known to
+	// return honest 404s or calibration is too expensive).
+	DisableSoft404Calibration bool
 }
 
 // Outcome is what a Probe reports for a single URL.
@@ -233,7 +243,10 @@ func (e *Engine) run(ctx context.Context, base string, words []string, spec Spec
 		d := queue[0]
 		queue = queue[1:]
 
-		soft := e.calibrate(ctx, d.url, exts, spec.Headers)
+		var soft *Outcome
+		if !spec.DisableSoft404Calibration {
+			soft = e.calibrate(ctx, d.url, exts, spec.Headers)
+		}
 
 		var (
 			wg    sync.WaitGroup
@@ -307,22 +320,59 @@ func (e *Engine) run(ctx context.Context, base string, words []string, spec Spec
 	e.fireNotify()
 }
 
-// calibrate probes an unlikely random path in dir to learn the "not found"
-// signature (status + body length). Pages that soft-404 (return 200 for missing
-// content) are then filtered. Returns nil if the dir genuinely 404s (clean).
+// calibrate issues calibProbes randomly-named requests against dir to learn the
+// server's "not found" fingerprint (status + body length). It returns a non-nil
+// soft-404 signature only when ALL probes agree: same HTTP status AND body lengths
+// that are mutually close (within lenClose tolerance). This conservative approach
+// avoids false suppression when probe responses are noisy.
+//
+// Returns nil when:
+//   - any probe fails with a network error (best-effort: fall back to no suppression)
+//   - all probes return honest 404s (no soft-404 filtering needed)
+//   - the probes disagree on status or body length (server is not a consistent soft-404)
 func (e *Engine) calibrate(ctx context.Context, dir string, exts []string, headers map[string]string) *Outcome {
-	token := "ic-" + randToken() + firstExt(exts)
-	out, err := e.probe(ctx, "GET", dir+token, headers)
-	e.mu.Lock()
-	e.tried++
-	e.mu.Unlock()
-	if err != nil {
+	ext := firstExt(exts)
+	outcomes := make([]Outcome, 0, calibProbes)
+	for i := 0; i < calibProbes; i++ {
+		if ctx.Err() != nil {
+			return nil
+		}
+		token := "ic-" + randToken() + ext
+		out, err := e.probe(ctx, "GET", dir+token, headers)
+		e.mu.Lock()
+		e.tried++
+		e.mu.Unlock()
+		if err != nil {
+			// Best-effort: a transport error means we cannot build a reliable
+			// baseline, so fall back to no suppression.
+			return nil
+		}
+		outcomes = append(outcomes, out)
+	}
+	// All probes returned honest 404s — the server is clean, no suppression needed.
+	allClean := true
+	for _, o := range outcomes {
+		if o.Status != 404 {
+			allClean = false
+			break
+		}
+	}
+	if allClean {
 		return nil
 	}
-	if out.Status == 404 {
-		return nil // honest 404s — no soft-404 filtering needed
+	// Require that all probes agree on status and that body lengths are mutually
+	// close. A single inconsistent probe means the server is not a reliable
+	// soft-404 server, so we skip suppression rather than risk hiding real results.
+	ref := outcomes[0]
+	for _, o := range outcomes[1:] {
+		if o.Status != ref.Status {
+			return nil // inconsistent status — not a stable soft-404
+		}
+		if !lenClose(o.Length, ref.Length) {
+			return nil // body lengths diverge — not a stable soft-404
+		}
 	}
-	sig := out
+	sig := ref
 	return &sig
 }
 
