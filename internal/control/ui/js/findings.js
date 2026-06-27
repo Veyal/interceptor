@@ -1,4 +1,4 @@
-import { $, esc, escAttr, state, toast, api, openModal, closeModal, renderMD, wireRowKey, saveFile } from './core.js';
+import { $, esc, escAttr, state, toast, api, openModal, closeModal, renderMD, wireRowKey, saveFile, uiPrompt } from './core.js';
 import { flowPopup } from './flowmodal.js';
 
 // Findings tab: the human reviews/curates the project's vulnerability findings
@@ -47,7 +47,8 @@ function renderFindingDetail() {
   </div>`).join('') || '<div class="hint">No PoC flows yet. Select request/responses in <b>Proxy History</b>, then use “➕ Add to finding” (selection bar) or the button below.</div>';
   box.innerHTML = `<div class="find-head">
       <span class="sev" style="color:${sevColor(f.severity)};font-weight:700">${esc(f.severity)}</span>
-      <b style="font-size:14px">${esc(f.title)}</b>
+      <b style="font-size:14px" id="findTitleText">${esc(f.title)}</b>
+      <button class="btn xs" id="findRename" title="Rename finding" aria-label="Rename finding">✎</button>
       <div class="spacer"></div>
       <select id="findStatus" class="btn" style="background:var(--bg3)" aria-label="Finding status">${statusSel}</select>
       <button class="btn danger" id="findDelete">Delete</button>
@@ -60,6 +61,12 @@ function renderFindingDetail() {
       <button class="btn xs" id="findAddSel" title="Attach the flows currently selected in Proxy History">➕ Add selected (${state.selected ? state.selected.size : 0})</button>
     </h4>
     <div id="findPocList">${poc}</div>`;
+  $('#findRename').onclick = async () => {
+    const t = await uiPrompt({ title: 'Rename finding', value: f.title, placeholder: 'Finding title' });
+    if (t == null || t === f.title) return;
+    try { await api('/api/findings/' + f.id, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: t }) }); }
+    catch (err) { toast(err.message); }
+  };
   $('#findStatus').onchange = async e => { try { await api('/api/findings/' + f.id, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: e.target.value }) }); } catch (err) { toast(err.message); } };
   $('#findDelete').onclick = async () => { try { await api('/api/findings/' + f.id, { method: 'DELETE' }); selFinding = null; } catch (err) { toast(err.message); } };
   $('#findAddSel').onclick = () => attachFlowsToFinding(f.id, state.selected ? [...state.selected] : []);
@@ -126,8 +133,10 @@ function pickFindingForFlows(ids) {
   list.querySelectorAll('.find-pick').forEach(b => b.onclick = async () => { closeModal($('#findPickModal')); await attachFlowsToFinding(Number(b.dataset.id), ids); });
   list.querySelector('.find-pick-new').onclick = async () => {
     closeModal($('#findPickModal'));
-    const f = await api('/api/findings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'New finding', severity: 'Medium', source: 'human', flowIds: ids }) }).catch(e => { toast(e.message); return null; });
-    if (f) { document.querySelector('.tab[data-tab="findings"]').click(); selFinding = f.id; }
+    const title = await uiPrompt({ title: 'Name the new finding', placeholder: 'e.g. IDOR on /api/user/{id}' });
+    if (title == null) return; // cancelled — don't create an untitled finding (selection is preserved)
+    const f = await api('/api/findings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title, severity: 'Medium', source: 'human', flowIds: ids }) }).catch(e => { toast(e.message); return null; });
+    if (f) { document.querySelector('.tab[data-tab="findings"]').click(); selFinding = f.id; toast('finding created'); }
   };
 }
 $('#fpClose') && ($('#fpClose').onclick = () => closeModal($('#findPickModal')));

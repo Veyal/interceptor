@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Findings can be renamed, and creating one from History prompts for a name.**
+  The finding detail header has a ✎ rename button (edits the title via the existing
+  PATCH). Creating a finding from a Proxy-History selection ("➕ Add to finding" →
+  "＋ New finding from these flows") now asks for a title up front instead of
+  silently creating one called "New finding".
+
 ### Changed
 - **History multi-select: Ctrl/Cmd-click toggles individual rows, and rows no longer
   select text.** Ctrl/Cmd-click now adds/removes a single (non-contiguous) row from
