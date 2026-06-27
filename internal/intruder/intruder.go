@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Veyal/interceptor/internal/codec"
 	"github.com/Veyal/interceptor/internal/sender"
 	"github.com/Veyal/interceptor/internal/store"
 )
@@ -51,6 +52,7 @@ type Result struct {
 	Flagged   bool   `json:"flagged"`
 	Matched   bool   `json:"matched"`   // grep-match hit in the response
 	Extracted string `json:"extracted"` // grep-extract capture from the response
+	Binary    bool   `json:"binary"`    // true when the body is binary/undecodable and grep did not apply
 }
 
 // State is a snapshot of the current/last attack.
@@ -76,6 +78,16 @@ type Engine struct {
 	errMsg  string
 	capped  bool
 	notify  func()
+}
+
+// headerVal returns the first value for a case-insensitive header key.
+func headerVal(h map[string][]string, key string) string {
+	for k, v := range h {
+		if strings.EqualFold(k, key) && len(v) > 0 {
+			return v[0]
+		}
+	}
+	return ""
 }
 
 // New returns an Engine backed by snd.
@@ -335,11 +347,36 @@ func (e *Engine) run(spec Spec, jobs []job) {
 	if spec.GrepExtract != "" {
 		grepX, _ = regexp.Compile(spec.GrepExtract)
 	}
-	doGrep := func(res *Result, hash string) {
+	// doGrep inspects the response body for grep-match and grep-extract patterns.
+	// resHeaders provides the response's Content-Encoding and Content-Type so the
+	// body can be decompressed before matching. If decompression fails, the raw
+	// bytes are used as a fallback (never an error). If the content type indicates
+	// a binary payload (image, audio, video, …) grep is skipped and res.Binary is
+	// set so the caller can surface a warning to the user.
+	doGrep := func(res *Result, hash string, resHeaders map[string][]string) {
 		if (grepM == nil && grepMLit == "" && grepX == nil) || e.body == nil || hash == "" {
 			return
 		}
-		body := string(e.body(hash))
+		raw := e.body(hash)
+
+		// Skip grep on known-binary content types; flag the result so the UI can
+		// show an informational badge rather than a silent non-match.
+		if ct := headerVal(resHeaders, "Content-Type"); codec.IsBinaryContentType(ct) {
+			res.Binary = true
+			return
+		}
+
+		// Decompress if the response was Content-Encoding compressed. Fall back
+		// gracefully to raw bytes on any decompression error.
+		bodyBytes := raw
+		if ce := headerVal(resHeaders, "Content-Encoding"); ce != "" && ce != "identity" {
+			if dec, ok := codec.DecompressBody(ce, raw); ok {
+				bodyBytes = dec
+			}
+			// else: fall through — grep the raw bytes rather than returning nothing
+		}
+
+		body := string(bodyBytes)
 		if grepM != nil {
 			res.Matched = grepM.MatchString(body)
 		} else if grepMLit != "" {
@@ -388,7 +425,7 @@ func (e *Engine) run(spec Spec, jobs []job) {
 					res.Error = flow.Error
 				}
 				res.FlowID = flow.ID
-				doGrep(&res, flow.ResBodyHash)
+				doGrep(&res, flow.ResBodyHash, flow.ResHeaders)
 			}
 			e.appendResult(res)
 		}(i, j)

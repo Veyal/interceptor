@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Four new passive-scan checks.** CORS-with-credentials (both the `ACAO: *` wildcard and the reflected-Origin variant, High), sensitive token/credential in the request URL (Medium), `Set-Cookie` missing `SameSite` (Low), and authenticated responses that shared proxies may cache (Set-Cookie without `no-store`/`private`, Low). All conservative, with positive/negative tests.
+- **Better MCP argument errors.** MCP tool argument-validation now reports the expected type and the offending value (e.g. `flowId must be an integer (got string "abc")`), truncated to 60 chars with secret-named fields masked — so an AI agent can self-correct instead of looping on a bad call.
 - **`xxe` active-scan check.** XML request bodies are now enumerated as a `body/_xml` injection point and probed for in-band XML External Entity injection using a safe internal-entity canary (`<!ENTITY xxe "INTERCEPTOR_XXE_CANARY">`) — no external/SYSTEM file-read entities. Flags High severity when the entity resolves in the response, with a baseline false-positive guard. Skips non-XML requests.
 - **Discovery auto-tags API endpoints.** Forced-browse hits whose path looks like an API (`/api`, `/graphql`, version segments like `/v1`, `.json`/`.xml`, etc.) are automatically tagged `api`, with a static-asset veto so `.css/.js/.png/…` aren't tagged. Default-on **Tag APIs** toggle in the Discovery bar; tagging is best-effort and never breaks a run.
 - **Activity feed intent filter.** The Activity tab gains an **All / 💭 With intent** toggle (show only actions where the AI stated a reason) plus a free-text intent substring filter — client-side over the loaded feed, preserving workflow-separator grouping on the filtered subset.
@@ -20,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **JWT expiry countdown in session UI.** Settings → Session now shows a live expiry timer (`Expires in Xh Ym`) parsed from the Bearer token in the global session headers. Turns amber under 30 minutes and red under 5 minutes. Refreshes every 30 seconds.
 
 ### Fixed
+- **Intruder grep on compressed responses.** Grep-match and grep-extract now decompress `gzip`/`deflate`/`br`/`zstd` response bodies before matching (previously an encoded body silently matched nothing). Genuinely binary responses (`image/*`, etc.) are skipped and flagged `binary` on the result instead of failing quietly. Decompression logic was consolidated into a shared `internal/codec.DecompressBody` (also used by the response viewer).
 - **History live refresh for MCP/tool sends.** Repeater, Intruder, active scan, and discovery sends now broadcast `flow.new` over SSE (via `sender.SetOnPersist`) so Proxy History updates live for AI/MCP traffic — not only proxied browser traffic. Virtualized History (≥120 rows) re-renders on incremental updates instead of patching a single DOM row.
 
 ### Added

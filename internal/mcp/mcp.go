@@ -446,12 +446,114 @@ func argBool(a map[string]any, key string, def bool) bool {
 	return def
 }
 
-// argFlowID accepts "id" or "flowId" (agents often guess the latter).
-func argFlowID(a map[string]any) int {
-	if id := argInt(a, "id", 0); id != 0 {
-		return id
+// ---- argument validation (helpful errors) ----
+//
+// An AI driving these tools over MCP only ever sees the error string, so a bare
+// "id is required" when it actually passed id:"abc" sends it into a retry loop.
+// The req* helpers below report BOTH what was expected AND what was received
+// (truncated, secrets masked) so the model can self-correct.
+
+const argValueCap = 60 // max chars of an offending value echoed back
+
+// looksSecret reports whether an argument key names a credential/token whose
+// value should be masked rather than echoed into an error message.
+func looksSecret(key string) bool {
+	k := strings.ToLower(key)
+	for _, s := range []string{"token", "secret", "password", "passwd", "apikey", "api_key", "authorization", "cookie", "credential", "jwt", "bearer"} {
+		if strings.Contains(k, s) {
+			return true
+		}
 	}
-	return argInt(a, "flowId", 0)
+	return false
+}
+
+// describeValue renders a received argument value for an error message: typed,
+// quoted if a string, truncated to argValueCap, and masked if the key names a
+// secret. Used to show the AI exactly what it sent.
+func describeValue(key string, v any) string {
+	if v == nil {
+		return "null"
+	}
+	if looksSecret(key) {
+		return "(masked)"
+	}
+	switch x := v.(type) {
+	case string:
+		return strconv.Quote(truncRunes(x, argValueCap))
+	default:
+		return truncRunes(fmt.Sprint(v), argValueCap)
+	}
+}
+
+// truncRunes caps s at n runes, appending an ellipsis when it had to cut.
+func truncRunes(s string, n int) string {
+	r := []rune(s)
+	if n <= 0 || len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
+// reqStr returns a required, non-empty string argument or a helpful error. A
+// present-but-empty or present-but-non-string value is reported with what was
+// received so the AI can correct it.
+func reqStr(a map[string]any, key string) (string, error) {
+	v, ok := a[key]
+	if !ok || v == nil {
+		return "", fmt.Errorf("%s is required (a non-empty string)", key)
+	}
+	s, isStr := v.(string)
+	if !isStr {
+		return "", fmt.Errorf("%s must be a string (got %T %s)", key, v, describeValue(key, v))
+	}
+	if strings.TrimSpace(s) == "" {
+		return "", fmt.Errorf("%s is required (got an empty string)", key)
+	}
+	return s, nil
+}
+
+// reqInt returns a required integer argument or a helpful error. It accepts JSON
+// numbers, Go ints, and numeric strings (agents often quote numbers); anything
+// else is reported with both the expected type and the offending value.
+func reqInt(a map[string]any, key string) (int, error) {
+	v, ok := a[key]
+	if !ok || v == nil {
+		return 0, fmt.Errorf("%s is required (an integer)", key)
+	}
+	switch x := v.(type) {
+	case float64:
+		return int(x), nil
+	case int:
+		return x, nil
+	case string:
+		if n, err := strconv.Atoi(strings.TrimSpace(x)); err == nil {
+			return n, nil
+		}
+	}
+	return 0, fmt.Errorf("%s must be an integer (got %T %s)", key, v, describeValue(key, v))
+}
+
+// reqFlowID returns the required flow id from "id" or "flowId" (agents guess
+// both), or a helpful error naming whichever wrong value was supplied.
+func reqFlowID(a map[string]any) (int, error) {
+	_, hasID := a["id"]
+	_, hasFlow := a["flowId"]
+	if !hasID && !hasFlow {
+		return 0, fmt.Errorf("id (or flowId) is required (an integer)")
+	}
+	key := "id"
+	if !hasID {
+		key = "flowId"
+	}
+	n, err := reqInt(a, key)
+	if err != nil {
+		// Re-key the message so it reads "id (or flowId) ...".
+		return 0, fmt.Errorf("id (or flowId) must be an integer (got %T %s)", a[key], describeValue(key, a[key]))
+	}
+	if n == 0 {
+		return 0, fmt.Errorf("id (or flowId) is required (a non-zero integer)")
+	}
+	return n, nil
 }
 
 // argHeaderLines normalizes MCP headers: "Key: Value" lines or a JSON object.
@@ -601,9 +703,9 @@ func (s *Server) registerTools() {
 			"maxBytes": pt("integer"),
 		}, "id"),
 		func(a map[string]any) (string, error) {
-			id := argFlowID(a)
-			if id == 0 {
-				return "", fmt.Errorf("id (or flowId) is required")
+			id, err := reqFlowID(a)
+			if err != nil {
+				return "", err
 			}
 			max := argInt(a, "maxBytes", 4000)
 			side := argStr(a, "side")
@@ -627,9 +729,9 @@ func (s *Server) registerTools() {
 		"Compact triage of a flow: URL/status, security headers, query params (injection points), passive findings, in-scope flag. Cheaper than get_flow for deciding what to inspect.",
 		obj(map[string]any{"id": pt("integer")}, "id"),
 		func(a map[string]any) (string, error) {
-			id := argFlowID(a)
-			if id == 0 {
-				return "", fmt.Errorf("id (or flowId) is required")
+			id, err := reqFlowID(a)
+			if err != nil {
+				return "", err
 			}
 			return s.apiGet(fmt.Sprintf("/api/flows/%d/analyze", id))
 		})
@@ -638,9 +740,9 @@ func (s *Server) registerTools() {
 		"Render a flow's request as a runnable curl command.",
 		obj(map[string]any{"id": pt("integer")}, "id"),
 		func(a map[string]any) (string, error) {
-			id := argInt(a, "id", 0)
-			if id == 0 {
-				return "", fmt.Errorf("id is required")
+			id, err := reqFlowID(a)
+			if err != nil {
+				return "", err
 			}
 			return s.apiGet(fmt.Sprintf("/api/flows/%d/curl", id))
 		})
@@ -652,9 +754,9 @@ func (s *Server) registerTools() {
 			"note": pt("string"),
 		}, "id", "note"),
 		func(a map[string]any) (string, error) {
-			id := argInt(a, "id", 0)
-			if id == 0 {
-				return "", fmt.Errorf("id is required")
+			id, err := reqFlowID(a)
+			if err != nil {
+				return "", err
 			}
 			if _, err := s.api(http.MethodPut, fmt.Sprintf("/api/flows/%d/note", id), map[string]any{"note": argStr(a, "note")}); err != nil {
 				return "", err
@@ -670,13 +772,13 @@ func (s *Server) registerTools() {
 			"intent": p("string", "optional: a short why, shown to the human"),
 		}, "id", "tags"),
 		func(a map[string]any) (string, error) {
-			id := argInt(a, "id", 0)
-			if id == 0 {
-				return "", fmt.Errorf("id is required")
+			id, err := reqFlowID(a)
+			if err != nil {
+				return "", err
 			}
 			tags := strings.FieldsFunc(argStr(a, "tags"), func(r rune) bool { return r == ',' || r == ' ' || r == ';' })
 			if len(tags) == 0 {
-				return "", fmt.Errorf("at least one tag is required")
+				return "", fmt.Errorf("tags is required (got %s) — pass at least one comma- or space-separated tag", describeValue("tags", a["tags"]))
 			}
 			if _, err := s.api(http.MethodPost, "/api/flows/tags", map[string]any{"flowIds": []int{id}, "add": tags}); err != nil {
 				return "", err
@@ -691,13 +793,13 @@ func (s *Server) registerTools() {
 			"tags": p("string", "comma- or space-separated tags to remove"),
 		}, "id", "tags"),
 		func(a map[string]any) (string, error) {
-			id := argInt(a, "id", 0)
-			if id == 0 {
-				return "", fmt.Errorf("id is required")
+			id, err := reqFlowID(a)
+			if err != nil {
+				return "", err
 			}
 			tags := strings.FieldsFunc(argStr(a, "tags"), func(r rune) bool { return r == ',' || r == ' ' || r == ';' })
 			if len(tags) == 0 {
-				return "", fmt.Errorf("at least one tag is required")
+				return "", fmt.Errorf("tags is required (got %s) — pass at least one comma- or space-separated tag", describeValue("tags", a["tags"]))
 			}
 			if _, err := s.api(http.MethodPost, "/api/flows/tags", map[string]any{"flowIds": []int{id}, "remove": tags}); err != nil {
 				return "", err
@@ -775,8 +877,8 @@ func (s *Server) registerTools() {
 			"intent":   p("string", "optional: a short 'why' shown to the human in the Activity feed"),
 		}, "title"),
 		func(a map[string]any) (string, error) {
-			if argStr(a, "title") == "" {
-				return "", fmt.Errorf("title is required")
+			if _, err := reqStr(a, "title"); err != nil {
+				return "", err
 			}
 			return s.api(http.MethodPost, "/api/findings", map[string]any{
 				"title": argStr(a, "title"), "severity": argStr(a, "severity"), "status": argStr(a, "status"),
@@ -816,9 +918,12 @@ func (s *Server) registerTools() {
 			"fix":      pt("string"),
 		}, "id"),
 		func(a map[string]any) (string, error) {
-			id := argInt(a, "id", 0)
+			id, err := reqInt(a, "id")
+			if err != nil {
+				return "", err
+			}
 			if id == 0 {
-				return "", fmt.Errorf("id is required")
+				return "", fmt.Errorf("id is required (a non-zero finding id)")
 			}
 			body := map[string]any{}
 			for _, k := range []string{"status", "severity", "title", "target", "detail", "evidence", "fix"} {
@@ -837,9 +942,16 @@ func (s *Server) registerTools() {
 			"note":      pt("string"),
 		}, "findingId", "flowId"),
 		func(a map[string]any) (string, error) {
-			fid, flow := argInt(a, "findingId", 0), argInt(a, "flowId", 0)
+			fid, err := reqInt(a, "findingId")
+			if err != nil {
+				return "", err
+			}
+			flow, err := reqInt(a, "flowId")
+			if err != nil {
+				return "", err
+			}
 			if fid == 0 || flow == 0 {
-				return "", fmt.Errorf("findingId and flowId are required")
+				return "", fmt.Errorf("findingId and flowId are required (non-zero integers; got findingId=%d flowId=%d)", fid, flow)
 			}
 			return s.api(http.MethodPost, fmt.Sprintf("/api/findings/%d/flows", fid), map[string]any{"flowId": flow, "note": argStr(a, "note")})
 		})
@@ -848,9 +960,16 @@ func (s *Server) registerTools() {
 		"Detach a PoC flow from a finding.",
 		obj(map[string]any{"findingId": pt("integer"), "flowId": pt("integer")}, "findingId", "flowId"),
 		func(a map[string]any) (string, error) {
-			fid, flow := argInt(a, "findingId", 0), argInt(a, "flowId", 0)
+			fid, err := reqInt(a, "findingId")
+			if err != nil {
+				return "", err
+			}
+			flow, err := reqInt(a, "flowId")
+			if err != nil {
+				return "", err
+			}
 			if fid == 0 || flow == 0 {
-				return "", fmt.Errorf("findingId and flowId are required")
+				return "", fmt.Errorf("findingId and flowId are required (non-zero integers; got findingId=%d flowId=%d)", fid, flow)
 			}
 			return s.api(http.MethodDelete, fmt.Sprintf("/api/findings/%d/flows/%d", fid, flow), nil)
 		})
@@ -1175,10 +1294,11 @@ func (s *Server) registerTools() {
 			"wildcard": p("boolean", "scope *.<host> (subdomains) instead of the exact host (default false)"),
 		}, "url"),
 		func(a map[string]any) (string, error) {
-			raw := strings.TrimSpace(argStr(a, "url"))
-			if raw == "" {
-				return "", fmt.Errorf("url is required")
+			rawURL, err := reqStr(a, "url")
+			if err != nil {
+				return "", err
 			}
+			raw := strings.TrimSpace(rawURL)
 			u, err := url.Parse(raw)
 			if err != nil || u.Hostname() == "" {
 				if u, err = url.Parse("https://" + raw); err != nil || u.Hostname() == "" {
@@ -1205,8 +1325,8 @@ func (s *Server) registerTools() {
 			"options": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "optional suggested answers, e.g. [\"yes\",\"no\"]"},
 		}, "message"),
 		func(a map[string]any) (string, error) {
-			if argStr(a, "message") == "" {
-				return "", fmt.Errorf("message is required")
+			if _, err := reqStr(a, "message"); err != nil {
+				return "", err
 			}
 			body := map[string]any{"message": argStr(a, "message")}
 			if opts, ok := a["options"].([]any); ok && len(opts) > 0 {
@@ -1232,9 +1352,12 @@ func (s *Server) registerTools() {
 		"Retrieve the human's answer to an earlier request_human_input (poll this until they've answered).",
 		obj(map[string]any{"id": pt("integer")}, "id"),
 		func(a map[string]any) (string, error) {
-			id := argInt(a, "id", 0)
+			id, err := reqInt(a, "id")
+			if err != nil {
+				return "", err
+			}
 			if id == 0 {
-				return "", fmt.Errorf("id is required")
+				return "", fmt.Errorf("id is required (a non-zero pending-prompt id)")
 			}
 			raw, err := s.apiGet(fmt.Sprintf("/api/human-input/%d", id))
 			if err != nil {
@@ -1417,9 +1540,12 @@ func (s *Server) registerTools() {
 		"Replay one flow (e.g. GET /api/me) under each identity — 401/403 with auth headers marks session invalid.",
 		obj(map[string]any{"flowId": pt("integer")}, "flowId"),
 		func(a map[string]any) (string, error) {
-			id := argInt(a, "flowId", 0)
+			id, err := reqInt(a, "flowId")
+			if err != nil {
+				return "", err
+			}
 			if id == 0 {
-				return "", fmt.Errorf("flowId is required")
+				return "", fmt.Errorf("flowId is required (a non-zero integer)")
 			}
 			return s.api(http.MethodPost, "/api/authz/check-sessions", map[string]any{"flowId": id})
 		})

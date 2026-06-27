@@ -132,3 +132,214 @@ func TestAnalyzeCleanFlowHasNoIssues(t *testing.T) {
 		t.Fatalf("expected no issues, got: %s", titles(got))
 	}
 }
+
+// --- Check 13: CORS with credentials ---
+
+func TestCORSCredentialsWildcard(t *testing.T) {
+	// Positive: ACAO=* + Allow-Credentials: true → High severity
+	flow := &store.Flow{
+		Scheme: "https", Method: "GET", Host: "api.example.com", Path: "/data", Status: 200,
+		ReqHeaders: map[string][]string(http.Header{"Origin": {"https://attacker.example"}}),
+		ResHeaders: map[string][]string(http.Header{
+			"Content-Type":                       {"application/json"},
+			"Strict-Transport-Security":          {"max-age=1"},
+			"Access-Control-Allow-Origin":        {"*"},
+			"Access-Control-Allow-Credentials":   {"true"},
+		}),
+	}
+	got := Analyze(flow, nil, []byte(`{"data":"secret"}`))
+	if !has(got, "CORS wildcard with credentials enabled") {
+		t.Fatalf("expected CORS wildcard+credentials finding; got: %s", titles(got))
+	}
+	// verify severity is High
+	for _, i := range got {
+		if i.Title == "CORS wildcard with credentials enabled" && i.Severity != "High" {
+			t.Fatalf("expected High severity, got %s", i.Severity)
+		}
+	}
+}
+
+func TestCORSCredentialsReflectedOrigin(t *testing.T) {
+	// Positive: ACAO reflects request Origin + Allow-Credentials: true → High severity
+	flow := &store.Flow{
+		Scheme: "https", Method: "GET", Host: "api.example.com", Path: "/data", Status: 200,
+		ReqHeaders: map[string][]string(http.Header{"Origin": {"https://attacker.example"}}),
+		ResHeaders: map[string][]string(http.Header{
+			"Content-Type":                     {"application/json"},
+			"Strict-Transport-Security":        {"max-age=1"},
+			"Access-Control-Allow-Origin":      {"https://attacker.example"},
+			"Access-Control-Allow-Credentials": {"true"},
+		}),
+	}
+	got := Analyze(flow, nil, []byte(`{"data":"secret"}`))
+	if !has(got, "CORS reflects request Origin with credentials enabled") {
+		t.Fatalf("expected CORS reflected-origin+credentials finding; got: %s", titles(got))
+	}
+}
+
+func TestCORSCredentialsNegative(t *testing.T) {
+	// Negative: Allow-Credentials present but ACAO is an explicit non-reflected trusted origin → no issue.
+	flow := &store.Flow{
+		Scheme: "https", Method: "GET", Host: "api.example.com", Path: "/data", Status: 200,
+		ReqHeaders: map[string][]string(http.Header{"Origin": {"https://app.example.com"}}),
+		ResHeaders: map[string][]string(http.Header{
+			"Content-Type":                     {"application/json"},
+			"Strict-Transport-Security":        {"max-age=1"},
+			"Access-Control-Allow-Origin":      {"https://trusted.example.com"},
+			"Access-Control-Allow-Credentials": {"true"},
+		}),
+	}
+	got := Analyze(flow, nil, []byte(`{"ok":true}`))
+	if has(got, "CORS wildcard with credentials enabled") || has(got, "CORS reflects request Origin with credentials enabled") {
+		t.Fatalf("should not flag CORS when ACAO is a fixed trusted origin; got: %s", titles(got))
+	}
+}
+
+// --- Check 14: Sensitive token in URL ---
+
+func TestSensitiveTokenInURL(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"access_token", "/api/resource?access_token=eyJhbGciOiJIUzI1NiJ9.payload.sig"},
+		{"api_key", "/v1/data?api_key=supersecretkey123"},
+		{"token", "/callback?token=verylongtoken12345"},
+		{"session", "/profile?session=sess_abc123xyz"},
+		{"password", "/reset?password=newPass123!"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			flow := &store.Flow{
+				Scheme: "https", Method: "GET", Host: "api.example.com", Path: tc.path, Status: 200,
+				ResHeaders: map[string][]string(http.Header{
+					"Content-Type":              {"application/json"},
+					"Strict-Transport-Security": {"max-age=1"},
+				}),
+			}
+			got := Analyze(flow, nil, []byte(`{"ok":true}`))
+			if !has(got, "Sensitive token or credential in URL") {
+				t.Fatalf("path %q: expected token-in-URL finding; got: %s", tc.path, titles(got))
+			}
+		})
+	}
+}
+
+func TestSensitiveTokenInURLNegative(t *testing.T) {
+	// Negative: normal query parameters should not fire.
+	flow := &store.Flow{
+		Scheme: "https", Method: "GET", Host: "api.example.com", Path: "/search?q=hello&page=2", Status: 200,
+		ResHeaders: map[string][]string(http.Header{
+			"Content-Type":              {"application/json"},
+			"Strict-Transport-Security": {"max-age=1"},
+		}),
+	}
+	got := Analyze(flow, nil, []byte(`{"results":[]}`))
+	if has(got, "Sensitive token or credential in URL") {
+		t.Fatalf("should not flag benign query params; got: %s", titles(got))
+	}
+}
+
+// --- Check 15: Cookie missing SameSite ---
+
+func TestCookieMissingSameSite(t *testing.T) {
+	// Positive: cookie has Secure and HttpOnly but no SameSite → Low finding.
+	flow := &store.Flow{
+		Scheme: "https", Method: "POST", Host: "app.example.com", Path: "/login", Status: 200,
+		ResHeaders: map[string][]string(http.Header{
+			"Content-Type":              {"application/json"},
+			"Strict-Transport-Security": {"max-age=1"},
+			// Secure + HttpOnly present, SameSite absent.
+			"Set-Cookie": {"session=abc123; Secure; HttpOnly; Path=/"},
+		}),
+	}
+	got := Analyze(flow, nil, []byte(`{"ok":true}`))
+	if !has(got, "Cookie missing SameSite attribute") {
+		t.Fatalf("expected SameSite finding; got: %s", titles(got))
+	}
+}
+
+func TestCookieMissingSameSiteNegative(t *testing.T) {
+	// Negative: cookie has SameSite=Strict → no SameSite finding.
+	flow := &store.Flow{
+		Scheme: "https", Method: "POST", Host: "app.example.com", Path: "/login", Status: 200,
+		ResHeaders: map[string][]string(http.Header{
+			"Content-Type":              {"application/json"},
+			"Strict-Transport-Security": {"max-age=1"},
+			"Set-Cookie":                {"session=abc123; Secure; HttpOnly; SameSite=Strict; Path=/"},
+		}),
+	}
+	got := Analyze(flow, nil, []byte(`{"ok":true}`))
+	if has(got, "Cookie missing SameSite attribute") {
+		t.Fatalf("should not flag cookie that has SameSite; got: %s", titles(got))
+	}
+}
+
+// --- Check 16: Authenticated response not marked no-store / private ---
+
+func TestAuthenticatedResponseCacheable(t *testing.T) {
+	// Positive: response sets cookie but Cache-Control is absent → Low finding.
+	flow := &store.Flow{
+		Scheme: "https", Method: "POST", Host: "app.example.com", Path: "/login", Status: 200,
+		ResHeaders: map[string][]string(http.Header{
+			"Content-Type":              {"application/json"},
+			"Strict-Transport-Security": {"max-age=1"},
+			"Set-Cookie":                {"session=abc123; Secure; HttpOnly; SameSite=Strict; Path=/"},
+			// No Cache-Control header at all.
+		}),
+	}
+	got := Analyze(flow, nil, []byte(`{"ok":true}`))
+	if !has(got, "Authenticated response may be cached by shared proxies") {
+		t.Fatalf("expected cache-control finding; got: %s", titles(got))
+	}
+}
+
+func TestAuthenticatedResponseCacheableNoStore(t *testing.T) {
+	// Negative: no-store present → no finding.
+	flow := &store.Flow{
+		Scheme: "https", Method: "POST", Host: "app.example.com", Path: "/login", Status: 200,
+		ResHeaders: map[string][]string(http.Header{
+			"Content-Type":              {"application/json"},
+			"Strict-Transport-Security": {"max-age=1"},
+			"Set-Cookie":                {"session=abc123; Secure; HttpOnly; SameSite=Strict; Path=/"},
+			"Cache-Control":             {"no-store"},
+		}),
+	}
+	got := Analyze(flow, nil, []byte(`{"ok":true}`))
+	if has(got, "Authenticated response may be cached by shared proxies") {
+		t.Fatalf("should not flag when Cache-Control: no-store is present; got: %s", titles(got))
+	}
+}
+
+func TestAuthenticatedResponseCacheablePrivate(t *testing.T) {
+	// Negative: Cache-Control: private is also acceptable.
+	flow := &store.Flow{
+		Scheme: "https", Method: "POST", Host: "app.example.com", Path: "/login", Status: 200,
+		ResHeaders: map[string][]string(http.Header{
+			"Content-Type":              {"application/json"},
+			"Strict-Transport-Security": {"max-age=1"},
+			"Set-Cookie":                {"session=abc123; Secure; HttpOnly; SameSite=Strict; Path=/"},
+			"Cache-Control":             {"private, max-age=0"},
+		}),
+	}
+	got := Analyze(flow, nil, []byte(`{"ok":true}`))
+	if has(got, "Authenticated response may be cached by shared proxies") {
+		t.Fatalf("should not flag when Cache-Control: private is present; got: %s", titles(got))
+	}
+}
+
+func TestNoCookieNoCacheIssue(t *testing.T) {
+	// Negative: response has no Set-Cookie → no cache-control finding regardless of Cache-Control value.
+	flow := &store.Flow{
+		Scheme: "https", Method: "GET", Host: "api.example.com", Path: "/public", Status: 200,
+		ResHeaders: map[string][]string(http.Header{
+			"Content-Type":              {"application/json"},
+			"Strict-Transport-Security": {"max-age=1"},
+			// No Set-Cookie, no Cache-Control — cache finding should not fire.
+		}),
+	}
+	got := Analyze(flow, nil, []byte(`{"items":[]}`))
+	if has(got, "Authenticated response may be cached by shared proxies") {
+		t.Fatalf("should not flag when no cookie is set; got: %s", titles(got))
+	}
+}

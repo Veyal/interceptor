@@ -13,10 +13,11 @@ import (
 )
 
 var (
-	jwtRe      = regexp.MustCompile(`eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{4,}`)
-	passwordRe = regexp.MustCompile(`(?i)"?password"?\s*[:=]\s*"?[^"&\s,}]{3,}`)
-	tokenRe    = regexp.MustCompile(`(?i)"(access_?token|token|session|secret|api_?key)"\s*:\s*"[^"]{8,}"`)
-	versionRe  = regexp.MustCompile(`\d+\.\d+`)
+	jwtRe          = regexp.MustCompile(`eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{4,}`)
+	passwordRe     = regexp.MustCompile(`(?i)"?password"?\s*[:=]\s*"?[^"&\s,}]{3,}`)
+	tokenRe        = regexp.MustCompile(`(?i)"(access_?token|token|session|secret|api_?key)"\s*:\s*"[^"]{8,}"`)
+	versionRe      = regexp.MustCompile(`\d+\.\d+`)
+	urlSensitiveRe = regexp.MustCompile(`(?i)[?&](access_?token|api_?key|token|session|password|secret|passwd|auth)=([^&\s]{6,})`)
 )
 
 const maxScanBytes = 256 * 1024 // cap how much of a body we inspect
@@ -156,6 +157,73 @@ func Analyze(f *store.Flow, reqBody, resBody []byte) []store.Issue {
 				"The HTML document can be framed by any origin: neither X-Frame-Options nor a CSP frame-ancestors directive is set, enabling clickjacking.",
 				"(no X-Frame-Options or CSP frame-ancestors)",
 				"Send X-Frame-Options: DENY (or SAMEORIGIN) or a CSP frame-ancestors 'none' directive.")
+		}
+	}
+
+	// 13. CORS with credentials — wildcard or reflected origin combined with Allow-Credentials: true.
+	// Wildcard + credentials is spec-prohibited but is still a misconfiguration worth flagging.
+	// Reflected origin + credentials is exploitable: the browser will honour the reflected ACAO and
+	// forward cookies/auth to a cross-origin attacker page.
+	if strings.EqualFold(res.Get("Access-Control-Allow-Credentials"), "true") {
+		acao := res.Get("Access-Control-Allow-Origin")
+		reqOrigin := http.Header(f.ReqHeaders).Get("Origin")
+		switch {
+		case acao == "*":
+			add("High", "CORS wildcard with credentials enabled",
+				"Access-Control-Allow-Origin: * is set alongside Access-Control-Allow-Credentials: true. "+
+					"Although browsers block this combination, it is a server-side misconfiguration that signals the developer intended open cross-origin access with credentials.",
+				"Access-Control-Allow-Origin: * | Access-Control-Allow-Credentials: true",
+				"Restrict Access-Control-Allow-Origin to a specific trusted origin when credentials are required; never use * with credentials.")
+		case reqOrigin != "" && acao == reqOrigin:
+			add("High", "CORS reflects request Origin with credentials enabled",
+				"The server echoes back the caller's Origin header as Access-Control-Allow-Origin and also sets Access-Control-Allow-Credentials: true. "+
+					"Any origin — including attacker-controlled pages — can make credentialed cross-origin requests and read the response.",
+				"Access-Control-Allow-Origin: "+acao+" | Access-Control-Allow-Credentials: true",
+				"Validate the Origin against an explicit server-side allow-list before reflecting it; do not echo arbitrary origins.")
+		}
+	}
+
+	// 14. Sensitive token or credential in the request URL query string.
+	// Tokens in URLs are logged by proxies, servers, and appear in Referer headers, making them
+	// high-risk even over HTTPS.
+	if m := urlSensitiveRe.FindString(f.Path); m != "" {
+		// Extract just the parameter name for a cleaner evidence string.
+		kv := strings.SplitN(strings.TrimLeft(m, "?&"), "=", 2)
+		paramName := kv[0]
+		add("Medium", "Sensitive token or credential in URL",
+			"A credential-like parameter ("+paramName+") is present in the request URL query string. "+
+				"Query parameters are recorded in server access logs, browser history, proxy logs, and Referer headers sent to third parties.",
+			trunc(m, 80),
+			"Pass credentials in the request body (POST) or as Authorization/custom headers, never in the URL.")
+	}
+
+	// 15. Cookie missing SameSite attribute.
+	// The existing check (7) catches missing Secure/HttpOnly. This check focuses on the distinct
+	// CSRF-related gap: a cookie that is Secure and HttpOnly but lacks SameSite is still vulnerable
+	// to cross-site request forgery in browsers that do not enforce SameSite=Lax by default.
+	for _, c := range res.Values("Set-Cookie") {
+		lc := strings.ToLower(c)
+		if !strings.Contains(lc, "samesite") {
+			add("Low", "Cookie missing SameSite attribute",
+				"A cookie is set without a SameSite attribute. Browsers that do not default to Lax will send it on cross-site requests, enabling CSRF attacks.",
+				trunc(c, 80),
+				"Add SameSite=Strict (or Lax) to all cookies. Use Strict for session tokens.")
+			break
+		}
+	}
+
+	// 16. Sensitive response cached without Cache-Control: no-store.
+	// Responses that set authentication cookies or carry a private payload should not be stored by
+	// shared caches (CDNs, forward proxies). We flag only responses that set a cookie AND lack an
+	// appropriate Cache-Control directive to keep false-positive rate low.
+	if len(res.Values("Set-Cookie")) > 0 {
+		cc := strings.ToLower(res.Get("Cache-Control"))
+		if !strings.Contains(cc, "no-store") && !strings.Contains(cc, "private") {
+			add("Low", "Authenticated response may be cached by shared proxies",
+				"The response sets a cookie but does not include Cache-Control: no-store or private. "+
+					"A shared proxy or CDN node may cache and serve this response to other users.",
+				"Set-Cookie present; Cache-Control: "+res.Get("Cache-Control"),
+				"Add Cache-Control: no-store (or at minimum private) to responses that set authentication cookies.")
 		}
 	}
 

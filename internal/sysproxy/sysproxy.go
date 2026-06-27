@@ -12,6 +12,12 @@ import (
 	"strings"
 )
 
+// networkSetup is the runner for networksetup commands. It is a package-level
+// variable so tests can inject a stub without changing external behaviour.
+var networkSetup = func(args ...string) ([]byte, error) {
+	return exec.Command("networksetup", args...).CombinedOutput()
+}
+
 // Supported reports whether automatic configuration is available on this OS.
 func Supported() bool { return runtime.GOOS == "darwin" }
 
@@ -66,7 +72,7 @@ func Status() (bool, error) {
 	if err != nil || len(svcs) == 0 {
 		return false, err
 	}
-	out, err := exec.Command("networksetup", "-getwebproxy", svcs[0]).Output()
+	out, err := networkSetup("-getwebproxy", svcs[0])
 	if err != nil {
 		return false, err
 	}
@@ -74,7 +80,7 @@ func Status() (bool, error) {
 }
 
 func run(args ...string) error {
-	out, err := exec.Command("networksetup", args...).CombinedOutput()
+	out, err := networkSetup(args...)
 	if err != nil {
 		return fmt.Errorf("networksetup %s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
@@ -82,7 +88,7 @@ func run(args ...string) error {
 }
 
 func activeServices() ([]string, error) {
-	out, err := exec.Command("networksetup", "-listallnetworkservices").Output()
+	out, err := networkSetup("-listallnetworkservices")
 	if err != nil {
 		return nil, err
 	}
