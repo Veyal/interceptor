@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Removed
+- **History "🔎 discover" filter button.** It only showed content-discovery hits,
+  which are already marked with a "DSC" badge on their rows and findable via the
+  Discover tab — so the toolbar toggle was redundant. The `?discovery=1` API filter
+  on `/api/flows` is unchanged.
+
 ## [0.11.0] - 2026-06-27
 
 ### Added

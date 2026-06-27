@@ -98,7 +98,7 @@ function toggleColPicker(){
 
 function flowExcluded(f){return (f.flags&EXCLUDE_NORM)!==0&&(f.flags&FLAG_AI)===0;}
 function canIncremental(){
-  if(state.inScopeOnly||state.discoveryOnly)return false;
+  if(state.inScopeOnly)return false;
   if(state.filters.search)return false;
   if(state.filters.exclude&&state.filters.exclude.length)return false;
   return true;
@@ -106,7 +106,6 @@ function canIncremental(){
 function flowMatchesFilters(f){
   const fl=state.filters;
   if(flowExcluded(f))return false;
-  if(state.discoveryOnly&&(f.flags&FLAG_DISCOVERY)===0)return false;
   if(!state.showAI&&(f.flags&FLAG_AI))return false;
   if(fl.scheme&&f.scheme!==fl.scheme)return false;
   if(fl.method&&f.method!==fl.method)return false;
@@ -328,7 +327,6 @@ export async function loadFlows(){
   if(f.tag)q.set('tag',f.tag);
   (f.exclude||[]).forEach(e=>{const k={method:'notMethod',host:'notHost',path:'notPath',status:'notStatus'}[e.field];if(k)q.append(k,e.value);});
   if(state.inScopeOnly)q.set('inScope','1');
-  if(state.discoveryOnly)q.set('discovery','1');
   if(!state.showAI)q.set('ai','0');
   if(state.aiOnly)q.set('onlyAi','1');
   q.set('limit',String(FLOW_LIMIT));
@@ -494,7 +492,6 @@ $('#importHarFile').onchange=async e=>{
   e.target.value='';
 };
 $('#scopeToggle').onclick=()=>{state.inScopeOnly=!state.inScopeOnly;$('#scopeToggle').classList.toggle('accent',state.inScopeOnly);$('#scopeToggle').textContent=(state.inScopeOnly?'◉':'◎')+' in scope';loadFlows();};
-$('#discFilter').onclick=()=>{state.discoveryOnly=!state.discoveryOnly;$('#discFilter').classList.toggle('accent',state.discoveryOnly);loadFlows();};
 $('#aiToggle').onclick=()=>{state.showAI=!state.showAI;$('#aiToggle').classList.toggle('accent',state.showAI);loadFlows();};
 $('#aiOnlyFilter')&&($('#aiOnlyFilter').onclick=()=>{state.aiOnly=!state.aiOnly;$('#aiOnlyFilter').classList.toggle('accent',state.aiOnly);loadFlows();});
 export async function saveNote(){
