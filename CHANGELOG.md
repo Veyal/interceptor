@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   download path still bypassing the shared `saveFile()` helper.
 
 ### Fixed
+- **UI: the token-macro "saved" toast no longer overclaims.** Saving the token
+  macro with the toggle on but required fields blank reported "token macro on —
+  fires before each send", even though the backend only fires it when target,
+  request, extract and inject-name are all set (so it silently did nothing). The
+  toast now says what's needed for it to actually fire.
 - **UI: destructive actions that lose work now ask for confirmation.** Revoking an
   API key (which immediately breaks any client using it and can't be undone) and
   deleting a custom Starlark check (which discards the hand-written source) both

@@ -187,7 +187,15 @@ function saveSessionAll(){
   return api('/api/session',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
 }
 if($('#saveSessionBtn'))$('#saveSessionBtn').onclick=async()=>{try{await saveSessionAll();toast('session saved');loadSession();}catch(e){toast(e.message);}};
-if($('#macroSave'))$('#macroSave').onclick=async()=>{try{await saveSessionAll();toast($('#macroOn').checked?'token macro on — fires before each send':'macro saved');loadSession();}catch(e){toast(e.message);}};
+if($('#macroSave'))$('#macroSave').onclick=async()=>{try{
+  await saveSessionAll();
+  // The backend only fires the token macro when ALL of target/request/extract/inject-name
+  // are set (sender.macroToken); reflect that so "macro on" isn't claimed for a no-op.
+  const on=$('#macroOn').checked;
+  const complete=$('#macroTarget').value.trim()&&$('#macroReq').value.trim()&&$('#macroExtract').value.trim()&&$('#macroName').value.trim();
+  toast(on?(complete?'token macro on — fires before each send':'macro saved — set target, request, extract & inject-name for it to fire'):'macro saved');
+  loadSession();
+}catch(e){toast(e.message);}};
 if($('#loginMacroSave'))$('#loginMacroSave').onclick=async()=>{try{await saveSessionAll();toast('login macro saved');loadSession();}catch(e){toast(e.message);}};
 if($('#loginMacroRun'))$('#loginMacroRun').onclick=async()=>{try{await saveSessionAll();const r=await api('/api/session/login/run',{method:'POST'});toast('session refreshed ('+r.applied+' header'+(r.applied===1?'':'s')+')');loadSession();}catch(e){toast(e.message);}};
 
