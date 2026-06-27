@@ -41,7 +41,8 @@ type Flow struct {
 	ClientAddr  string
 	Error       string
 	Flags       int64
-	Note        string // free-text annotation an operator (or the AI) attaches to the flow
+	Note        string   // free-text annotation an operator (or the AI) attaches to the flow
+	Tags        []string // labels attached to the flow (manual or AI); loaded on demand, not a flows column
 }
 
 // Flow flag bits, OR'd into Flow.Flags.
@@ -177,6 +178,18 @@ CREATE TABLE IF NOT EXISTS finding_flows (
   PRIMARY KEY (finding_id, flow_id)
 );
 CREATE INDEX IF NOT EXISTS idx_finding_flows_finding ON finding_flows(finding_id);
+
+CREATE TABLE IF NOT EXISTS flow_tags (
+  flow_id INTEGER NOT NULL,
+  tag TEXT NOT NULL,
+  PRIMARY KEY (flow_id, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_flow_tags_tag ON flow_tags(tag);
+
+CREATE TABLE IF NOT EXISTS tag_meta (
+  tag TEXT PRIMARY KEY,
+  color TEXT NOT NULL DEFAULT ''
+);
 `
 
 // Open creates (or opens) the database and body store under dir.
@@ -336,6 +349,9 @@ func (s *Store) DeleteFlows(ids []int64) (int64, error) {
 	// so a partial failure can't leave the full-text index out of sync with flows
 	// (a stale FTS row would make a deleted flow appear in search until reused).
 	if _, err := tx.Exec(`DELETE FROM flows_fts WHERE rowid IN (`+ph+`)`, args...); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(`DELETE FROM flow_tags WHERE flow_id IN (`+ph+`)`, args...); err != nil {
 		return 0, err
 	}
 	res, err := tx.Exec(`DELETE FROM flows WHERE id IN (`+ph+`)`, args...)

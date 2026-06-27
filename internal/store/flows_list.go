@@ -116,6 +116,10 @@ func buildFlowFilterWhere(f FlowFilter) ([]string, []any) {
 	if f.HasNote {
 		where = append(where, "note IS NOT NULL AND note != ''")
 	}
+	if f.Tag != "" {
+		where = append(where, "EXISTS (SELECT 1 FROM flow_tags ft WHERE ft.flow_id = flows.id AND ft.tag = ?)")
+		args = append(args, normalizeTag(f.Tag))
+	}
 	if len(f.FlowIDs) > 0 {
 		ph := make([]string, len(f.FlowIDs))
 		for i, id := range f.FlowIDs {

@@ -85,6 +85,7 @@ type FlowFilter struct {
 
 	FlowIDs []int64 // when set, only these ids (used for body search results)
 	HasNote bool    // only rows with a non-empty note
+	Tag     string  // only rows carrying this exact tag
 }
 
 // QueryFlowsFilter returns flows matching f, newest first. Filtering and paging

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Flow tags — storage foundation.** Flows can carry short labels (tags) for
+  triage, filtering and Map grouping. Backed by new `flow_tags` and `tag_meta`
+  tables (kept off the hot insert/scan path), with normalization (lowercased
+  slugs, deduped, capped), set/add/remove, batch-load for list pages (no N+1),
+  distinct-tags-with-counts-and-colors, per-tag colors, and a `Tag` history
+  filter. Tags are removed when their flow is purged. (API/MCP/UI in follow-ups.)
 - **Login macro: a "Test" button (dry-run).** Settings → Session → Login macro now
   has a ⚗ Test button that runs the recorded login request and shows the response
   status and exactly which session headers (Cookie / Authorization) it captures —

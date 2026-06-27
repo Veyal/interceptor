@@ -125,6 +125,9 @@ func (s *Store) DeleteFlowsByHost(hosts []string, keepOnly bool) (int64, error) 
 	if _, err := tx.Exec(`DELETE FROM flows_fts WHERE rowid IN (SELECT id FROM flows WHERE lower(host) IN (`+ph+`))`, args...); err != nil {
 		return 0, fmt.Errorf("store.DeleteFlowsByHost: unindex: %w", err)
 	}
+	if _, err := tx.Exec(`DELETE FROM flow_tags WHERE flow_id IN (SELECT id FROM flows WHERE lower(host) IN (`+ph+`))`, args...); err != nil {
+		return 0, fmt.Errorf("store.DeleteFlowsByHost: untag: %w", err)
+	}
 	res, err := tx.Exec(`DELETE FROM flows WHERE lower(host) IN (`+ph+`)`, args...)
 	if err != nil {
 		return 0, fmt.Errorf("store.DeleteFlowsByHost: delete: %w", err)
