@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-06-27
+
 ### Added
 - **Findings ↔ flow cross-linking + History "AI-only" filter.** A flow's right-click
   menu shows the findings it's a PoC for ("📌 In finding") and an "➕ Add to finding"
