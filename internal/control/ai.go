@@ -42,9 +42,18 @@ func (h *Hub) aiCreds() (provider, key string, ok bool) {
 // aiAssistReq is the JSON body shared by the assist endpoints: a single flow
 // (back-compat) or a selection, plus the kind (explain/suggest/summarize).
 type aiAssistReq struct {
-	FlowID  int64   `json:"flowId"`
-	FlowIDs []int64 `json:"flowIds"`
-	Kind    string  `json:"kind"`
+	FlowID   int64          `json:"flowId"`
+	FlowIDs  []int64        `json:"flowIds"`
+	Kind     string         `json:"kind"`
+	Question string         `json:"question"` // free-text question (kind == "ask")
+	History  []aiAssistTurn `json:"history"`  // prior user/assistant turns (kind == "ask" follow-ups)
+	Agent    bool           `json:"agent"`    // opt-in: let the model send requests (kind == "ask")
+}
+
+// aiAssistTurn is one message in an Ask AI follow-up thread.
+type aiAssistTurn struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
 func (in aiAssistReq) ids() []int64 {
@@ -119,7 +128,8 @@ func (h *Hub) aiAssist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	model, _, _ := h.st.GetSetting("ai.model")
-	text, err := aiassist.New(provider, key, model).Complete(assistSystem, assistPrompt(in.Kind, flows))
+	msgs := assistMessages(in.Kind, flows, in.Question, in.History)
+	text, err := aiassist.New(provider, key, model).CompleteMessages(assistSystem, msgs)
 	if err != nil {
 		httpErr(w, http.StatusBadGateway, err.Error())
 		return
@@ -167,7 +177,13 @@ func (h *Hub) aiAssistStream(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	model, _, _ := h.st.GetSetting("ai.model")
-	err := aiassist.New(provider, key, model).CompleteStream(r.Context(), assistSystem, assistPrompt(in.Kind, flows), func(delta string) {
+	if in.Agent && in.Kind == "ask" {
+		h.aiAssistAgentStream(w, r, in, flows, provider, key, model, flusher)
+		return
+	}
+
+	msgs := assistMessages(in.Kind, flows, in.Question, in.History)
+	err := aiassist.New(provider, key, model).CompleteStreamMessages(r.Context(), assistSystem, msgs, func(delta string) {
 		b, _ := json.Marshal(delta) // JSON-encode so newlines/quotes survive the SSE framing
 		fmt.Fprintf(w, "data: %s\n\n", b)
 		flusher.Flush()
@@ -263,10 +279,13 @@ type assistFlow struct {
 
 // assistPrompt builds the AI-assist user prompt. One flow keeps the original
 // focused wording; several selected flows become a combined per-endpoint review.
-func assistPrompt(kind string, flows []assistFlow) string {
+func assistPrompt(kind string, flows []assistFlow, question string) string {
+	question = strings.TrimSpace(question)
 	if len(flows) == 1 {
 		f := flows[0]
 		switch kind {
+		case "ask":
+			return "Answer this question about the HTTP exchange below, using only what it shows:\n\nQuestion: " + question + "\n\nRequest:\n" + f.Req + "\n\nResponse:\n" + f.Res
 		case "suggest":
 			return "Suggest specific test payloads (injection, IDOR, auth bypass, etc.) for the parameters in this request, with a one-line rationale each:\n\n" + f.Req
 		case "summarize":
@@ -276,6 +295,7 @@ func assistPrompt(kind string, flows []assistFlow) string {
 		}
 	}
 	lead := map[string]string{
+		"ask":       "Answer this question about the captured exchanges below, using only what they show:\n\nQuestion: " + question,
 		"suggest":   "Across these requests, suggest specific test payloads (injection, IDOR, auth bypass, etc.) worth trying, grouped by endpoint, each with a one-line rationale.",
 		"summarize": "Review these captured exchanges together and summarize the security posture and the highest-value things to test, in a few bullets.",
 	}[kind]
@@ -291,6 +311,66 @@ func assistPrompt(kind string, flows []assistFlow) string {
 		}
 		b.WriteString("Request:\n" + f.Req + "\n")
 		if kind != "suggest" && f.Res != "" {
+			b.WriteString("Response:\n" + f.Res + "\n")
+		}
+	}
+	return b.String()
+}
+
+const maxAskHistoryTurns = 20
+
+// assistMessages builds the provider message list. Ask follow-ups reuse prior
+// turns and only re-send the flow context once at the head of the thread.
+func assistMessages(kind string, flows []assistFlow, question string, history []aiAssistTurn) []aiassist.Message {
+	if kind == "ask" {
+		return buildAskMessages(flows, history, question)
+	}
+	return []aiassist.Message{{Role: "user", Content: assistPrompt(kind, flows, question)}}
+}
+
+func buildAskMessages(flows []assistFlow, history []aiAssistTurn, question string) []aiassist.Message {
+	question = strings.TrimSpace(question)
+	history = normalizeAskHistory(history)
+	if len(history) == 0 {
+		return []aiassist.Message{{Role: "user", Content: assistPrompt("ask", flows, question)}}
+	}
+	msgs := []aiassist.Message{{Role: "user", Content: flowContextPrompt(flows)}}
+	for _, t := range history {
+		msgs = append(msgs, aiassist.Message{Role: t.Role, Content: t.Content})
+	}
+	msgs = append(msgs, aiassist.Message{Role: "user", Content: question})
+	return msgs
+}
+
+func normalizeAskHistory(history []aiAssistTurn) []aiAssistTurn {
+	out := make([]aiAssistTurn, 0, len(history))
+	for _, t := range history {
+		role := strings.TrimSpace(t.Role)
+		content := strings.TrimSpace(t.Content)
+		if content == "" || (role != "user" && role != "assistant") {
+			continue
+		}
+		out = append(out, aiAssistTurn{Role: role, Content: content})
+	}
+	max := maxAskHistoryTurns * 2
+	if len(out) > max {
+		out = out[len(out)-max:]
+	}
+	return out
+}
+
+// flowContextPrompt anchors a follow-up thread with the captured exchange(s).
+func flowContextPrompt(flows []assistFlow) string {
+	if len(flows) == 1 {
+		f := flows[0]
+		return "We are discussing this HTTP exchange. Answer follow-up questions using only what it shows.\n\nRequest:\n" + f.Req + "\n\nResponse:\n" + f.Res
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "We are discussing these %d captured exchanges. Answer follow-up questions using only what they show.\n\n", len(flows))
+	for i, f := range flows {
+		fmt.Fprintf(&b, "\n=== [%d] %s ===\n", i+1, f.Label)
+		b.WriteString("Request:\n" + f.Req + "\n")
+		if f.Res != "" {
 			b.WriteString("Response:\n" + f.Res + "\n")
 		}
 	}

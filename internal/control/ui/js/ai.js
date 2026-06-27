@@ -1,45 +1,110 @@
-// ai.js — the AI assist modal. Explain / Summary stream the model's reply token by
-// token and render it as Markdown; Payloads asks for structured test suggestions
-// and renders them as cards you can copy or load straight into Intruder. A footer
-// action bar turns the analysed flow into one-click Repeater / Intruder loads.
+// ai.js — the AI assist modal. Ask a free-text question about the selected flow(s)
+// and the model's reply streams in token by token, rendered as Markdown. Follow-up
+// questions keep the thread (prior Q&A is sent as history). A footer action bar loads
+// the analysed flow into Repeater / Intruder in one click.
 import { $, api, openModal, closeModal, state, toast, renderMD, esc, copyText } from './core.js';
-import { sendToRepeater, sendToIntruder, setSniperPayloads } from './tools.js';
+import { sendToRepeater, sendToIntruder } from './tools.js';
 
-let aiKind = 'explain';     // current mode
-let aiPayloads = [];        // structured suggestions (Payloads mode)
+let aiKind = 'ask';         // only mode now: a free-text question
 let aiLastText = '';        // last streamed/markdown text (for Copy)
 let aiAbort = null;         // AbortController for the in-flight stream
 let aiSeq = 0;              // bumped per request; stale runs must not touch the DOM
+let aiQuestion = '';        // the free-text question being asked
+let aiHistory = [];         // [{role, content}] completed + in-flight user turn
+let aiStreaming = '';       // partial assistant reply while streaming
 
-export function openAi(kind, ids) {
+function setStatus(s) { const el = $('#aiStatus'); if (el) el.textContent = s || ''; }
+
+function aiHintHtml() {
+  const what = state.aiIds.length > 1 ? state.aiIds.length + ' selected flows' : 'this request / response';
+  return '<div class="hint">Ask anything about ' + what + ' — e.g. <i>“is the CSRF token validated?”</i>, <i>“what auth scheme is this?”</i>, <i>“suggest test payloads”</i>. Follow-up questions stay in context. Enable <b>Let AI send requests</b> to let the model probe URLs (Anthropic only).</div>';
+}
+
+function renderAiChat() {
+  if (!aiHistory.length && !aiStreaming) {
+    $('#aiOut').innerHTML = aiHintHtml();
+    return;
+  }
+  let html = '';
+  for (const t of aiHistory) {
+    if (t.role === 'user') {
+      html += '<div class="ai-turn ai-turn-user"><div class="ai-turn-label">You</div><div class="ai-turn-body">' + esc(t.content) + '</div></div>';
+    } else if (t.role === 'tool') {
+      const ok = t.ok !== false;
+      const label = esc(t.tool || 'tool') + (t.summary ? ' · ' + esc(t.summary) : '');
+      html += '<div class="ai-turn ai-turn-tool"><div class="ai-turn-label">Tool' + (ok ? '' : ' · failed') + '</div><div class="ai-turn-body"><strong>' + label + '</strong>';
+      if (t.result) html += '<pre style="margin:6px 0 0;white-space:pre-wrap">' + esc(t.result) + '</pre>';
+      html += '</div></div>';
+    } else {
+      html += '<div class="ai-turn ai-turn-assistant"><div class="ai-turn-label">AI</div><div class="ai-turn-body md">' + renderMD(t.content) + '</div></div>';
+    }
+  }
+  if (aiStreaming !== '') {
+    html += '<div class="ai-turn ai-turn-assistant ai-turn-streaming"><div class="ai-turn-label">AI</div><div class="ai-turn-body md">' + renderMD(aiStreaming) + '</div></div>';
+  }
+  $('#aiOut').innerHTML = html;
+  $('#aiBody').scrollTop = $('#aiBody').scrollHeight;
+}
+
+function updateAskPlaceholder() {
+  const qi = $('#aiQuestion');
+  if (!qi) return;
+  qi.placeholder = aiHistory.length
+    ? 'Ask a follow-up… (Enter)'
+    : 'Ask anything about this request / response… (Enter)';
+}
+
+function resetAiChat() {
+  aiHistory = [];
+  aiStreaming = '';
+  aiLastText = '';
+  updateAskPlaceholder();
+  renderAiChat();
+}
+
+// openAi opens the assist panel for the given flow(s) (or the current selection),
+// ready for a free-text question — no preset mode is run; the user asks.
+export function openAi(ids) {
   if (state.aiDisabled) { toast('AI features are disabled — enable in Settings → AI assist'); return; }
   state.aiIds = (ids && ids.length) ? ids.slice() : (state.selId != null ? [state.selId] : []);
   if (!state.aiIds.length) { toast('select a flow first'); return; }
+  abortAi();
+  resetAiChat();
+  setStatus('');
+  updateActionBar();
   openModal($('#aiModal'));
-  $('#aiKindSeg').querySelectorAll('button').forEach(b => { const on = b.dataset.k === kind; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); });
-  runAi(kind);
+  const qi = $('#aiQuestion'); if (qi) { qi.value = ''; setTimeout(() => qi.focus(), 30); }
 }
 
 export async function runAi(kind) {
-  const seq = ++aiSeq; // invalidates any in-flight request from a previous mode
+  const seq = ++aiSeq;
   aiKind = kind;
   abortAi();
-  aiPayloads = []; aiLastText = '';
-  $('#aiPayloads').innerHTML = ''; $('#aiOut').innerHTML = '';
-  updateActionBar();
-  if (kind === 'suggest') { await loadActions(seq); return; }
+  aiLastText = '';
+  aiStreaming = '';
   await streamAi(kind, seq);
 }
 
-let aiRenderTimer=null, aiPending='';
-function scheduleAiRender(seq, text){
-  aiPending=text;
+let aiRenderTimer = null;
+function scheduleAiRender(seq) {
   clearTimeout(aiRenderTimer);
-  aiRenderTimer=setTimeout(()=>{
-    if(seq!==aiSeq)return;
-    $('#aiOut').innerHTML=renderMD(aiPending);
-    $('#aiBody').scrollTop=$('#aiBody').scrollHeight;
-  },90);
+  aiRenderTimer = setTimeout(() => {
+    if (seq !== aiSeq) return;
+    renderAiChat();
+  }, 90);
+}
+
+function assistBody(kind) {
+  const ids = state.aiIds;
+  const body = ids.length > 1 ? { flowIds: ids, kind } : { flowId: ids[0], kind };
+  if (kind === 'ask') {
+    body.question = aiQuestion;
+    const hist = aiHistory.slice(0, -1).filter(t => t.role === 'user' || t.role === 'assistant');
+    if (hist.length) body.history = hist;
+    const toggle = $('#aiAgentToggle');
+    if (toggle && toggle.checked) body.agent = true;
+  }
+  return body;
 }
 
 // streamAi consumes the SSE stream from /api/ai/assist/stream, re-rendering the
@@ -47,10 +112,10 @@ function scheduleAiRender(seq, text){
 // the stream can't be opened (older proxy, no Flusher, etc.).
 async function streamAi(kind, seq) {
   const ids = state.aiIds;
-  const body = ids.length > 1 ? { flowIds: ids, kind } : { flowId: ids[0], kind };
+  const body = assistBody(kind);
   const ctrl = new AbortController(); aiAbort = ctrl;
   $('#aiStop').style.display = '';
-  setStatus(ids.length > 1 ? `Analyzing ${ids.length} flows…` : 'Thinking…');
+  setStatus(ids.length > 1 ? `Analyzing ${ids.length} flows…` : (aiHistory.length > 1 ? 'Thinking…' : 'Thinking…'));
   let acc = '';
   try {
     const r = await fetch('/api/ai/assist/stream', {
@@ -63,34 +128,60 @@ async function streamAi(kind, seq) {
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
-      if (seq !== aiSeq) return; // a newer mode took over — stop touching the DOM
+      if (seq !== aiSeq) return;
       buf += dec.decode(value, { stream: true });
       let idx;
       while ((idx = buf.indexOf('\n\n')) >= 0) {
         const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
         handleSSE(chunk,
-          t => { if (seq !== aiSeq) return; if (!streaming) { streaming = true; setStatus('Streaming…'); } acc += t; scheduleAiRender(seq, acc); },
-          msg => { throw new Error(msg); });
+          t => {
+            if (seq !== aiSeq) return;
+            if (!streaming) { streaming = true; setStatus('Streaming…'); }
+            acc += t;
+            aiStreaming = acc;
+            scheduleAiRender(seq);
+          },
+          msg => { throw new Error(msg); },
+          ev => {
+            if (seq !== aiSeq) return;
+            aiHistory.push({ role: 'tool', tool: ev.tool, summary: ev.summary, ok: ev.ok, result: ev.result || '' });
+            renderAiChat();
+            setStatus('Tool: ' + (ev.tool || '') + '…');
+          });
       }
     }
     if (seq !== aiSeq) return;
+    aiStreaming = '';
     aiLastText = acc;
-    $('#aiOut').innerHTML = renderMD(acc || '_(empty response)_');
+    aiHistory.push({ role: 'assistant', content: acc || '_(empty response)_' });
+    renderAiChat();
     setStatus('');
+    updateAskPlaceholder();
   } catch (e) {
-    if (seq !== aiSeq) return; // superseded; the newer run owns the UI
-    if (ctrl.signal.aborted) { setStatus('stopped'); }
-    else if (e.message === 'stream-unavailable') { await runAiNonStream(kind, seq); }
-    else { showError(e.message); }
+    if (seq !== aiSeq) return;
+    if (ctrl.signal.aborted) {
+      if (acc) {
+        aiStreaming = '';
+        aiHistory.push({ role: 'assistant', content: acc + '\n\n_(stopped)_' });
+        renderAiChat();
+      } else {
+        aiHistory.pop();
+        renderAiChat();
+      }
+      setStatus('stopped');
+    } else if (e.message === 'stream-unavailable') { await runAiNonStream(kind, seq); }
+    else {
+      aiHistory.pop();
+      renderAiChat();
+      showError(e.message);
+    }
   } finally {
-    if (seq === aiSeq) { $('#aiStop').style.display = 'none'; }
+    if (seq === aiSeq) { $('#aiStop').style.display = 'none'; aiStreaming = ''; }
     if (aiAbort === ctrl) aiAbort = null;
   }
 }
 
-// handleSSE parses one "\n\n"-delimited SSE event. Text deltas arrive as a
-// JSON-encoded string on a default-event data line; errors as event:error.
-function handleSSE(chunk, onText, onErr) {
+function handleSSE(chunk, onText, onErr, onTool) {
   let ev = 'message', data = '';
   chunk.split('\n').forEach(line => {
     if (line.startsWith('event:')) ev = line.slice(6).trim();
@@ -99,114 +190,80 @@ function handleSSE(chunk, onText, onErr) {
   if (!data) return;
   if (ev === 'error') { let m = data; try { m = JSON.parse(data); } catch (e) {} onErr(m); return; }
   if (ev === 'done') return;
+  if (ev === 'tool' && onTool) {
+    try { onTool(JSON.parse(data)); } catch (e) {}
+    return;
+  }
   try { const t = JSON.parse(data); if (typeof t === 'string') onText(t); } catch (e) {}
 }
 
-// runAiNonStream is the fallback: a single completion rendered as Markdown.
 async function runAiNonStream(kind, seq) {
-  const ids = state.aiIds;
-  const body = ids.length > 1 ? { flowIds: ids, kind } : { flowId: ids[0], kind };
+  const body = assistBody(kind);
   setStatus('Thinking…');
   try {
     const r = await api('/api/ai/assist', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     if (seq !== aiSeq) return;
     aiLastText = r.text || '';
-    $('#aiOut').innerHTML = renderMD(aiLastText || '_(empty response)_');
+    aiHistory.push({ role: 'assistant', content: aiLastText || '_(empty response)_' });
+    renderAiChat();
     setStatus('');
-  } catch (e) { if (seq === aiSeq) showError(e.message); }
-}
-
-// loadActions fetches structured payload suggestions for the (single) flow and
-// renders them as actionable cards.
-async function loadActions(seq) {
-  const id = state.aiIds[0];
-  setStatus('Finding payloads…');
-  $('#aiOut').innerHTML = '<div class="hint">Finding test payloads…</div>';
-  try {
-    const r = await api('/api/ai/actions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ flowId: id }) });
-    if (seq !== aiSeq) return; // superseded by a newer mode switch
-    aiPayloads = r.payloads || [];
-    $('#aiOut').innerHTML = aiPayloads.length
-      ? '<div class="hint" style="margin-bottom:8px">' + aiPayloads.length + ' suggested payloads. Each shows the recommended tool — <b>→ Repeater</b> for a one-shot manual probe (sends one request, you read the response), <b>→ Intruder</b> for fuzzing/enumeration over many values (mark <code>§</code> and Start).</div>'
-      : '<div class="hint">No payload suggestions for this request.</div>';
-    renderPayloads(aiPayloads);
-    setStatus('');
-    updateActionBar();
-  } catch (e) { if (seq !== aiSeq) return; aiPayloads = []; showError(e.message); updateActionBar(); }
-}
-
-function renderPayloads(payloads) {
-  const box = $('#aiPayloads');
-  if (!payloads || !payloads.length) { box.innerHTML = ''; return; }
-  box.innerHTML = payloads.map((p, i) => {
-    const rep = (p.tool || '').toLowerCase() === 'repeater'; // AI's recommended tool
-    const repBtn = `<button class="btn${rep ? ' accent' : ''}" data-act="rep" data-i="${i}" title="Load the request into Repeater (payload copied to clipboard)">→ Repeater</button>`;
-    const intrBtn = `<button class="btn${rep ? '' : ' accent'}" data-act="intr" data-i="${i}" title="Stage this point for fuzzing in Intruder">→ Intruder</button>`;
-    return `<div style="border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin-bottom:8px">
-      <div class="row" style="gap:8px;margin-bottom:5px">
-        <span class="sev Info">${esc(p.point || 'param')}</span>
-        <span class="hint" style="font-size:10px">${rep ? 'one-shot' : 'fuzz'}</span>
-        <div class="spacer"></div>
-        ${rep ? repBtn + intrBtn : intrBtn + repBtn}
-        <button class="btn" data-act="copy" data-i="${i}" title="Copy payload">⧉</button>
-      </div>
-      <code style="display:block;background:var(--bg3);border-radius:4px;padding:6px 8px;overflow-wrap:anywhere;font-size:12px">${esc(p.payload || '')}</code>
-      ${p.why ? `<div class="hint" style="margin-top:5px">${esc(p.why)}</div>` : ''}
-    </div>`;
-  }).join('');
-  box.querySelectorAll('[data-act]').forEach(b => b.onclick = () => {
-    const p = payloads[Number(b.dataset.i)];
-    if (b.dataset.act === 'copy') { copyText(p.payload || '', 'payload copied'); return; }
-    if (b.dataset.act === 'rep') { loadRepeater(p.payload); return; }
-    loadIntruder([p.payload]);
-  });
-}
-
-// loadIntruder stages the analysed request in Intruder with the given payload list
-// pre-filled — the user places the § marker(s) and hits Start (load & stage; we
-// never auto-fire attack payloads).
-function loadIntruder(list) {
-  const id = state.aiIds[0]; if (!id) return;
-  const picked = (list || []).filter(Boolean);
-  sendToIntruder({ id });
-  setSniperPayloads(picked.join('\n')); // AI payloads go into the single Sniper list
-  closeModal($('#aiModal'));
-  toast('loaded request + ' + picked.length + ' payload(s) into Intruder · wrap the injection point in § and Start');
-}
-
-// loadRepeater stages the request in Repeater for a one-shot manual probe and copies
-// the payload to the clipboard (Repeater has no payload slot — you paste it at the
-// injection point, then Send).
-function loadRepeater(payload) {
-  const id = state.aiIds[0]; if (!id) return;
-  sendToRepeater({ id });
-  closeModal($('#aiModal'));
-  if (payload) copyText(payload, 'request loaded in Repeater · payload copied — paste it at the injection point');
+    updateAskPlaceholder();
+  } catch (e) {
+    if (seq !== aiSeq) return;
+    aiHistory.pop();
+    renderAiChat();
+    showError(e.message);
+  }
 }
 
 function updateActionBar() {
   const single = state.aiIds.length === 1;
   $('#aiToRepeater').style.display = single ? '' : 'none';
   $('#aiToIntruder').style.display = single ? '' : 'none';
-  $('#aiAllIntruder').style.display = (single && aiKind === 'suggest' && aiPayloads.length) ? '' : 'none';
 }
 
 function showError(msg) {
   setStatus('');
-  $('#aiOut').innerHTML = '<div class="hint" style="color:var(--red)">Error: ' + esc(msg) + '</div>'
+  const err = '<div class="hint" style="color:var(--red)">Error: ' + esc(msg) + '</div>'
     + '<div class="hint" style="margin-top:6px">Pick a provider and set its API key in Settings → AI assist (or the ANTHROPIC_API_KEY / OPENROUTER_API_KEY env var).</div>';
+  if (aiHistory.length) {
+    renderAiChat();
+    $('#aiOut').insertAdjacentHTML('beforeend', err);
+    $('#aiBody').scrollTop = $('#aiBody').scrollHeight;
+  } else {
+    $('#aiOut').innerHTML = err;
+  }
 }
 
 function abortAi() { if (aiAbort) { try { aiAbort.abort(); } catch (e) {} aiAbort = null; } $('#aiStop').style.display = 'none'; }
 
-$('#aiExplainBtn').onclick = () => openAi('explain');
-$('#aiKindSeg').querySelectorAll('button').forEach(b => b.onclick = () => { $('#aiKindSeg').querySelectorAll('button').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); }); runAi(b.dataset.k); });
+function copyAiThread() {
+  const lines = [];
+  for (const t of aiHistory) {
+    if (t.role === 'user') lines.push('You: ' + t.content);
+    else if (t.role === 'tool') lines.push('Tool ' + (t.tool || '') + (t.summary ? ' (' + t.summary + ')' : '') + ': ' + (t.result || ''));
+    else lines.push('AI: ' + t.content);
+  }
+  copyText(lines.join('\n\n') || aiLastText || '', 'copied');
+}
+
+$('#aiExplainBtn') && ($('#aiExplainBtn').onclick = () => openAi());
+
+function runAsk() {
+  const q = ($('#aiQuestion').value || '').trim();
+  if (!q) { $('#aiQuestion').focus(); return; }
+  aiQuestion = q;
+  $('#aiQuestion').value = '';
+  aiHistory.push({ role: 'user', content: q });
+  renderAiChat();
+  runAi('ask');
+}
+
+$('#aiAskBtn') && ($('#aiAskBtn').onclick = runAsk);
+$('#aiQuestion') && $('#aiQuestion').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); runAsk(); } });
+$('#aiNewChat') && ($('#aiNewChat').onclick = () => { abortAi(); resetAiChat(); setStatus(''); const qi = $('#aiQuestion'); if (qi) { qi.value = ''; qi.focus(); } });
 $('#aiClose').onclick = () => { abortAi(); closeModal($('#aiModal')); };
 $('#aiStop').onclick = abortAi;
 $('#aiToRepeater').onclick = () => { const id = state.aiIds[0]; if (id) { sendToRepeater({ id }); closeModal($('#aiModal')); } };
 $('#aiToIntruder').onclick = () => { const id = state.aiIds[0]; if (id) { sendToIntruder({ id }); closeModal($('#aiModal')); } };
-$('#aiAllIntruder').onclick = () => loadIntruder(aiPayloads.map(p => p.payload));
-$('#aiCopy').onclick = () => {
-  if (aiKind === 'suggest') copyText(aiPayloads.map(p => p.payload).filter(Boolean).join('\n'), 'payloads copied');
-  else copyText(aiLastText || '', 'copied');
-};
+$('#aiCopy').onclick = () => copyAiThread();
