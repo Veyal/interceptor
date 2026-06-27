@@ -22,6 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   download path still bypassing the shared `saveFile()` helper.
 
 ### Fixed
+- **HAR export/import no longer corrupts binary bodies.** `harx` wrote response and
+  request bodies into the HAR `text` field verbatim, so `json.Marshal` replaced any
+  invalid-UTF-8 bytes (images, gzip, protobuf, any binary) with the U+FFFD
+  replacement character — silently corrupting the body on export. Binary bodies are
+  now base64-encoded with `encoding:"base64"` (HAR 1.2), and `Parse` decodes
+  `encoding:"base64"` content — so HARs from Chrome/Burp/Firefox (which base64 their
+  binary bodies) now import correctly too instead of storing the literal base64
+  string. Text bodies are unchanged. Covered by a binary round-trip test.
 - **UI: the token-macro "saved" toast no longer overclaims.** Saving the token
   macro with the toggle on but required fields blank reported "token macro on —
   fires before each send", even though the backend only fires it when target,

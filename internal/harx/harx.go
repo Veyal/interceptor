@@ -3,10 +3,13 @@
 package harx
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Veyal/interceptor/internal/store"
 )
@@ -60,11 +63,13 @@ type harHeader struct {
 type harPostData struct {
 	MimeType string `json:"mimeType"`
 	Text     string `json:"text"`
+	Encoding string `json:"encoding,omitempty"`
 }
 type harContent struct {
 	Size     int    `json:"size"`
 	MimeType string `json:"mimeType"`
 	Text     string `json:"text"`
+	Encoding string `json:"encoding,omitempty"`
 }
 type harTimings struct {
 	Send    float64 `json:"send"`
@@ -95,11 +100,13 @@ func Build(flows []*store.Flow, body func(hash string) []byte) []byte {
 				Status: f.Status, StatusText: "", HTTPVersion: orVal(f.HTTPVersion, "HTTP/1.1"),
 				Headers: headers(f.ResHeaders), Cookies: []any{}, RedirectURL: "", HeadersSize: -1,
 				BodySize: len(resBody),
-				Content:  harContent{Size: len(resBody), MimeType: f.Mime, Text: string(resBody)},
 			},
 		}
+		resText, resEnc := bodyField(resBody)
+		entry.Response.Content = harContent{Size: len(resBody), MimeType: f.Mime, Text: resText, Encoding: resEnc}
 		if len(reqBody) > 0 {
-			entry.Request.PostData = &harPostData{MimeType: contentType(f.ReqHeaders), Text: string(reqBody)}
+			reqText, reqEnc := bodyField(reqBody)
+			entry.Request.PostData = &harPostData{MimeType: contentType(f.ReqHeaders), Text: reqText, Encoding: reqEnc}
 		}
 		doc.Log.Entries = append(doc.Log.Entries, entry)
 	}
@@ -138,12 +145,37 @@ func Parse(data []byte) ([]Entry, error) {
 			TS: ts, DurationMs: int64(e.Time),
 		}
 		if e.Request.PostData != nil {
-			en.ReqBody = []byte(e.Request.PostData.Text)
+			en.ReqBody = decodeBody(e.Request.PostData.Text, e.Request.PostData.Encoding)
 		}
-		en.ResBody = []byte(e.Response.Content.Text)
+		en.ResBody = decodeBody(e.Response.Content.Text, e.Response.Content.Encoding)
 		out = append(out, en)
 	}
 	return out, nil
+}
+
+// bodyField renders a body for a HAR text field. UTF-8-safe bodies pass through
+// verbatim; binary bodies are base64-encoded and flagged encoding="base64" (HAR
+// 1.2), so json.Marshal can't mangle invalid UTF-8 into U+FFFD replacement chars.
+func bodyField(b []byte) (text, encoding string) {
+	if len(b) == 0 {
+		return "", ""
+	}
+	if utf8.Valid(b) {
+		return string(b), ""
+	}
+	return base64.StdEncoding.EncodeToString(b), "base64"
+}
+
+// decodeBody reverses bodyField and also handles HARs from other tools: a body
+// flagged encoding="base64" is decoded; anything else is taken verbatim. A
+// malformed base64 payload falls back to the raw text rather than dropping it.
+func decodeBody(text, encoding string) []byte {
+	if strings.EqualFold(encoding, "base64") {
+		if b, err := base64.StdEncoding.DecodeString(text); err == nil {
+			return b
+		}
+	}
+	return []byte(text)
 }
 
 func flowURL(f *store.Flow) string {
