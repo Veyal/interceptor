@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- **History multi-select: Ctrl/Cmd-click toggles individual rows, and rows no longer
+  select text.** Ctrl/Cmd-click now adds/removes a single (non-contiguous) row from
+  the selection — previously this required the awkward Ctrl+Shift+click. Shift-click
+  still selects a contiguous range. The history rows are also marked
+  `user-select:none`, so shift/ctrl-clicking to build a selection no longer
+  highlights row text (the long-standing annoyance); the inspector panes stay fully
+  selectable for copying.
 - **UI: the passive-scan report download uses the native Save dialog and honest
   feedback**, like the Findings engagement-report export. It previously triggered a
   hidden-anchor download and toasted "report downloaded" before the download could

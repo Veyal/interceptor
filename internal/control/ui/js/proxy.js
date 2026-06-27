@@ -126,7 +126,7 @@ function flowRowHTML(f){
   const hasNote=!!(f.note&&String(f.note).trim());
   const stHTML=f.status?String(f.status):(f.error?'ERR':'<span class="blink" style="color:var(--fg3)" title="waiting for response">•••</span>');
   const grid=flowColGrid();
-  const rowTitle=(hasNote?String(f.note).trim()+' · ':'')+'Click inspect · Shift+click range · Ctrl+Shift+click toggle';
+  const rowTitle=(hasNote?String(f.note).trim()+' · ':'')+'Click inspect · Shift+click range · Ctrl/Cmd+click toggle';
   const cells={
     id:`<div class="tr-id" data-field="id">${f.id}</div>`,
     method:`<div class="tr-m" data-field="method" style="color:${methodColor(f.method)}">${esc(f.method)}</div>`,
@@ -263,7 +263,9 @@ export function flowRowClick(id,e){
   const list=applySort(state.flows),idx=list.findIndex(f=>f.id===id);
   if(idx<0)return;
   const mod=e.ctrlKey||e.metaKey;
-  if(e.shiftKey&&mod){
+  if(mod){
+    // Ctrl/Cmd-click toggles this single row in/out of the multi-selection
+    // (non-contiguous pick), without disturbing the rest.
     state.selected.has(id)?state.selected.delete(id):state.selected.add(id);
     state.lastSelIdx=idx;selectFlow(id);updateSelBar();return;
   }
@@ -283,7 +285,7 @@ export function walkFlowNav(down,e){
   const ni=i<0?0:(down?Math.min(i+1,list.length-1):Math.max(i-1,0));
   if(ni===i)return null;
   const id=list[ni].id,mod=e.ctrlKey||e.metaKey;
-  if(e.shiftKey&&mod){
+  if(mod){
     state.selected.has(id)?state.selected.delete(id):state.selected.add(id);
     state.lastSelIdx=ni;selectFlow(id);updateSelBar();return id;
   }

@@ -68,7 +68,7 @@ button{cursor:pointer}
 .thead>div{padding:0 4px;cursor:pointer;user-select:none}
 .thead>div:hover{color:var(--fg)}
 #rows{flex:1;overflow:auto;min-height:0}
-.trow{height:27px;border-bottom:1px solid var(--line);border-left:2px solid transparent;font-size:11.5px;padding:0 6px;cursor:pointer}
+.trow{height:27px;border-bottom:1px solid var(--line);border-left:2px solid transparent;font-size:11.5px;padding:0 6px;cursor:pointer;user-select:none;-webkit-user-select:none}
 .trow:hover{background:var(--bg3)}
 .trow.sel{background:var(--sel);border-left-color:var(--accent)}
 .trow.msel{background:var(--accentDim)}
