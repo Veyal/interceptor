@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Login macro: a "Test" button (dry-run).** Settings → Session → Login macro now
+  has a ⚗ Test button that runs the recorded login request and shows the response
+  status and exactly which session headers (Cookie / Authorization) it captures —
+  **without** applying them to your live session, so you can debug a macro before
+  relying on it. If it captures nothing, it says so and why. Backed by the new
+  dry-run `POST /api/session/login/test` and `sender.TestLoginMacro`.
 - **Findings can be renamed, and creating one from History prompts for a name.**
   The finding detail header has a ✎ rename button (edits the title via the existing
   PATCH). Creating a finding from a Proxy-History selection ("➕ Add to finding" →

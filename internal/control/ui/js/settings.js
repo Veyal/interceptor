@@ -198,6 +198,28 @@ if($('#macroSave'))$('#macroSave').onclick=async()=>{try{
 }catch(e){toast(e.message);}};
 if($('#loginMacroSave'))$('#loginMacroSave').onclick=async()=>{try{await saveSessionAll();toast('login macro saved');loadSession();}catch(e){toast(e.message);}};
 if($('#loginMacroRun'))$('#loginMacroRun').onclick=async()=>{try{await saveSessionAll();const r=await api('/api/session/login/run',{method:'POST'});toast('session refreshed ('+r.applied+' header'+(r.applied===1?'':'s')+')');loadSession();}catch(e){toast(e.message);}};
+// Test = dry-run: run the login request and show the response + the session it
+// would capture, WITHOUT touching the live session (so you can debug it safely).
+if($('#loginMacroTest'))$('#loginMacroTest').onclick=async()=>{
+  const out=$('#loginMacroTestOut');
+  try{
+    await saveSessionAll(); // test what's in the form
+    if(out){out.style.display='block';out.innerHTML='<span class="hint">testing…</span>';}
+    const r=await api('/api/session/login/test',{method:'POST'});
+    const sc=r.status||0,scColor=(sc>=200&&sc<400)?'var(--accent)':(sc>=400?'var(--red)':'var(--fg3)');
+    const hdrs=r.headers||[];
+    let html=`<div style="margin-bottom:6px">Login responded <b style="color:${scColor}">${sc||'no response'}</b> · captured <b>${hdrs.length}</b> session header${hdrs.length===1?'':'s'} <span class="hint">(dry-run — live session unchanged)</span></div>`;
+    if(hdrs.length){
+      html+=hdrs.map(h=>{const v=String(h.value||'');return `<div style="font-family:var(--mono);font-size:11px;overflow-wrap:anywhere"><span style="color:var(--accent)">${esc(h.key)}</span>: ${esc(v.length>160?v.slice(0,160)+'…':v)}</div>`;}).join('');
+    }else{
+      html+='<div class="hint" style="color:var(--amber)">No session captured — the login response set no Set-Cookie or Authorization. Check the request, credentials and target.</div>';
+    }
+    if(out)out.innerHTML=html;
+  }catch(e){
+    if(out){out.style.display='block';out.innerHTML='<span style="color:var(--red)">Test failed: '+esc(e.message)+'</span>';}
+    else toast(e.message);
+  }
+};
 
 /* ---- data retention panel ---- */
 export let retentionStats=null; // cached from last fetch

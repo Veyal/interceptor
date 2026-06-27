@@ -617,10 +617,12 @@ Content-Type: application/json
             </div>
             <div class="row" style="gap:8px">
               <button class="btn accent" id="loginMacroSave">Save login macro</button>
+              <button class="btn" id="loginMacroTest" title="Dry-run the macro and show what session it captures — without changing your live session">⚗ Test</button>
               <button class="btn" id="loginMacroRun">Run now ▸</button>
               <span class="hint" id="loginMacroState"></span>
             </div>
-            <p class="hint" style="margin-top:8px">Tip: right-click a login flow in History → <b>Use as login macro</b>.</p>
+            <div id="loginMacroTestOut" class="evidence" style="display:none;margin-top:10px"></div>
+            <p class="hint" style="margin-top:8px">Tip: right-click a login flow in History → <b>Use as login macro</b>. <b>Test</b> is a dry-run — it shows the response &amp; captured session without applying it.</p>
           </div>
         </section>
         <section class="set-sec" data-sec="project" hidden>

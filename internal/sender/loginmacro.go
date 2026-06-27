@@ -42,16 +42,23 @@ func ExtractSessionHeaders(resp *http.Response) []Header {
 
 // RunLoginMacro issues the recorded login request and returns session headers.
 func RunLoginMacro(cl *http.Client, m LoginMacro) ([]Header, error) {
+	_, hdrs, err := runLoginMacroReq(cl, m)
+	return hdrs, err
+}
+
+// runLoginMacroReq issues the login request and returns the response status code
+// plus the session headers it yields. Shared by the live run and the dry-run test.
+func runLoginMacroReq(cl *http.Client, m LoginMacro) (int, []Header, error) {
 	if !m.Enabled || m.Target == "" || m.Request == "" {
-		return nil, nil
+		return 0, nil, nil
 	}
 	method, path, headers, body, err := parseRawRequest(m.Request)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	req, err := http.NewRequest(method, strings.TrimRight(m.Target, "/")+path, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	for k, vs := range headers {
 		if http.CanonicalHeaderKey(k) == "Host" {
@@ -66,11 +73,11 @@ func RunLoginMacro(cl *http.Client, m LoginMacro) ([]Header, error) {
 	}
 	resp, err := cl.Do(req)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	defer resp.Body.Close()
 	_, _ = io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	return ExtractSessionHeaders(resp), nil
+	return resp.StatusCode, ExtractSessionHeaders(resp), nil
 }
 
 // loginState tracks the configured login macro and last refresh time.
@@ -159,6 +166,14 @@ func (s *Sender) applySessionHeaders(hdrs []Header) {
 
 // RunLoginMacroNow runs the login macro immediately (API / manual re-auth).
 func (s *Sender) RunLoginMacroNow() ([]Header, error) { return s.runLoginMacro() }
+
+// TestLoginMacro dry-runs the given login macro: it issues the login request and
+// returns the response status plus the session headers it WOULD set, WITHOUT
+// touching the live session. Backs the UI "Test" button so an operator can see
+// what the macro does (and whether it captures a session) before relying on it.
+func (s *Sender) TestLoginMacro(m LoginMacro) (status int, headers []Header, err error) {
+	return runLoginMacroReq(s.cl, m)
+}
 
 func (s *Sender) shouldReauth401() bool {
 	m, _ := s.login.get()

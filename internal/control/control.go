@@ -197,6 +197,7 @@ func (h *Hub) routes() {
 	h.mux.HandleFunc("GET /api/session", h.getSession)
 	h.mux.HandleFunc("POST /api/session", h.setSession)
 	h.mux.HandleFunc("POST /api/session/login/run", h.runLoginMacro)
+	h.mux.HandleFunc("POST /api/session/login/test", h.testLoginMacro)
 	h.mux.HandleFunc("POST /api/session/login/from-flow/{id}", h.loginMacroFromFlow)
 	h.mux.HandleFunc("POST /api/ai/notes/organize", h.aiNotesOrganize)
 	h.mux.HandleFunc("POST /api/ai/notes/organize/stream", h.aiNotesOrganizeStream)

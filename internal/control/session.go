@@ -142,6 +142,24 @@ func (h *Hub) runLoginMacro(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// testLoginMacro dry-runs the saved login macro without touching the live session:
+// it returns the login response status and the session headers it would capture, so
+// the operator can see what the macro does before relying on it.
+func (h *Hub) testLoginMacro(w http.ResponseWriter, r *http.Request) {
+	status, hdrs, err := h.snd.TestLoginMacro(h.loadLoginMacro())
+	if err != nil {
+		httpErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	out := make([]map[string]string, 0, len(hdrs))
+	for _, hd := range hdrs {
+		out = append(out, map[string]string{"key": hd.Key, "value": hd.Value})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": status, "headers": out, "applied": len(hdrs),
+	})
+}
+
 // loginMacroFromFlow captures a flow's request as the login macro.
 func (h *Hub) loginMacroFromFlow(w http.ResponseWriter, r *http.Request) {
 	f, ok := h.loadFlow(w, r)

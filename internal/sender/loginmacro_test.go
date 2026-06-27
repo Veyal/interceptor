@@ -100,6 +100,56 @@ func TestRunLoginMacroExtractsSession(t *testing.T) {
 	}
 }
 
+// TestLoginMacro must DRY-RUN: return the login response status + the session
+// headers it would set, while leaving the live session untouched (so a subsequent
+// send carries no session).
+func TestTestLoginMacroIsDryRun(t *testing.T) {
+	var sawCookie string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			w.Header().Set("Set-Cookie", "session=dry; Path=/")
+			w.WriteHeader(201)
+		case "/api":
+			sawCookie = r.Header.Get("Cookie")
+			w.WriteHeader(200)
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer upstream.Close()
+
+	s, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	snd := New(s, capture.New(s))
+	snd.cl = upstream.Client()
+	snd.SetSession(true, nil) // session enabled, no headers yet
+
+	m := LoginMacro{Enabled: true, Target: upstream.URL,
+		Request: "POST /login HTTP/1.1\r\nHost: " + upstream.Listener.Addr().String() + "\r\nContent-Length: 0\r\n\r\n"}
+	status, hdrs, err := snd.TestLoginMacro(m)
+	if err != nil {
+		t.Fatalf("TestLoginMacro: %v", err)
+	}
+	if status != 201 {
+		t.Fatalf("status: got %d want 201", status)
+	}
+	if len(hdrs) != 1 || hdrs[0].Key != "Cookie" || hdrs[0].Value != "session=dry" {
+		t.Fatalf("headers: %+v", hdrs)
+	}
+
+	// The dry-run must not have applied the session: a live send carries no cookie.
+	if _, err := snd.Send(Request{Method: "GET", URL: upstream.URL + "/api"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if sawCookie != "" {
+		t.Fatalf("dry-run leaked session into a live send: %q", sawCookie)
+	}
+}
+
 func TestReauthOn401RetriesOnce(t *testing.T) {
 	var hits int
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
