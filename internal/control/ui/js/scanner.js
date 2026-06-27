@@ -26,7 +26,7 @@ $('#oobClose')&&($('#oobClose').onclick=()=>closeModal($('#oobModal')));
 $('#oobGen')&&($('#oobGen').onclick=async()=>{try{const r=await api('/api/oob/new',{method:'POST'});$('#oobUrl').value=r.url||'';copyText(r.url||'','OOB URL generated & copied');}catch(e){toast(e.message);}});
 $('#oobCopy')&&($('#oobCopy').onclick=()=>{const u=$('#oobUrl').value;if(u)copyText(u,'OOB URL copied');else toast('generate a URL first');});
 $('#oobSaveBase')&&($('#oobSaveBase').onclick=async()=>{try{await api('/api/oob/base',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({baseUrl:$('#oobBase').value.trim()})});toast('OOB base saved');loadOob();}catch(e){toast(e.message);}});
-$('#oobClear')&&($('#oobClear').onclick=async()=>{try{await api('/api/oob/interactions',{method:'DELETE'});loadOob();}catch(e){}});
+$('#oobClear')&&($('#oobClear').onclick=async()=>{try{await api('/api/oob/interactions',{method:'DELETE'});loadOob();toast('OOB interactions cleared');}catch(e){toast(e.message);}});
 
 /* ---- custom checks editor ---- */
 let checkMode='code',checkDocsLoaded=false;
@@ -67,7 +67,7 @@ export async function loadChecksList(){
       const disabled=[...box.querySelectorAll('.check-en')].filter(x=>!x.checked).map(x=>x.dataset.id);
       try{await api('/api/checks/disabled',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({disabled})});}catch(e){toast(e.message);}
     });
-  }catch(e){}
+  }catch(e){const box=$('#checksList');if(box)box.innerHTML=`<div class="hint" style="padding:10px;color:var(--red)">Couldn't load checks: ${esc(e.message)}</div>`;}
 }
 export async function loadCheck(id){
   try{const d=await api('/api/checks/'+encodeURIComponent(id));$('#checkId').value=id;$('#checkSrc').value=d.source||'';
@@ -238,7 +238,7 @@ export async function asStartScan(){
   try{await api('/api/activescan/start',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});loadActive();}
   catch(e){toast(e.message);}
 }
-export async function asStopScan(){try{await api('/api/activescan/stop',{method:'POST'});loadActive();}catch(e){}}
+export async function asStopScan(){try{await api('/api/activescan/stop',{method:'POST'});loadActive();toast('active scan stopped');}catch(e){toast(e.message);}}
 export function openActive(){
   openModal($('#activeModal'));
   $('#asFlowLabel').textContent=state.selId!=null?('#'+state.selId):'(none selected)';

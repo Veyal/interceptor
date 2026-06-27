@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **UI: user-triggered actions that failed silently now give feedback.** The custom-
+  checks list left a blank panel when its load failed (now shows an inline error);
+  the OOB "Clear" button and the active-scan "Stop" action swallowed errors with no
+  toast (now confirm success / surface the error), matching the Discover "Stop" and
+  OOB generate/save siblings.
+
 ## [0.10.0] - 2026-06-27
 
 ### Added
