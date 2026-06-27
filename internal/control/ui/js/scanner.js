@@ -1,4 +1,4 @@
-import { $, esc, escAttr, state, toast, api, openModal, closeModal, copyText, fmtTime, renderMD, pickTextFile, normalizeListText, DEC_OPS, wireRowKey, saveFile } from './core.js';
+import { $, esc, escAttr, state, toast, api, openModal, closeModal, copyText, fmtTime, renderMD, pickTextFile, normalizeListText, DEC_OPS, wireRowKey, saveFile, uiConfirm } from './core.js';
 import { flowPopup } from './flowmodal.js';
 
 /* ---- out-of-band (OOB) interaction catcher ---- */
@@ -93,6 +93,7 @@ export async function checkSave(){
 }
 export async function checkDelete(){
   const id=$('#checkId').value.trim();if(!id)return;
+  if(!await uiConfirm('Delete check',`Delete check <b>${esc(id)}</b>? Its Starlark source will be removed and won't run on future scans.`,'Delete','btn danger','var(--red)'))return;
   try{await api('/api/checks/'+encodeURIComponent(id),{method:'DELETE'});checkNew();loadChecksList();toast('deleted '+id);}catch(e){toast(e.message);}
 }
 async function checkAiGenerate(){

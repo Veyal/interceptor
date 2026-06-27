@@ -1,4 +1,4 @@
-import { $, esc, api, toast, methodColor, copyText } from './core.js';
+import { $, esc, escAttr, api, toast, methodColor, copyText, uiConfirm } from './core.js';
 
 /* ---- api module ---- */
 $('#apiSub').querySelectorAll('button').forEach(b=>b.onclick=()=>{
@@ -11,9 +11,9 @@ export async function loadApiKeys(){
       <td style="font-family:var(--mono);color:var(--accent)">${esc(k.prefix)}…</td>
       <td>${esc(k.label)}</td>
       <td style="color:var(--fg3)">${k.created?esc(new Date(k.created).toLocaleString()):'—'}</td>
-      <td><button class="btn danger" data-revoke="${k.id}">Revoke</button></td></tr>`).join('')
+      <td><button class="btn danger" data-revoke="${k.id}" data-kp="${escAttr(k.prefix||'')}" data-kl="${escAttr(k.label||'')}">Revoke</button></td></tr>`).join('')
       :'<tr><td colspan="4" class="hint" style="padding:10px">No keys yet.</td></tr>';
-    $('#keyList').querySelectorAll('[data-revoke]').forEach(b=>b.onclick=()=>revokeKey(Number(b.dataset.revoke)));
+    $('#keyList').querySelectorAll('[data-revoke]').forEach(b=>b.onclick=()=>revokeKey(Number(b.dataset.revoke),b.dataset.kp,b.dataset.kl));
   }catch(e){}
 }
 export async function createApiKey(){
@@ -24,7 +24,11 @@ export async function createApiKey(){
     $('#keyLabel').value='';loadApiKeys();
   }catch(e){toast(e.message);}
 }
-export async function revokeKey(id){try{await api('/api/keys/'+id,{method:'DELETE'});loadApiKeys();}catch(e){toast(e.message);}}
+export async function revokeKey(id,prefix,label){
+  const who=(prefix?esc(prefix)+'…':'')+(label?' <b>'+esc(label)+'</b>':'');
+  if(!await uiConfirm('Revoke API key',`Revoke key ${who||'#'+id}? Any client using it stops working immediately, and this can't be undone.`,'Revoke','btn danger','var(--red)'))return;
+  try{await api('/api/keys/'+id,{method:'DELETE'});loadApiKeys();toast('key revoked');}catch(e){toast(e.message);}
+}
 $('#keyCreate').onclick=createApiKey;
 export async function loadReference(){
   try{const d=await api('/api/reference');$('#apiBase').textContent='Base URL: '+d.baseUrl;

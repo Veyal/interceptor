@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   download path still bypassing the shared `saveFile()` helper.
 
 ### Fixed
+- **UI: destructive actions that lose work now ask for confirmation.** Revoking an
+  API key (which immediately breaks any client using it and can't be undone) and
+  deleting a custom Starlark check (which discards the hand-written source) both
+  fired on a single click; they now show the same themed danger-confirm dialog the
+  rest of the app uses for destructive operations, naming the key/check involved.
 - **UI: user-triggered actions that failed silently now give feedback.** The custom-
   checks list left a blank panel when its load failed (now shows an inline error);
   the OOB "Clear" button and the active-scan "Stop" action swallowed errors with no
