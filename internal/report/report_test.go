@@ -223,3 +223,38 @@ func TestFindingsSanitizesEvidence(t *testing.T) {
 		t.Fatalf("evidence not sanitized for inline code: %s", out)
 	}
 }
+
+// TestProjectImpactRendering verifies that a curated finding with Impact renders
+// "**Impact:**" (not "**Remediation:**") in the engagement report, while a passive
+// scan issue (store.Issue with Fix) still renders "**Remediation:**".
+func TestProjectImpactRendering(t *testing.T) {
+	findings := []store.Finding{
+		{ID: 1, Severity: "High", Status: "open", Title: "SSRF via redirect",
+			Target: "POST /api/fetch", Impact: "attacker reads internal metadata endpoint"},
+	}
+	issues := []store.Issue{
+		{Severity: "Medium", Title: "Missing HSTS", Target: "GET /", Fix: "add Strict-Transport-Security header"},
+	}
+	out := Project(findings, issues)
+
+	// Curated finding with Impact renders "**Impact:**".
+	if !strings.Contains(out, "**Impact:** attacker reads internal metadata endpoint") {
+		t.Fatalf("missing Impact line in project report:\n%s", out)
+	}
+	// "**Remediation:**" must NOT appear for curated findings (only in passive issues appendix).
+	// Check the main body section does not contain Remediation.
+	appendixIdx := strings.Index(out, "## Appendix")
+	if appendixIdx < 0 {
+		t.Fatalf("appendix section missing:\n%s", out)
+	}
+	mainBody := out[:appendixIdx]
+	if strings.Contains(mainBody, "**Remediation:**") {
+		t.Fatalf("Remediation must not appear in curated findings section:\n%s", mainBody)
+	}
+
+	// Passive issue in the appendix still renders "**Remediation:**".
+	appendix := out[appendixIdx:]
+	if !strings.Contains(appendix, "**Remediation:** add Strict-Transport-Security header") {
+		t.Fatalf("passive issue Remediation missing from appendix:\n%s", appendix)
+	}
+}

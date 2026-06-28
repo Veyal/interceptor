@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Findings is now its own top-level tab.** Promoted out of the Scanner tab into a standalone **Findings** menu (the Scanner tab is now passive-issues only) — findings are first-class, not a sub-view. Flow cross-links ("open finding") and the saved-tab restore now target the new tab.
+- **Findings define Impact instead of Remediation.** A finding now captures its **security impact** (what an attacker gains / business consequence) via a new `impact` field, replacing the old "Remediation" field on curated findings. Shown in the finding detail pane and rendered as `**Impact:**` in the exported report. Passive scanner-issue remediation is unchanged. Stored in a new additive `impact` SQLite column; exposed on create/update (REST + MCP), with legacy `fix` still accepted for back-compat.
+- **MCP records findings description-first.** `create_finding`/`update_finding` now take `impact` (in place of `fix`), and the `initialize` methodology mandates the workflow: write a finding's **description and impact first**, then **always attach the relevant captured flow(s) as PoC** via `add_finding_poc` — every finding should have a description before evidence and at least one PoC flow when one exists.
+
 ### Added
 - **Track `.cursor/mcp.json` in the repo.** The documented Cursor MCP config (Streamable HTTP to `http://127.0.0.1:9966/mcp`) is now checked in so a fresh clone connects Cursor to a running Interceptor with no manual setup.
 - **Project `.mcp.json` for Claude Code.** Checks in the Claude Code MCP config (Streamable HTTP to `http://127.0.0.1:9966/mcp`) so Claude Code connects to a running Interceptor — the Claude-Code analogue of `.cursor/mcp.json`.

@@ -175,7 +175,7 @@ func (s *Server) dispatch(method string, params json.RawMessage) (any, *rpcError
 			"protocolVersion": ver,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "interceptor", "version": version.Version},
-			"instructions":    "Interceptor — an AI web-pentest workspace; a human watches everything you do and can take over manually, so record your work as you go.\n\nSETUP (do first): check_readiness for a setup checklist → scope_from_url to focus on the target → for HTTPS the client must trust the CA (ca_info) → route the target's traffic through the proxy. Re-run check_readiness if list_flows/scans come back empty.\n\nMETHODOLOGY: (1) Recon & map — list_flows + analyze_flow to triage captured endpoints and spot injection points; suggest_discovery_paths + start_discovery to forced-browse more. (2) Auth & access control — set_session to stay authenticated; authz_run / authz_check_sessions to find IDOR / broken access control. (3) Injection & logic — send_request to probe, start_intruder to fuzz §markers; run_scanner (passive, no traffic) then active_scan (real payloads: xss/sqli/ssti/redirect/traversal/timing-cmdi — pass arm=true once, fires in-scope only); oob_* for blind callbacks. (4) Verify each candidate before reporting (re-send the PoC; rule out false positives).\n\nRECORD AS YOU GO (this is shared memory the human reviews in the Findings tab and can act on): create_finding for every confirmed/suspected vuln → add_finding_poc to attach the baseline and exploit request/response flows as evidence → update_finding to mark verified or false_positive. list_findings to track progress and avoid duplicates. get_notes/append_notes for freeform methodology, creds, scope notes.\n\nNOTES: flow ids come from list_flows; bodies truncate to maxBytes (default 4000); scanners obey scope (list_scope/scope_from_url/add_scope_rule). host_stats + prune_history manage project size (destructive, shown live in Activity). Everything you do is tagged AI and visible to the human in History and the Activity feed. Pass an optional `intent` (a short why) on consequential tools — it's shown to the human next to the action. Before any high-impact or ambiguous step (large fuzz, destructive action, unclear scope), call request_human_input to ask the operator and wait for their answer — never exceed their authority.",
+			"instructions":    "Interceptor — an AI web-pentest workspace; a human watches everything you do and can take over manually, so record your work as you go.\n\nSETUP (do first): check_readiness for a setup checklist → scope_from_url to focus on the target → for HTTPS the client must trust the CA (ca_info) → route the target's traffic through the proxy. Re-run check_readiness if list_flows/scans come back empty.\n\nMETHODOLOGY: (1) Recon & map — list_flows + analyze_flow to triage captured endpoints and spot injection points; suggest_discovery_paths + start_discovery to forced-browse more. (2) Auth & access control — set_session to stay authenticated; authz_run / authz_check_sessions to find IDOR / broken access control. (3) Injection & logic — send_request to probe, start_intruder to fuzz §markers; run_scanner (passive, no traffic) then active_scan (real payloads: xss/sqli/ssti/redirect/traversal/timing-cmdi — pass arm=true once, fires in-scope only); oob_* for blind callbacks. (4) Verify each candidate before reporting (re-send the PoC; rule out false positives).\n\nRECORD AS YOU GO: create_finding with a description (detail) and the security impact (what an attacker gains / business consequence) FIRST — every finding starts as a written description before any evidence is attached. Then call add_finding_poc to attach the relevant captured flows as PoC evidence; every finding should have at least one PoC flow when one exists. Use update_finding to mark verified or false_positive. list_findings tracks progress and avoids duplicates. get_notes/append_notes for freeform methodology, creds, scope notes.\n\nNOTES: flow ids come from list_flows; bodies truncate to maxBytes (default 4000); scanners obey scope (list_scope/scope_from_url/add_scope_rule). host_stats + prune_history manage project size (destructive, shown live in Activity). Everything you do is tagged AI and visible to the human in History and the Activity feed. Pass an optional `intent` (a short why) on consequential tools — it's shown to the human next to the action. Before any high-impact or ambiguous step (large fuzz, destructive action, unclear scope), call request_human_input to ask the operator and wait for their answer — never exceed their authority.",
 		}, nil
 	case "tools/list":
 		return map[string]any{"tools": s.toolList()}, nil
@@ -910,7 +910,7 @@ func (s *Server) registerTools() {
 	// ---- findings: structured, curated vulnerability records (the AI's durable
 	// memory; the human reviews/curates them in the Findings tab) ----
 	s.add("create_finding",
-		"Record a confirmed/suspected vulnerability as a structured finding (the AI's durable memory the human reviews). Returns the new finding with its id; then attach request/response PoCs with add_finding_poc. severity=High|Medium|Low|Info; status defaults to open.",
+		"Record a confirmed/suspected vulnerability as a structured finding (the AI's durable memory the human reviews). Always write a description and define the security IMPACT (what an attacker gains / business consequence) first, then attach PoCs with add_finding_poc. Returns the new finding with its id. severity=High|Medium|Low|Info; status defaults to open.",
 		obj(map[string]any{
 			"title":    pt("string"),
 			"severity": pt("string"),
@@ -918,18 +918,25 @@ func (s *Server) registerTools() {
 			"target":   pt("string"),
 			"detail":   pt("string"),
 			"evidence": pt("string"),
-			"fix":      pt("string"),
+			"impact":   p("string", "the security impact — what an attacker gains / business consequence"),
 			"intent":   p("string", "optional: a short 'why' shown to the human in the Activity feed"),
 		}, "title"),
 		func(a map[string]any) (string, error) {
 			if _, err := reqStr(a, "title"); err != nil {
 				return "", err
 			}
-			return s.api(http.MethodPost, "/api/findings", map[string]any{
+			body := map[string]any{
 				"title": argStr(a, "title"), "severity": argStr(a, "severity"), "status": argStr(a, "status"),
 				"target": argStr(a, "target"), "detail": argStr(a, "detail"),
-				"evidence": argStr(a, "evidence"), "fix": argStr(a, "fix"), "source": "ai",
-			})
+				"evidence": argStr(a, "evidence"), "source": "ai",
+			}
+			// impact is the primary field; fix is accepted for back-compat but not advertised.
+			if v := argStr(a, "impact"); v != "" {
+				body["impact"] = v
+			} else if v := argStr(a, "fix"); v != "" {
+				body["fix"] = v
+			}
+			return s.api(http.MethodPost, "/api/findings", body)
 		})
 
 	s.add("list_findings",
@@ -951,7 +958,7 @@ func (s *Server) registerTools() {
 		})
 
 	s.add("update_finding",
-		"Update a finding's status or any field (e.g. mark verified once you've confirmed the PoC, or false_positive). Only the fields you pass are changed.",
+		"Update a finding's status or any field (e.g. mark verified once you've confirmed the PoC, or false_positive, or set the security impact). Only the fields you pass are changed.",
 		obj(map[string]any{
 			"id":       pt("integer"),
 			"status":   pt("string"),
@@ -960,7 +967,7 @@ func (s *Server) registerTools() {
 			"target":   pt("string"),
 			"detail":   pt("string"),
 			"evidence": pt("string"),
-			"fix":      pt("string"),
+			"impact":   p("string", "the security impact — what an attacker gains / business consequence"),
 		}, "id"),
 		func(a map[string]any) (string, error) {
 			id, err := reqInt(a, "id")
@@ -971,10 +978,14 @@ func (s *Server) registerTools() {
 				return "", fmt.Errorf("id is required (a non-zero finding id)")
 			}
 			body := map[string]any{}
-			for _, k := range []string{"status", "severity", "title", "target", "detail", "evidence", "fix"} {
+			for _, k := range []string{"status", "severity", "title", "target", "detail", "evidence", "impact"} {
 				if v, ok := a[k]; ok {
 					body[k] = v
 				}
+			}
+			// fix accepted for back-compat but not advertised in schema.
+			if v, ok := a["fix"]; ok {
+				body["fix"] = v
 			}
 			return s.api(http.MethodPatch, fmt.Sprintf("/api/findings/%d", id), body)
 		})

@@ -22,7 +22,8 @@ type Finding struct {
 	Target    string         `json:"target"`
 	Detail    string         `json:"detail"`   // legacy / MCP compat: first text block synced here
 	Evidence  string         `json:"evidence"` // legacy only
-	Fix       string         `json:"fix"`
+	Fix       string         `json:"fix"`      // back-compat: kept but superseded by Impact
+	Impact    string         `json:"impact"`   // security impact — what an attacker gains / business consequence
 	Body      string         `json:"body,omitempty"` // stored JSON blocks (use Blocks for rendering)
 	Flows     []FindingFlow  `json:"flows"`           // attached flow metadata (for list sidebar count)
 	Blocks    []FindingBlock `json:"blocks"`          // ordered narrative body (source of truth for UI)
@@ -282,9 +283,9 @@ func (s *Store) CreateFinding(f *Finding) (int64, error) {
 		f.Body = initialBody(f.Detail, f.Evidence)
 	}
 	res, err := s.db.Exec(
-		`INSERT INTO findings (ts, updated_ts, severity, status, source, title, target, detail, evidence, fix, body)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-		f.TS, f.UpdatedTS, f.Severity, f.Status, f.Source, f.Title, f.Target, f.Detail, f.Evidence, f.Fix, f.Body)
+		`INSERT INTO findings (ts, updated_ts, severity, status, source, title, target, detail, evidence, fix, body, impact)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		f.TS, f.UpdatedTS, f.Severity, f.Status, f.Source, f.Title, f.Target, f.Detail, f.Evidence, f.Fix, f.Body, f.Impact)
 	if err != nil {
 		return 0, err
 	}
@@ -299,7 +300,7 @@ func (s *Store) CreateFinding(f *Finding) (int64, error) {
 // is updated (MCP backward-compat: AI updates detail → UI sees the change).
 // When body is set, detail is synced from its first text block so MCP list_findings
 // still shows meaningful text.
-func (s *Store) UpdateFinding(id int64, severity, status, title, target, detail, evidence, fix, body *string) error {
+func (s *Store) UpdateFinding(id int64, severity, status, title, target, detail, evidence, fix, body, impact *string) error {
 	// If detail changes and there is an existing body, sync the first text block.
 	if detail != nil && body == nil {
 		var existBody string
@@ -349,6 +350,10 @@ func (s *Store) UpdateFinding(id int64, severity, status, title, target, detail,
 	if body != nil {
 		sets = append(sets, "body=?")
 		args = append(args, *body)
+	}
+	if impact != nil {
+		sets = append(sets, "impact=?")
+		args = append(args, *impact)
 	}
 	args = append(args, id)
 	_, err := s.db.Exec(`UPDATE findings SET `+strings.Join(sets, ", ")+` WHERE id=?`, args...)
@@ -465,13 +470,13 @@ func (s *Store) findingFlows(findingID int64) ([]FindingFlow, error) {
 func scanFinding(sc scanner) (*Finding, error) {
 	var f Finding
 	if err := sc.Scan(&f.ID, &f.TS, &f.UpdatedTS, &f.Severity, &f.Status, &f.Source,
-		&f.Title, &f.Target, &f.Detail, &f.Evidence, &f.Fix, &f.Body); err != nil {
+		&f.Title, &f.Target, &f.Detail, &f.Evidence, &f.Fix, &f.Body, &f.Impact); err != nil {
 		return nil, err
 	}
 	return &f, nil
 }
 
-const findingCols = `id, ts, updated_ts, severity, status, source, title, target, detail, evidence, fix, body`
+const findingCols = `id, ts, updated_ts, severity, status, source, title, target, detail, evidence, fix, body, impact`
 
 // GetFinding loads one finding with its narrative body blocks and PoC flow list.
 func (s *Store) GetFinding(id int64) (*Finding, error) {

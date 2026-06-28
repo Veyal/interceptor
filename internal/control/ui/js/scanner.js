@@ -31,23 +31,16 @@ $('#oobClear')&&($('#oobClear').onclick=async()=>{try{await api('/api/oob/intera
 const OOB_TUNNEL_CMD='cloudflared tunnel --url http://127.0.0.1:9966';
 $('#oobModalTunnelCopy')&&($('#oobModalTunnelCopy').onclick=()=>copyText(OOB_TUNNEL_CMD,'Tunnel command copied'));
 
-/* ---- Scanner / Findings sub-tabs ---- */
+/* ---- Scanner sub-tabs (legacy) ----
+   Findings is now its own top-level tab; the Scanner tab is passive-only.
+   setScanSub remains as a no-op shim so any lingering callers (e.g. old saved
+   state or cross-links) don't throw. If asked for the findings view, it now
+   activates the standalone Findings tab. */
 export function setScanSub(sub){
-  const passive=sub!=='findings';
-  $('#scanSub')?.querySelectorAll('button').forEach(b=>{
-    const on=b.dataset.s===(passive?'passive':'findings');
-    b.classList.toggle('on',on);
-    b.setAttribute('aria-pressed',on?'true':'false');
-  });
-  const pb=$('#scanPassiveBar'),fb=$('#scanFindingsBar'),pv=$('#scanPassiveView'),fv=$('#scanFindingsView');
-  if(pb)pb.style.display=passive?'flex':'none';
-  if(fb)fb.style.display=passive?'none':'flex';
-  if(pv)pv.style.display=passive?'flex':'none';
-  if(fv)fv.style.display=passive?'none':'flex';
-  if(!passive) import('./findings.js').then(m=>m.loadFindings());
-  try{localStorage.setItem('scanSub',passive?'passive':'findings');}catch(e){}
+  if(sub==='findings'){
+    document.querySelector('.tab[data-tab="findings"]')?.click();
+  }
 }
-$('#scanSub')&&$('#scanSub').querySelectorAll('button').forEach(b=>{b.onclick=()=>setScanSub(b.dataset.s);});
 
 /* ---- custom checks editor ---- */
 let checkMode='code',checkDocsLoaded=false;

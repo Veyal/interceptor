@@ -100,7 +100,8 @@ func (h *Hub) createFinding(w http.ResponseWriter, r *http.Request) {
 		Target   string  `json:"target"`
 		Detail   string  `json:"detail"`
 		Evidence string  `json:"evidence"`
-		Fix      string  `json:"fix"`
+		Fix      string  `json:"fix"`    // back-compat: still accepted
+		Impact   string  `json:"impact"` // security impact — what an attacker gains / business consequence
 		Body     string  `json:"body"`    // JSON blocks (new format)
 		FlowIDs  []int64 `json:"flowIds"` // optional: attach these PoC flows on create
 	}
@@ -119,7 +120,7 @@ func (h *Hub) createFinding(w http.ResponseWriter, r *http.Request) {
 	f := &store.Finding{
 		Severity: in.Severity, Status: in.Status, Source: orVal(in.Source, "human"),
 		Title: in.Title, Target: in.Target, Detail: in.Detail, Evidence: in.Evidence, Fix: in.Fix,
-		Body: in.Body,
+		Impact: in.Impact, Body: in.Body,
 	}
 	id, err := h.st.CreateFinding(f)
 	if err != nil {
@@ -153,8 +154,9 @@ func (h *Hub) updateFinding(w http.ResponseWriter, r *http.Request) {
 		Target   *string `json:"target"`
 		Detail   *string `json:"detail"`
 		Evidence *string `json:"evidence"`
-		Fix      *string `json:"fix"`
-		Body     *string `json:"body"` // JSON blocks
+		Fix      *string `json:"fix"`    // back-compat: still accepted
+		Impact   *string `json:"impact"` // security impact — what an attacker gains / business consequence
+		Body     *string `json:"body"`   // JSON blocks
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		httpErr(w, http.StatusBadRequest, "bad json")
@@ -178,7 +180,7 @@ func (h *Hub) updateFinding(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusRequestEntityTooLarge, msg)
 		return
 	}
-	if err := h.st.UpdateFinding(id, in.Severity, in.Status, in.Title, in.Target, in.Detail, in.Evidence, in.Fix, in.Body); err != nil {
+	if err := h.st.UpdateFinding(id, in.Severity, in.Status, in.Title, in.Target, in.Detail, in.Evidence, in.Fix, in.Body, in.Impact); err != nil {
 		httpErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}

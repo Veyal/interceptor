@@ -237,8 +237,8 @@ func renderFinding(b *strings.Builder, n int, f store.Finding) {
 	if f.Target != "" {
 		b.WriteString("- **Target:** `" + code(f.Target) + "`\n")
 	}
-	if f.Fix != "" {
-		b.WriteString("- **Remediation:** " + f.Fix + "\n")
+	if f.Impact != "" {
+		b.WriteString("- **Impact:** " + f.Impact + "\n")
 	}
 	b.WriteString("\n")
 	// Render interleaved narrative body (text + PoC flows in author's order).

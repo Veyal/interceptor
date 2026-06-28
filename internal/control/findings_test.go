@@ -208,3 +208,52 @@ func TestFindingBodySizeCap(t *testing.T) {
 	}
 	resp5.Body.Close()
 }
+
+// TestFindingImpactCreateAndPatch verifies that:
+//  - POST /api/findings with "impact" returns the field populated.
+//  - PATCH /api/findings/:id with "impact" updates it and returns the new value.
+func TestFindingImpactCreateAndPatch(t *testing.T) {
+	h, _, _ := newHub(t)
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	idStr := func(id int64) string { return strconv.FormatInt(id, 10) }
+
+	// CREATE with impact.
+	resp, err := http.Post(ts.URL+"/api/findings", "application/json",
+		strings.NewReader(`{"title":"Impact test","severity":"High","impact":"attacker reads PII of all users"}`))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	var created store.Finding
+	json.NewDecoder(resp.Body).Decode(&created)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create: want 200, got %d", resp.StatusCode)
+	}
+	if created.ID == 0 {
+		t.Fatalf("create: no id returned")
+	}
+	if created.Impact != "attacker reads PII of all users" {
+		t.Fatalf("create: impact want %q got %q", "attacker reads PII of all users", created.Impact)
+	}
+
+	// PATCH impact.
+	req, _ := http.NewRequest(http.MethodPatch,
+		ts.URL+"/api/findings/"+idStr(created.ID),
+		strings.NewReader(`{"impact":"full account takeover — admin privilege escalation"}`))
+	r2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("patch: %v", err)
+	}
+	var updated store.Finding
+	json.NewDecoder(r2.Body).Decode(&updated)
+	r2.Body.Close()
+	if r2.StatusCode != http.StatusOK {
+		t.Fatalf("patch: want 200, got %d", r2.StatusCode)
+	}
+	want := "full account takeover — admin privilege escalation"
+	if updated.Impact != want {
+		t.Fatalf("patch: impact want %q got %q", want, updated.Impact)
+	}
+}

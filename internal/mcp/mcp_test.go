@@ -11,6 +11,53 @@ import (
 	"testing"
 )
 
+// TestCreateFindingWithImpact verifies that the create_finding MCP tool forwards
+// the "impact" argument to the control-plane POST /api/findings endpoint (not "fix"),
+// and that update_finding likewise forwards "impact".
+func TestCreateFindingWithImpact(t *testing.T) {
+	var createBody, updateBody map[string]any
+
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/findings":
+			json.NewDecoder(r.Body).Decode(&createBody)
+			io.WriteString(w, `{"id":1,"title":"test","impact":"attacker reads PII","severity":"High","status":"open","flows":[],"blocks":[]}`)
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/findings/1":
+			json.NewDecoder(r.Body).Decode(&updateBody)
+			io.WriteString(w, `{"id":1,"title":"test","impact":"full account takeover","severity":"High","status":"verified","flows":[],"blocks":[]}`)
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer mock.Close()
+
+	s := New(mock.URL)
+	s.report = func(Activity) {} // silence activity reporting
+
+	script := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_finding","arguments":{"title":"test","severity":"High","impact":"attacker reads PII"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"update_finding","arguments":{"id":1,"status":"verified","impact":"full account takeover"}}}`,
+	}, "\n") + "\n"
+
+	var out bytes.Buffer
+	if err := s.Serve(strings.NewReader(script), &out); err != nil {
+		t.Fatalf("Serve: %v", err)
+	}
+
+	// create_finding must have forwarded "impact", not "fix".
+	if createBody["impact"] != "attacker reads PII" {
+		t.Fatalf("create_finding: expected impact=%q in body, got %v", "attacker reads PII", createBody)
+	}
+	if _, hasFix := createBody["fix"]; hasFix {
+		t.Fatalf("create_finding: must not forward 'fix' when impact is set, body=%v", createBody)
+	}
+
+	// update_finding must have forwarded "impact".
+	if updateBody["impact"] != "full account takeover" {
+		t.Fatalf("update_finding: expected impact=%q in body, got %v", "full account takeover", updateBody)
+	}
+}
+
 type rpcResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id"`

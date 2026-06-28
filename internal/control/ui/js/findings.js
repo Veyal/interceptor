@@ -212,10 +212,10 @@ function renderFindingDetail() {
       <button class="btn" id="findAddText" style="font-size:11px;padding:3px 8px">＋ Text</button>
       <button class="btn" id="findAddFlow" style="font-size:11px;padding:3px 8px">＋ Flow (<span id="findSelCount">${state.selected ? state.selected.size : 0}</span> selected)</button>
     </div>
-    ${f.fix !== undefined ? `<div style="margin-bottom:4px">
-      <div class="find-sec" style="margin-bottom:4px">Remediation</div>
-      <textarea id="findFix" class="rep-edit" rows="2" placeholder="Fix / remediation…" style="border-radius:6px">${esc(f.fix || '')}</textarea>
-    </div>` : ''}`;
+    <div style="margin-bottom:4px">
+      <div class="find-sec" style="margin-bottom:4px">Impact</div>
+      <textarea id="findImpact" class="rep-edit" rows="2" placeholder="Security impact — what an attacker gains…" style="border-radius:6px">${esc(f.impact || '')}</textarea>
+    </div>`;
 
   // Load body blocks for this finding.
   bodyFindingId = f.id;
@@ -245,9 +245,9 @@ function renderFindingDetail() {
     if (tas.length) tas[tas.length - 1].focus();
   };
   $('#findAddFlow').onclick = () => attachSelectedFlowsAsBlocks(f.id);
-  $('#findFix')?.addEventListener('blur', async () => {
-    const fix = $('#findFix').value;
-    try { await api('/api/findings/' + f.id, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ fix }) }); }
+  $('#findImpact')?.addEventListener('blur', async () => {
+    const impact = $('#findImpact').value;
+    try { await api('/api/findings/' + f.id, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ impact }) }); }
     catch (err) { toast(err.message); }
   });
 }
@@ -290,11 +290,8 @@ export function flowFindings(flowId) {
 }
 export function openFinding(id) {
   selFinding = id;
-  import('./scanner.js').then(m => {
-    document.querySelector('.tab[data-tab="scanner"]')?.click();
-    m.setScanSub('findings');
-    renderFindings();
-  });
+  document.querySelector('.tab[data-tab="findings"]')?.click();
+  loadFindings();
 }
 export function addFlowToFinding(flowId) {
   if (flowId) pickFindingForFlows([flowId]);
@@ -326,7 +323,7 @@ function pickFindingForFlows(ids) {
     const title = await uiPrompt({ title: 'Name the new finding', placeholder: 'e.g. IDOR on /api/user/{id}' });
     if (title == null) return;
     const f = await api('/api/findings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title, severity: 'Medium', source: 'human', flowIds: ids }) }).catch(e => { toast(e.message); return null; });
-    if (f) { import('./scanner.js').then(m => { document.querySelector('.tab[data-tab="scanner"]')?.click(); m.setScanSub('findings'); }); selFinding = f.id; toast('finding created'); }
+    if (f) { selFinding = f.id; document.querySelector('.tab[data-tab="findings"]')?.click(); loadFindings(); toast('finding created'); }
   };
 }
 $('#fpClose') && ($('#fpClose').onclick = () => closeModal($('#findPickModal')));

@@ -6,7 +6,7 @@ import { $, $$, esc, state, api, toast, MODAL_IDS, openModal, closeModal } from 
 import { selectFlow, renderChips, loadFlows, loadScope, loadViews, scheduleReload, renderWSFrames, clearAllFilters, walkFlowNav, toggleSelectAllShown, handleFlowNew, handleFlowUpdate } from './proxy.js';
 import { renderIntercept, toggleIntercept, loadRules } from './intercept.js';
 import { repInit, repSend, sendToRepeater, sendToIntruder, scheduleIntr } from './tools.js';
-import { loadIssues, runScan, loadScanTargets, openActive, openDecoder, openChecks, loadActive, loadChecksList, loadOob, renderAsScopePanel, setScanSub } from './scanner.js';
+import { loadIssues, runScan, loadScanTargets, openActive, openDecoder, openChecks, loadActive, loadChecksList, loadOob, renderAsScopePanel } from './scanner.js';
 import { loadEndpoints } from './map.js';
 import { loadDiscovery, refreshDiscovery } from './discovery.js';
 import { loadSettings, loadSysProxy, loadSession, loadProject, openProjectModal, applyAiDisabledUI, applyOobDisabledUI } from './settings.js';
@@ -30,7 +30,8 @@ function activateTab(t){
   $$('.panel').forEach(p=>p.classList.toggle('active',p.dataset.panel===t.dataset.tab));
   try{localStorage.setItem('tab',t.dataset.tab);}catch(e){} // remember the open tab across refresh
   if(t.dataset.tab==='activity'){renderActivity();clearActSeen();}
-  if(t.dataset.tab==='scanner'){loadScanTargets();const sub=localStorage.getItem('scanSub')||$('#scanSub')?.querySelector('.on')?.dataset.s||'passive';setScanSub(sub);}
+  if(t.dataset.tab==='scanner')loadScanTargets();
+  if(t.dataset.tab==='findings')loadFindings();
   if(t.dataset.tab==='discover')loadDiscovery();
   if(t.dataset.tab==='map')loadEndpoints();
   if(t.dataset.tab==='notes')loadNotes();
@@ -59,11 +60,12 @@ $('#tabs').addEventListener('keydown',e=>{
 // Re-open whichever tab was active before a refresh (default stays Proxy).
 function restoreTab(){
   try{let id=localStorage.getItem('tab');
-    if(id==='findings'){id='scanner';localStorage.setItem('tab','scanner');localStorage.setItem('scanSub','findings');}
+    // Legacy: Findings used to be a sub-view of the Scanner tab (scanSub==='findings').
+    // It is now its own top-level tab — redirect old saved state to it.
+    if(id==='scanner'&&localStorage.getItem('scanSub')==='findings'){id='findings';localStorage.setItem('tab','findings');localStorage.removeItem('scanSub');}
     if(id==='api'){id='settings';localStorage.setItem('tab','settings');}
     if(!id||id==='proxy')return;
     const b=document.querySelector('.tab[data-tab="'+id+'"]');if(b)b.click();
-    if(id==='scanner'){const sub=localStorage.getItem('scanSub');if(sub==='findings')setScanSub('findings');}
     if(id==='settings'&&localStorage.getItem('setSec')==='api'){document.querySelector('#setNav button[data-sec="api"]')?.click();}
   }catch(e){}
 }
@@ -185,8 +187,8 @@ function cmdkCommands(){
     {t:'Go to Intercept',kw:'hold forward drop match replace rules',run:go('intercept')},
     {t:'Go to Repeater',kw:'resend craft edit request',run:go('repeater')},
     {t:'Go to Intruder',kw:'fuzz brute force payloads enumerate',run:go('intruder')},
-    {t:'Go to Scanner',kw:'passive active scan checks findings issues vulnerabilities report',run:()=>{go('scanner')();setScanSub('passive');}},
-    {t:'Go to Findings',kw:'findings poc vulnerability record curated',run:()=>{go('scanner')();setScanSub('findings');}},
+    {t:'Go to Scanner',kw:'passive active scan checks issues vulnerabilities report',run:go('scanner')},
+    {t:'Go to Findings',kw:'findings poc vulnerability record curated impact',run:go('findings')},
     {t:'Go to Discover',kw:'content discovery forced browse brute force dirbuster gobuster ffuf wordlist directories endpoints fuzz paths',run:go('discover')},
     {t:'Go to Map',kw:'endpoints attack surface graph tree headers body search',run:go('map')},
     {t:'Go to Notes',kw:'scratchpad markdown findings notebook',run:goToNotes},

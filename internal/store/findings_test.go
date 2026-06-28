@@ -5,6 +5,50 @@ import (
 	"time"
 )
 
+// TestFindingImpactRoundTrip verifies that the impact field is persisted on
+// create and can be updated independently of all other fields.
+func TestFindingImpactRoundTrip(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	// Create with impact set.
+	id, err := s.CreateFinding(&Finding{
+		Severity: "High",
+		Title:    "Impact round-trip",
+		Impact:   "attacker can read all users' PII",
+	})
+	if err != nil {
+		t.Fatalf("CreateFinding: %v", err)
+	}
+	got, err := s.GetFinding(id)
+	if err != nil {
+		t.Fatalf("GetFinding: %v", err)
+	}
+	if got.Impact != "attacker can read all users' PII" {
+		t.Fatalf("create: impact want %q got %q", "attacker can read all users' PII", got.Impact)
+	}
+
+	// Update impact.
+	newImpact := "attacker gains admin access — full account takeover"
+	if err := s.UpdateFinding(id, nil, nil, nil, nil, nil, nil, nil, nil, &newImpact); err != nil {
+		t.Fatalf("UpdateFinding impact: %v", err)
+	}
+	got2, err := s.GetFinding(id)
+	if err != nil {
+		t.Fatalf("GetFinding after update: %v", err)
+	}
+	if got2.Impact != newImpact {
+		t.Fatalf("update: impact want %q got %q", newImpact, got2.Impact)
+	}
+	// Other fields not clobbered.
+	if got2.Title != "Impact round-trip" {
+		t.Fatalf("title clobbered after impact update: %q", got2.Title)
+	}
+}
+
 func TestFindingsCRUDAndPoCFlows(t *testing.T) {
 	s, err := Open(t.TempDir())
 	if err != nil {
@@ -58,7 +102,7 @@ func TestFindingsCRUDAndPoCFlows(t *testing.T) {
 
 	// Update status; list filter by status.
 	verified := "verified"
-	if err := s.UpdateFinding(id, nil, &verified, nil, nil, nil, nil, nil, nil); err != nil {
+	if err := s.UpdateFinding(id, nil, &verified, nil, nil, nil, nil, nil, nil, nil); err != nil {
 		t.Fatalf("UpdateFinding: %v", err)
 	}
 	open, _ := s.ListFindings("", "open")
