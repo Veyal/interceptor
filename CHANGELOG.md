@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - **Track `.cursor/mcp.json` in the repo.** The documented Cursor MCP config (Streamable HTTP to `http://127.0.0.1:9966/mcp`) is now checked in so a fresh clone connects Cursor to a running Interceptor with no manual setup.
+- **Project `.mcp.json` for Claude Code.** Checks in the Claude Code MCP config (Streamable HTTP to `http://127.0.0.1:9966/mcp`) so Claude Code connects to a running Interceptor — the Claude-Code analogue of `.cursor/mcp.json`.
 
 ## [0.12.0] - 2026-06-28
 
