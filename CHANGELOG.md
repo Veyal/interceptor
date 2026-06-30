@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **`interceptor update` progress.** Step-by-step status (check → download → verify → extract → install) plus live download percentage and size when the terminal supports it.
+
 ## [0.19.0] - 2026-06-30
 
 **Regex in target scope:** match hosts and paths with patterns like `.*ohsome.*` without giving up `*.acme.com` wildcards.

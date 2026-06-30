@@ -54,10 +54,12 @@ func Update(ctx context.Context, opts UpdateOptions) error {
 	if out == nil {
 		out = os.Stderr
 	}
+	prog := newUpdateProgress(out)
 	target := strings.TrimSpace(opts.Version)
 	if target != "" {
 		target = strings.TrimPrefix(target, "v")
 	} else {
+		prog.step("Checking for latest release…")
 		latest, newer, err := CheckLatest(ctx)
 		if err != nil {
 			return fmt.Errorf("check for updates: %w", err)
@@ -82,6 +84,7 @@ func Update(ctx context.Context, opts UpdateOptions) error {
 	}
 
 	if opts.Check {
+		prog.step("Checking release v%s…", target)
 		rel, err := fetchRelease(ctx, target)
 		if err != nil {
 			return err
@@ -96,6 +99,9 @@ func Update(ctx context.Context, opts UpdateOptions) error {
 		return nil
 	}
 
+	if strings.TrimSpace(opts.Version) != "" {
+		prog.step("Fetching release v%s…", target)
+	}
 	rel, err := fetchRelease(ctx, target)
 	if err != nil {
 		return err
@@ -106,17 +112,27 @@ func Update(ctx context.Context, opts UpdateOptions) error {
 		return nil
 	}
 
+	cur := String()
+	if cur != ver {
+		prog.step("Found v%s (you have v%s)", ver, cur)
+	} else {
+		prog.step("Reinstalling v%s", ver)
+	}
+
 	if name, url := pickAsset(rel, ver); url != "" {
-		fmt.Fprintf(out, "downloading %s…\n", name)
-		data, err := download(ctx, url)
+		prog.step("Downloading %s…", name)
+		data, err := download(ctx, url, prog)
 		if err != nil {
 			return err
 		}
+		prog.downloadDone()
 		if sum, ok := checksumFor(rel, name); ok {
+			prog.step("Verifying checksum…")
 			if err := verifySHA256(data, sum); err != nil {
 				return err
 			}
 		}
+		prog.step("Extracting binary…")
 		bin, err := extractBinary(data, name)
 		if err != nil {
 			return err
@@ -129,28 +145,29 @@ func Update(ctx context.Context, opts UpdateOptions) error {
 		if err != nil {
 			return err
 		}
+		prog.step("Installing to %s…", dest)
 		if err := installBinary(dest, bin); err != nil {
 			if errors.Is(err, ErrRestartRequired) {
-				fmt.Fprintf(out, "updater started — quit this interceptor process, then run the new binary\n")
+				prog.done("Updater started — quit this interceptor process, then run the new binary")
 				return err
 			}
 			return err
 		}
-		fmt.Fprintf(out, "updated to interceptor v%s → %s\n", ver, dest)
+		prog.done("Updated to interceptor v%s → %s", ver, dest)
 		printMCPUpdateNote(out)
 		return nil
 	}
 
-	fmt.Fprintf(out, "no prebuilt binary for %s/%s on release v%s — trying go install…\n", runtime.GOOS, runtime.GOARCH, ver)
-	if err := goInstall(ctx, ver); err != nil {
+	prog.step("No prebuilt binary for %s/%s — running go install…", runtime.GOOS, runtime.GOARCH)
+	if err := goInstall(ctx, ver, out); err != nil {
 		return fmt.Errorf("%w\n\ninstall manually: https://github.com/%s/releases/tag/v%s", err, Repo, ver)
 	}
 	gopath, _ := exec.LookPath("go")
 	_ = gopath
 	if bin, err := goInstallBin(); err == nil {
-		fmt.Fprintf(out, "installed interceptor v%s via go install → %s\n", ver, bin)
+		prog.done("Installed interceptor v%s via go install → %s", ver, bin)
 	} else {
-		fmt.Fprintf(out, "installed interceptor v%s via go install (ensure $(go env GOPATH)/bin is on your PATH)\n", ver)
+		prog.done("Installed interceptor v%s via go install (ensure $(go env GOPATH)/bin is on your PATH)", ver)
 	}
 	printMCPUpdateNote(out)
 	return nil
@@ -270,7 +287,7 @@ func checksumFor(rel *releaseInfo, assetName string) (string, bool) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	data, err := download(ctx, url)
+	data, err := download(ctx, url, nil)
 	if err != nil {
 		return "", false
 	}
@@ -299,7 +316,7 @@ func verifySHA256(data []byte, want string) error {
 	return nil
 }
 
-func download(ctx context.Context, url string) ([]byte, error) {
+func download(ctx context.Context, url string, prog *updateProgress) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -312,7 +329,15 @@ func download(ctx context.Context, url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("download %s: HTTP %d", url, resp.StatusCode)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, 256<<20))
+	var body io.Reader = resp.Body
+	if prog != nil {
+		body = &progressReader{r: resp.Body, prog: prog, total: resp.ContentLength}
+	}
+	data, err := io.ReadAll(io.LimitReader(body, 256<<20))
+	if prog != nil && prog.term {
+		prog.downloadProgress(int64(len(data)), resp.ContentLength)
+	}
+	return data, err
 }
 
 func extractBinary(archive []byte, name string) ([]byte, error) {
@@ -410,16 +435,17 @@ del "%s"
 	return ErrRestartRequired
 }
 
-func goInstall(ctx context.Context, version string) error {
+func goInstall(ctx context.Context, version string, out io.Writer) error {
 	if _, err := exec.LookPath("go"); err != nil {
 		return fmt.Errorf("go toolchain not found in PATH")
 	}
 	mod := "github.com/Veyal/interceptor/cmd/interceptor@v" + strings.TrimPrefix(version, "v")
 	cmd := exec.CommandContext(ctx, "go", "install", mod)
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("go install: %w: %s", err, strings.TrimSpace(string(out)))
+	cmd.Stdout = out
+	cmd.Stderr = out
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("go install: %w", err)
 	}
 	return nil
 }
