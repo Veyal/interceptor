@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/Veyal/interceptor/internal/report"
 	"github.com/Veyal/interceptor/internal/store"
@@ -71,9 +72,9 @@ func (h *Hub) listFindings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"findings": fs})
 }
 
-// findingsReport renders the curated findings (with PoC flows) plus the passive-scan
-// issues as a downloadable Markdown engagement report. Pass ?issues=0 to omit the
-// passive-scan appendix.
+// findingsReport renders the curated findings (with PoC flows) as a downloadable
+// engagement report. Passive-scan issues are omitted by default; pass ?issues=1 to
+// append the passive-scan appendix. ?format=html returns a standalone HTML document.
 func (h *Hub) findingsReport(w http.ResponseWriter, r *http.Request) {
 	fs, err := h.st.ListFindings("", "")
 	if err != nil {
@@ -81,14 +82,22 @@ func (h *Hub) findingsReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var issues []store.Issue
-	if r.URL.Query().Get("issues") != "0" {
+	if r.URL.Query().Get("issues") == "1" {
 		if iss, err := h.st.ListIssues(); err == nil {
 			issues = iss
 		}
 	}
-	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="interceptor-report.md"`)
-	w.Write([]byte(report.Project(fs, issues)))
+	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+	switch format {
+	case "html":
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="interceptor-report.html"`)
+		w.Write([]byte(report.ProjectHTML(fs, issues)))
+	default:
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="interceptor-report.md"`)
+		w.Write([]byte(report.Project(fs, issues)))
+	}
 }
 
 func (h *Hub) createFinding(w http.ResponseWriter, r *http.Request) {

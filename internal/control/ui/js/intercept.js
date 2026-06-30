@@ -61,6 +61,11 @@ export async function selectHeld(id,side,opts={}){
     else{
       try{
         const d=await api('/api/intercept/held/'+id+'/raw?side='+side);
+        // A fast second click on another item can change state.heldSel while this
+        // fetch was in flight. Bail (and restore that item's editor) so the editor
+        // — and thus #forwardBtn, which reads state.heldSel — never shows item A's
+        // body while the selection is item B.
+        if(!state.heldSel||state.heldSel.id!==id||state.heldSel.side!==side)return;
         raw=d.raw||'';
         heldRawCache.set(cacheKey,raw);
         h.raw=raw;
@@ -93,7 +98,8 @@ export async function applyInterceptFilter(){
   try{const s=await api('/api/intercept/filter',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({enabled,target,pattern})});
     state.intercept=s;renderIntercept();toast(enabled&&pattern?'filter applied':'filter off');}catch(e){toast(e.message);}
 }
-$('#interceptFilterApply').onclick=applyInterceptFilter;
+// The conditional filter auto-applies on a debounce (and on Enter), so there is
+// no Apply button — keeping one would be a redundant third commit path.
 $('#interceptFilterPattern').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();applyInterceptFilter();}});
 let icptFilterTimer=null;
 function scheduleInterceptFilter(){
@@ -121,8 +127,7 @@ export function renderRules(){
   body.querySelectorAll('tr').forEach(tr=>{
     const id=Number(tr.dataset.id);
     tr.querySelectorAll('[data-k]').forEach(inp=>{
-      const ev=inp.tagName==='SELECT'||inp.type==='checkbox'?'change':'change';
-      inp.addEventListener(ev,()=>updateRule(id,tr));
+      inp.addEventListener('change',()=>updateRule(id,tr));
     });
   });
   body.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>deleteRule(Number(b.dataset.del)));

@@ -72,6 +72,10 @@ type Hub struct {
 	// projects — typically ~/.interceptor/checks). Set by cmd.
 	ChecksDir string
 
+	// ActiveChecksDir holds user-authored Starlark ACTIVE checks (global, shared —
+	// typically ~/.interceptor/active-checks). Set by cmd.
+	ActiveChecksDir string
+
 	// SelfAddr is this control plane's own host:port (e.g. 127.0.0.1:9966). Set by
 	// cmd; the active scanner refuses to target it, so it never attacks its own API.
 	SelfAddr string
@@ -205,6 +209,11 @@ func (h *Hub) routes() {
 	h.mux.HandleFunc("PUT /api/settings", h.putSettings)
 	h.mux.HandleFunc("GET /api/sysproxy", h.getSysProxy)
 	h.mux.HandleFunc("POST /api/sysproxy", h.setSysProxy)
+	h.mux.HandleFunc("GET /api/android/status", h.getAndroidStatus)
+	h.mux.HandleFunc("POST /api/android/proxy", h.postAndroidProxy)
+	h.mux.HandleFunc("POST /api/android/unproxy", h.postAndroidUnproxy)
+	h.mux.HandleFunc("POST /api/android/install-ca", h.postAndroidInstallCA)
+	h.mux.HandleFunc("POST /api/android/setup", h.postAndroidSetup)
 	h.mux.HandleFunc("GET /api/session", h.getSession)
 	h.mux.HandleFunc("POST /api/session", h.setSession)
 	h.mux.HandleFunc("POST /api/session/login/run", h.runLoginMacro)
@@ -229,7 +238,9 @@ func (h *Hub) routes() {
 	h.mux.HandleFunc("DELETE /api/oob/interactions", h.oobClear)
 	h.mux.HandleFunc("GET /api/authz", h.getAuthz)
 	h.mux.HandleFunc("POST /api/authz", h.setAuthz)
+	h.mux.HandleFunc("GET /api/readiness", h.getReadiness)
 	h.mux.HandleFunc("GET /api/authz/flow-auth/{id}", h.authzFlowAuth)
+	h.mux.HandleFunc("POST /api/authz/from-flow/{id}", h.authzPromoteFromFlow)
 	h.mux.HandleFunc("POST /api/authz/check-sessions", h.authzCheckSessions)
 	h.mux.HandleFunc("POST /api/authz/run", h.authzRun)
 	h.mux.HandleFunc("POST /api/authz/cross-host-replay", h.authzCrossHostReplay)
@@ -259,6 +270,12 @@ func (h *Hub) routes() {
 	h.mux.HandleFunc("GET /api/checks/{id}", h.getCheck)
 	h.mux.HandleFunc("PUT /api/checks/{id}", h.saveCheck)
 	h.mux.HandleFunc("DELETE /api/checks/{id}", h.deleteCheck)
+	// Custom ACTIVE checks (user-authored Starlark probes) — same CRUD + test shape.
+	h.mux.HandleFunc("GET /api/active-checks", h.listActiveChecks)
+	h.mux.HandleFunc("POST /api/active-checks/test", h.testActiveCheck)
+	h.mux.HandleFunc("GET /api/active-checks/{id}", h.getActiveCheck)
+	h.mux.HandleFunc("PUT /api/active-checks/{id}", h.saveActiveCheck)
+	h.mux.HandleFunc("DELETE /api/active-checks/{id}", h.deleteActiveCheck)
 	h.mux.HandleFunc("POST /api/ws/send", h.wsSend)
 	h.mux.HandleFunc("POST /api/decode", h.decode)
 	h.mux.HandleFunc("GET /api/activescan", h.asGet)
@@ -552,21 +569,29 @@ func (h *Hub) deleteFlows(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": n})
 }
 
+// maxEndpointList caps the attack-surface map payload so the UI stays responsive
+// on large projects (tens of thousands of unique paths).
+const maxEndpointList = 12000
+
 // listEndpoints returns the unique-endpoint map for the attack-surface view —
 // proxied/manual traffic aggregated by (host, method, path); bulk attack traffic
 // (Intruder / active scan) is excluded as noise.
 func (h *Hub) listEndpoints(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := store.EndpointFilter{
-		Host:         q.Get("host"),
-		Search:       q.Get("search"),
-		SearchScope:  q.Get("searchScope"),
-		ExcludeFlags: store.FlagIntruder | store.FlagActiveScan,
-		Tag:          q.Get("tag"),
+		Host:          q.Get("host"),
+		Search:        q.Get("search"),
+		SearchScope:   q.Get("searchScope"),
+		ExcludeFlags:  store.FlagIntruder | store.FlagActiveScan,
+		Tag:           q.Get("tag"),
+		HideNoiseOnly: q.Get("hideNoise") != "0", // on by default — ferox/discovery 403/404-only paths
 	}
 	key := endpointsCacheKey(f)
-	if eps, note, ok := h.epsCache.get(key); ok {
-		out := map[string]any{"endpoints": eps}
+	if eps, note, total, truncated, ok := h.epsCache.get(key); ok {
+		out := map[string]any{"endpoints": eps, "total": total}
+		if truncated {
+			out["truncated"] = true
+		}
 		if note != "" {
 			out["searchNote"] = note
 		}
@@ -581,8 +606,17 @@ func (h *Hub) listEndpoints(w http.ResponseWriter, r *http.Request) {
 	if eps == nil {
 		eps = []store.Endpoint{}
 	}
-	h.epsCache.set(key, eps, note)
-	out := map[string]any{"endpoints": eps}
+	total := len(eps)
+	truncated := false
+	if total > maxEndpointList {
+		eps = eps[:maxEndpointList]
+		truncated = true
+	}
+	h.epsCache.set(key, eps, note, total, truncated)
+	out := map[string]any{"endpoints": eps, "total": total}
+	if truncated {
+		out["truncated"] = true
+	}
 	if note != "" {
 		out["searchNote"] = note
 	}

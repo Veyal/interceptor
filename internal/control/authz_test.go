@@ -139,8 +139,8 @@ func TestAuthzFlowAuthEndpoint(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(body["requestAuth"].(string), "Cookie: s=1") {
-		t.Fatalf("requestAuth: %v", body["requestAuth"])
+	if !strings.Contains(body["suggestedHeaders"].(string), "Cookie: s=1") {
+		t.Fatalf("suggestedHeaders: %v", body["suggestedHeaders"])
 	}
 }
 

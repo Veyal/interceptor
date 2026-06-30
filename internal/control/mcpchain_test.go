@@ -115,7 +115,7 @@ func TestMCPScopeFromURLAndReadiness(t *testing.T) {
 		t.Fatalf("scope_from_url should add include app.acme.com https; got %+v", sc.Rules)
 	}
 
-	if o := out.String(); !strings.Contains(o, "Scope set") || !strings.Contains(o, "Proxy listening") {
-		t.Fatalf("check_readiness output missing checklist items: %s", o)
+	if o := out.String(); !strings.Contains(o, "blockers") || !strings.Contains(o, "auth_identities") {
+		t.Fatalf("check_readiness output missing structured checklist: %s", o)
 	}
 }

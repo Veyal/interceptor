@@ -434,3 +434,38 @@ func TestUpdateFindingWithBodyArg(t *testing.T) {
 		t.Fatalf("detail not synced from body: %q", got.Detail)
 	}
 }
+
+// TestEmptyFindingJSONSlices verifies bare findings serialize blocks/flows as []
+// not null — the UI and API clients assume arrays.
+func TestEmptyFindingJSONSlices(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	id, err := s.CreateFinding(&Finding{Title: "empty shell"})
+	if err != nil {
+		t.Fatalf("CreateFinding: %v", err)
+	}
+	got, err := s.GetFinding(id)
+	if err != nil {
+		t.Fatalf("GetFinding: %v", err)
+	}
+	if got.Flows == nil {
+		t.Fatal("Flows should be non-nil empty slice")
+	}
+	if got.Blocks == nil {
+		t.Fatal("Blocks should be non-nil empty slice")
+	}
+	b, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), `"flows":null`) {
+		t.Fatalf("flows marshaled as null: %s", b)
+	}
+	if strings.Contains(string(b), `"blocks":null`) {
+		t.Fatalf("blocks marshaled as null: %s", b)
+	}
+}

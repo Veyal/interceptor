@@ -1,4 +1,4 @@
-import { $, $$, esc, escAttr, state, toast, api, fmtBytes, uiConfirm, openModal, closeModal, copyText } from './core.js';
+import { $, $$, esc, escAttr, state, toast, api, fmtBytes, uiConfirm, openModal, closeModal, copyText, setSeg, syncUiSelectStyles } from './core.js';
 import { loadFlows, loadScope, syncSourceFilters } from './proxy.js';
 import { loadRules } from './intercept.js';
 
@@ -86,6 +86,18 @@ if ($('#addHostHdrBtn')) $('#addHostHdrBtn').onclick = () => {
 };
 
 /* settings sub-nav */
+export function openSettingsSection(sec){
+  const tab=document.querySelector('.tab[data-tab="settings"]');
+  if(tab&&!tab.classList.contains('active'))tab.click();
+  document.querySelector('#setNav button[data-sec="'+sec+'"]')?.click();
+}
+
+export function openSettingsProxy(){
+  openSettingsSection('proxy');
+  const inp=$('#setAddr');
+  if(inp)setTimeout(()=>{inp.closest('.field')?.scrollIntoView({block:'nearest',behavior:'smooth'});inp.focus();},50);
+}
+
 $$('#setNav button').forEach(b=>b.onclick=()=>{
   $$('#setNav button').forEach(x=>{x.classList.toggle('on',x===b);x.setAttribute('aria-pressed',x===b?'true':'false');});
   $$('.set-sec').forEach(s=>{s.hidden=s.dataset.sec!==b.dataset.sec;});
@@ -98,8 +110,6 @@ $$('#setNav button').forEach(b=>b.onclick=()=>{
 /* ---- settings ---- */
 let savedAiModel='';
 let apiLoaded=false;
-const OOB_TUNNEL_CMD='cloudflared tunnel --url http://127.0.0.1:9966';
-$('#oobTunnelCopy')&&($('#oobTunnelCopy').onclick=()=>copyText(OOB_TUNNEL_CMD,'Tunnel command copied'));
 
 export async function loadSettings(){try{const s=await api('/api/settings');state.proxyAddr=s.proxyAddr;$('#proxyAddr').textContent=s.proxyAddr;$('#setAddr').value=s.proxyAddr;
   if($('#setUpstream'))$('#setUpstream').value=s.upstreamProxy||'';
@@ -171,9 +181,18 @@ export function aiSyncProviderUI(){
   const or=aiIsOpenRouter();
   const inp=$('#setAiModel'),sel=$('#setAiModelSelect'),loadBtn=$('#loadAiModelsBtn'),hint=$('#setAiModelHint');
   if(inp)inp.style.display=or?'none':'';
-  if(sel)sel.style.display=or?'':'none';
+  if(sel){sel.style.display=or?'':'none';syncUiSelectStyles(sel);}
   if(loadBtn)loadBtn.style.display=or?'':'none';
   if(hint)hint.textContent=or?'(required — pick from list)':'(optional)';
+  // Agent mode (let-AI-send-requests) is Anthropic-only — disable the toggle so
+  // it isn't a silent no-op under OpenRouter. The hint text is refreshed when the
+  // AI modal opens (ai.js syncAgentToggle).
+  const agent=$('#aiAgentToggle');
+  if(agent){
+    const supported=!or;
+    if(!supported&&agent.checked)agent.checked=false;
+    agent.disabled=!supported;
+  }
   aiPlaceholders();
   if(or)loadOpenRouterModels(false);
 }
@@ -288,17 +307,18 @@ function saveSessionAll(){
   const body={enabled:$('#setSessionOn').checked,unscoped:!!($('#setSessionUnscoped')&&$('#setSessionUnscoped').checked),headers:$('#setSessionHeaders').value,macro,loginMacro:loginMacroBody(),hostHeaders:collectHostHeaders()};
   return api('/api/session',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
 }
-if($('#saveSessionBtn'))$('#saveSessionBtn').onclick=async()=>{try{await saveSessionAll();toast('session saved');loadSession();}catch(e){toast(e.message);}};
-if($('#macroSave'))$('#macroSave').onclick=async()=>{try{
-  await saveSessionAll();
-  // The backend only fires the token macro when ALL of target/request/extract/inject-name
-  // are set (sender.macroToken); reflect that so "macro on" isn't claimed for a no-op.
-  const on=$('#macroOn').checked;
-  const complete=$('#macroTarget').value.trim()&&$('#macroReq').value.trim()&&$('#macroExtract').value.trim()&&$('#macroName').value.trim();
-  toast(on?(complete?'token macro on — fires before each send':'macro saved — set target, request, extract & inject-name for it to fire'):'macro saved');
-  loadSession();
-}catch(e){toast(e.message);}};
-if($('#loginMacroSave'))$('#loginMacroSave').onclick=async()=>{try{await saveSessionAll();toast('login macro saved');loadSession();}catch(e){toast(e.message);}};
+if($('#saveSessionBtn'))$('#saveSessionBtn').onclick=async()=>{
+  try{
+    await saveSessionAll();
+    // Surface macro completeness (previously on the now-removed per-macro Save buttons).
+    const on=$('#macroOn').checked;
+    const complete=$('#macroTarget').value.trim()&&$('#macroReq').value.trim()&&$('#macroExtract').value.trim()&&$('#macroName').value.trim();
+    let msg='session saved';
+    if(on) msg=complete?'session saved · token macro on — fires before each send':'session saved — set target, request, extract & inject-name for the token macro to fire';
+    if($('#loginMacroOn')&&$('#loginMacroOn').checked) msg+=' · login macro on';
+    toast(msg);loadSession();
+  }catch(e){toast(e.message);}
+};
 if($('#loginMacroRun'))$('#loginMacroRun').onclick=async()=>{try{await saveSessionAll();const r=await api('/api/session/login/run',{method:'POST'});toast('session refreshed ('+r.applied+' header'+(r.applied===1?'':'s')+')');loadSession();}catch(e){toast(e.message);}};
 // Test = dry-run: run the login request and show the response + the session it
 // would capture, WITHOUT touching the live session (so you can debug it safely).
@@ -355,8 +375,21 @@ export function renderRetention(d){
   </tr>`).join('');
   // per-row delete buttons
   body.querySelectorAll('.ret-del-one').forEach(b=>b.onclick=()=>retDeleteOne(b.dataset.host,Number(b.dataset.flows)));
-  // select-all checkbox sync
-  const sa=$('#retSelectAll');if(sa){sa.checked=false;sa.indeterminate=false;}
+  // Keep the master checkbox's checked/indeterminate state in sync as individual
+  // rows are toggled — without this it stays stuck at the last bulk-set state and
+  // misleads the user about how many hosts are selected.
+  const sa=$('#retSelectAll');
+  if(sa){
+    body.querySelectorAll('.ret-chk').forEach(cb=>cb.addEventListener('change',()=>syncRetSelectAll(sa)));
+    sa.checked=false;sa.indeterminate=false;
+  }
+}
+function syncRetSelectAll(sa){
+  const boxes=document.querySelectorAll('.ret-chk');
+  if(!boxes.length){sa.checked=false;sa.indeterminate=false;return;}
+  const n=[].slice.call(boxes).filter(b=>b.checked).length;
+  sa.checked=n===boxes.length;
+  sa.indeterminate=n>0&&n<boxes.length;
 }
 
 export function retChecked(){return [].slice.call(document.querySelectorAll('.ret-chk:checked')).map(cb=>cb.dataset.host);}
@@ -437,6 +470,8 @@ $('#retSelectAll')&&($('#retSelectAll').onclick=function(){
 });
 
 $('#exportProject').onclick=()=>toast('Downloading project export…');
+const runSetupBtn=$('#runSetupBtn');
+if(runSetupBtn)runSetupBtn.onclick=()=>{import('./setup.js').then(m=>m.openSetup()).catch(e=>toast(e.message));};
 const dlCa=$('#dlCaBtn');if(dlCa)dlCa.onclick=()=>toast('Downloading CA certificate — trust it on the client');
 $('#importProjectBtn').onclick=()=>$('#importProjectFile').click();
 $('#importProjectFile').onchange=async e=>{
@@ -521,3 +556,178 @@ $('#sysProxyToggle').onclick=async()=>{
   catch(e){toast(e.message);}
   $('#sysProxyToggle').disabled=false;
 };
+
+let androidDeviceSerial='';
+
+function androidSerial(){
+  return androidDeviceSerial||'';
+}
+
+function androidDeviceTitle(d){
+  if(d.model)return d.model;
+  if(d.emulator)return 'Android emulator';
+  if(d.serial&&d.serial!=='(no serial number)')return d.serial;
+  return 'Connected device';
+}
+
+function androidDeviceMeta(d){
+  const bits=[];
+  if(d.emulator)bits.push('emulator');
+  if(d.suggestedCAMode==='system')bits.push('system CA suggested');
+  else if(d.suggestedCAMode==='user')bits.push('user CA suggested');
+  if(d.state&&d.state!=='device')bits.push(d.state);
+  if(d.serial==='(no serial number)'&&d.transportId)bits.push('adb transport '+d.transportId);
+  else if(d.serial&&d.serial!=='(no serial number)')bits.push(d.serial);
+  return bits.join(' · ');
+}
+
+function androidProxyMode(){
+  const on=$('#androidProxyMode')?.querySelector('button.on');
+  return on?.dataset.mode==='wifi'?'wifi':'usb';
+}
+
+function closeAndroidDeviceMenu(){
+  const menu=$('#androidDeviceMenu'),trigger=$('#androidDeviceTrigger');
+  if(menu)menu.hidden=true;
+  if(trigger)trigger.setAttribute('aria-expanded','false');
+}
+
+function toggleAndroidDeviceMenu(){
+  const menu=$('#androidDeviceMenu'),trigger=$('#androidDeviceTrigger');
+  if(!menu||!trigger||trigger.disabled)return;
+  if(!menu.hidden){closeAndroidDeviceMenu();return;}
+  menu.hidden=false;
+  trigger.setAttribute('aria-expanded','true');
+  menu.querySelector('.ui-select-opt.sel')?.scrollIntoView({block:'nearest'});
+}
+
+function renderAndroidDevicePicker(devs){
+  const menu=$('#androidDeviceMenu'),trigger=$('#androidDeviceTrigger'),valueEl=$('#androidDeviceValue'),meta=$('#androidDeviceMeta');
+  if(!menu||!trigger||!valueEl)return;
+  closeAndroidDeviceMenu();
+  if(!devs.length){
+    androidDeviceSerial='';
+    valueEl.textContent='No device connected';
+    trigger.disabled=true;
+    menu.innerHTML='';
+    if(meta)meta.textContent='Connect a device with USB debugging enabled.';
+    return;
+  }
+  trigger.disabled=false;
+  if(!devs.some(d=>d.serial===androidDeviceSerial&&d.state==='device')){
+    const first=devs.find(d=>d.state==='device');
+    androidDeviceSerial=first?first.serial:'';
+  }
+  menu.innerHTML=devs.map(d=>{
+    const sel=d.serial===androidDeviceSerial;
+    const dis=d.state!=='device';
+    return `<button type="button" role="option" class="ui-select-opt${sel?' sel':''}" data-serial="${escAttr(d.serial)}"${dis?' disabled':''} aria-selected="${sel?'true':'false'}"><span class="ui-select-opt-title">${esc(androidDeviceTitle(d))}${dis?' — '+esc(d.state):''}</span><span class="ui-select-opt-sub">${esc(androidDeviceMeta(d))}</span></button>`;
+  }).join('');
+  const cur=devs.find(d=>d.serial===androidDeviceSerial);
+  valueEl.textContent=cur?androidDeviceTitle(cur):'Select device…';
+  if(meta)meta.textContent=cur?androidDeviceMeta(cur):'';
+}
+
+async function androidPost(path,body){
+  const payload={serial:androidSerial(),proxyMode:androidProxyMode(),...body};
+  return api(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
+}
+
+function isLoopbackProxyBind(addr){
+  if(!addr)return true;
+  const host=String(addr).replace(/^\[/,'').split(':')[0].replace(/\]$/,'').toLowerCase();
+  return host==='127.0.0.1'||host==='localhost'||host==='::1';
+}
+
+function androidWifiNeedsProxyBind(s){
+  return androidProxyMode()==='wifi'&&(!s.externalBindAllowed||isLoopbackProxyBind(s.proxy));
+}
+
+export async function loadAndroid(){
+  const sec=$('#androidAdbSection'),hint=$('#androidAdbHint');
+  const lanHint=$('#androidLanHint'),caHint=$('#androidCaHint');
+  if(!sec)return;
+  try{
+    const s=await api('/api/android/status');
+    if(!s.available){
+      sec.style.display='none';
+      return;
+    }
+    sec.style.display='';
+    const devs=s.devices||[];
+    renderAndroidDevicePicker(devs);
+    if(lanHint){
+      let html='';
+      if(s.lanHost)html=`<span>LAN host: ${esc(s.lanHost)}</span>`;
+      if(androidWifiNeedsProxyBind(s)){
+        if(html)html+='<br>';
+        html+=`<span>Wi‑Fi mode needs <code>INTERCEPTOR_ALLOW_EXTERNAL_BIND=1</code> and bind <code>0.0.0.0</code> on the proxy listener.</span> <button type="button" class="btn" id="androidOpenProxyBtn">Settings → Proxy</button>`;
+      }
+      lanHint.innerHTML=html;
+      lanHint.style.display=html?'':'none';
+    }
+    const cur=devs.find(d=>d.serial===androidSerial());
+    if(caHint&&cur){
+      const sug=cur.suggestedCAMode==='system'?'Suggested: install system CA (emulator)':'Suggested: install user CA (physical device)';
+      caHint.textContent=sug;
+    }else if(caHint)caHint.textContent='';
+    let msg='';
+    if(!devs.length)msg='Connect a device with USB debugging enabled.';
+    else{
+      const selSerial=androidSerial();
+      const active=selSerial&&s.proxySerial===selSerial&&s.proxyActive?s.proxyValue:(s.proxyActive?s.proxyValue:'');
+      if(active)msg='Device proxy active: '+active;
+      else if(devs.some(d=>d.state==='unauthorized'))msg='Accept the USB debugging authorization prompt on the device.';
+    }
+    if(hint)hint.textContent=msg;
+  }catch(e){
+    if(hint)hint.textContent='';
+    sec.style.display='none';
+  }
+}
+
+async function androidAction(fn){
+  try{await fn();await loadAndroid();}catch(e){toast(e.message);}
+}
+
+$('#androidProxyMode')&&$('#androidProxyMode').addEventListener('click',e=>{
+  const b=e.target.closest('button[data-mode]');
+  if(!b||b.classList.contains('on'))return;
+  b.parentElement.querySelectorAll('button[data-mode]').forEach(x=>setSeg(x,x===b));
+  loadAndroid();
+});
+{const t=$('#androidDeviceTrigger');if(t)t.addEventListener('click',e=>{e.stopPropagation();toggleAndroidDeviceMenu();});}
+{const m=$('#androidDeviceMenu');if(m)m.addEventListener('click',e=>{
+  const opt=e.target.closest('.ui-select-opt');
+  if(!opt||opt.disabled)return;
+  androidDeviceSerial=opt.dataset.serial||'';
+  closeAndroidDeviceMenu();
+  loadAndroid();
+});}
+document.addEventListener('click',()=>closeAndroidDeviceMenu());
+{const wrap=$('#androidDeviceSelectWrap');if(wrap)wrap.addEventListener('keydown',e=>{
+  if(e.key==='Escape')closeAndroidDeviceMenu();
+});}
+{const lh=$('#androidLanHint');if(lh)lh.addEventListener('click',e=>{if(e.target.closest('#androidOpenProxyBtn'))openSettingsProxy();});}
+$('#androidRefreshBtn')&&($('#androidRefreshBtn').onclick=()=>androidAction(loadAndroid));
+$('#androidSetupAllBtn')&&($('#androidSetupAllBtn').onclick=()=>androidAction(async()=>{
+  const r=await androidPost('/api/android/setup',{caMode:'auto'});
+  toast(r.message||'Android setup complete');
+}));
+$('#androidInstallUserBtn')&&($('#androidInstallUserBtn').onclick=()=>androidAction(async()=>{
+  const r=await androidPost('/api/android/install-ca',{mode:'user'});
+  toast(r.message||'CA install prompt opened on device');
+}));
+$('#androidInstallSystemBtn')&&($('#androidInstallSystemBtn').onclick=()=>androidAction(async()=>{
+  const r=await androidPost('/api/android/install-ca',{mode:'system'});
+  toast(r.message||'System CA installed');
+}));
+$('#androidProxyBtn')&&($('#androidProxyBtn').onclick=()=>androidAction(async()=>{
+  const r=await androidPost('/api/android/proxy',{});
+  toast(r.message||'Device proxied');
+}));
+$('#androidUnproxyBtn')&&($('#androidUnproxyBtn').onclick=()=>androidAction(async()=>{
+  const remove=!!($('#androidRemoveSystemCa')||{}).checked;
+  const r=await androidPost('/api/android/unproxy',{removeSystemCA:remove});
+  toast(r.warning?(r.message+' — '+r.warning):(r.message||'Device proxy cleared'));
+}));

@@ -21,7 +21,7 @@ func (h *Hub) analyzeFlow(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	issues := scanner.Analyze(f, h.bodyBytes(f.ReqBodyHash), h.bodyBytes(f.ResBodyHash))
+	issues := scanner.AnalyzeWithDisabled(f, h.bodyBytes(f.ReqBodyHash), h.bodyBytes(f.ResBodyHash), h.checksDisabledSet())
 	findings := make([]map[string]string, 0, len(issues))
 	for _, is := range issues {
 		findings = append(findings, map[string]string{"severity": is.Severity, "title": is.Title})

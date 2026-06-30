@@ -1,9 +1,31 @@
 import { $, esc, escAttr, state, toast, api, methodColor, statusColor, statusText, fmtSize, fmtDur } from './core.js';
 import { sendToRepeater } from './tools.js';
+
+// keyClick promotes a click-only element to a keyboard-operable control (role +
+// tabindex + Enter/Space) so endpoints/rows/sorts are reachable without a mouse.
+function keyClick(el, fn){
+  if(!el) return;
+  el.setAttribute('role','button');
+  el.tabIndex=0;
+  el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();fn(e);}});
+  el.onclick=fn;
+}
 import { flowPopup } from './flowmodal.js';
 
-const GRAPH_NODE_CAP = 150;
+const GRAPH_NODE_MAX = 200;
+const MAP_TREE_EAGER_MAX = 2500;
+const MAP_TABLE_VIRTUAL_MIN = 400;
+const MAP_ROW_H = 28;
 const MAP_VIEW_KEY = 'mapView';
+const MAP_HIDE_NOISE_KEY = 'mapHideNoise';
+
+function restoreMapHideNoise(){
+  try{
+    const v = localStorage.getItem(MAP_HIDE_NOISE_KEY);
+    if(v === '0') return false;
+  }catch(e){}
+  return true;
+}
 
 /* ---- endpoint map ---- */
 function restoreMapView(){
@@ -15,10 +37,10 @@ function restoreMapView(){
 }
 
 export const mapState = {
-  eps: [], domain: null, method: '', search: '', searchScope: 'path', searchNote: '', tag: '',
-  statusClass: 0, expandAll: false,
+  eps: [], total: 0, truncated: false, domain: null, method: '', search: '', searchScope: 'path', searchNote: '', tag: '',
+  statusClass: 0, hideNoise: restoreMapHideNoise(), expandAll: false,
   view: restoreMapView(), collapsed: new Set(), zoom: { k: 1, x: 12, y: 12 }, _needFit: true,
-  sort: { key: 'path', dir: 1 },
+  sort: { key: 'path', dir: 1 }, _treeHosts: null, _dataVersion: 0,
 };
 
 function mapUsesServerSearch(){
@@ -48,6 +70,7 @@ export async function loadEndpoints(){
     const params = new URLSearchParams();
     if(mapState.domain) params.set('host', mapState.domain);
     if(mapState.tag) params.set('tag', mapState.tag);
+    if(!mapState.hideNoise) params.set('hideNoise', '0');
     if(mapUsesServerSearch()){
       params.set('search', mapState.search.trim());
       params.set('searchScope', mapState.searchScope);
@@ -55,7 +78,10 @@ export async function loadEndpoints(){
     const q = params.toString();
     const d = await api('/api/endpoints' + (q ? '?' + q : ''));
     mapState.eps = d.endpoints || [];
+    mapState.total = d.total != null ? d.total : mapState.eps.length;
+    mapState.truncated = !!d.truncated;
     mapState.searchNote = d.searchNote || '';
+    mapState._dataVersion++; // invalidate buildMapTree / fillMapDomains caches
     mapState._needFit = true;
     fillMapDomains();
     fillMapMethods();
@@ -64,15 +90,22 @@ export async function loadEndpoints(){
   }catch(e){ toast('map: '+e.message); }
 }
 
+let _fdKey = -1, _fdHtml = '';
 export function fillMapDomains(){
   const sel = $('#mapDomain'); if(!sel) return;
-  const counts = {};
-  mapState.eps.forEach(e => { counts[e.host] = (counts[e.host] || 0) + 1; });
-  const hosts = Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b));
-  if(mapState.domain === null) mapState.domain = hosts[0] || '';
-  else if(mapState.domain && !counts[mapState.domain]) mapState.domain = hosts[0] || '';
-  sel.innerHTML = `<option value="">All domains (${mapState.eps.length})</option>`
-    + hosts.map(h => `<option value="${escAttr(h)}">${esc(h)} (${counts[h]})</option>`).join('');
+  // Rebuild the (potentially thousands-of-options) host <select> only when the
+  // dataset actually changes — successive re-fetches with the same hosts reuse it.
+  if(mapState._dataVersion !== _fdKey){
+    const counts = {};
+    mapState.eps.forEach(e => { counts[e.host] = (counts[e.host] || 0) + 1; });
+    const hosts = Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b));
+    if(mapState.domain === null) mapState.domain = hosts[0] || '';
+    else if(mapState.domain && !counts[mapState.domain]) mapState.domain = hosts[0] || '';
+    _fdHtml = `<option value="">All domains (${mapState.eps.length})</option>`
+      + hosts.map(h => `<option value="${escAttr(h)}">${esc(h)} (${counts[h]})</option>`).join('');
+    _fdKey = mapState._dataVersion;
+    sel.innerHTML = _fdHtml;
+  }
   sel.value = mapState.domain;
 }
 
@@ -123,18 +156,37 @@ export function mapFiltered(){
 
 export function mapCount(node){ let n = node.eps.length; node.kids.forEach(k => n += mapCount(k)); return n; }
 
+// Memoized: the tree depends only on the data version + active filters, so the
+// 2–3 calls per render (mapExpandForSearch + renderMapTree + hydration) and the
+// per-keystroke search re-renders reuse one build instead of rebuilding an
+// O(N×depth) tree for thousands of endpoints every time.
+let _btKey = '', _btCache = null;
 export function buildMapTree(eps){
+  const key = mapState._dataVersion + '|' + mapState.domain + '|' + mapState.method + '|' + mapState.statusClass + '|' + (mapState.search || '') + '|' + eps.length;
+  if(key === _btKey && _btCache) return _btCache;
   const hosts = new Map();
   eps.forEach(e => {
-    if(!hosts.has(e.host)) hosts.set(e.host, { name: e.host, kids: new Map(), eps: [] });
+    if(!hosts.has(e.host)) hosts.set(e.host, { name: e.host, key: '/'+e.host, kids: new Map(), eps: [] });
     let node = hosts.get(e.host);
+    let pathKey = '/'+e.host;
     (e.path || '/').split('?')[0].split('/').filter(Boolean).forEach(seg => {
-      if(!node.kids.has(seg)) node.kids.set(seg, { name: seg, kids: new Map(), eps: [] });
+      pathKey += '/'+seg;
+      if(!node.kids.has(seg)) node.kids.set(seg, { name: seg, key: pathKey, kids: new Map(), eps: [] });
       node = node.kids.get(seg);
     });
     node.eps.push(e);
   });
+  _btKey = key; _btCache = hosts;
   return hosts;
+}
+
+export function findMapTreeNode(key){
+  if(!key||!mapState._treeHosts) return null;
+  const parts = key.replace(/^\//,'').split('/').filter(Boolean);
+  if(!parts.length) return null;
+  let node = mapState._treeHosts.get(parts[0]);
+  for(let i = 1; i < parts.length && node; i++) node = node.kids.get(parts[i]);
+  return node;
 }
 
 export function mapEpRow(e, dim){
@@ -147,13 +199,33 @@ export function mapEpRow(e, dim){
     <span class="map-hits">${e.hits > 1 ? e.hits+'×' : ''}</span></div>`;
 }
 
-export function mapRenderNode(node, open, dim){
+export function mapRenderNode(node, open, dim, lazy=false){
   let html = '';
   [...node.kids.values()].sort((a, b) => a.name.localeCompare(b.name)).forEach(kid => {
-    html += `<details class="map-folder"${open ? ' open' : ''}><summary><span class="map-seg">/${esc(kid.name)}</span><span class="map-c">${mapCount(kid)}</span></summary><div class="map-body">${mapRenderNode(kid, open, dim)}</div></details>`;
+    const summary = `<summary><span class="map-seg">/${esc(kid.name)}</span><span class="map-c">${mapCount(kid)}</span></summary>`;
+    if(lazy && !open){
+      html += `<details class="map-folder">${summary}<div class="map-body" data-lazy-key="${escAttr(kid.key)}"></div></details>`;
+    }else{
+      html += `<details class="map-folder"${open ? ' open' : ''}>${summary}<div class="map-body">${mapRenderNode(kid, open, dim, lazy && !open)}</div></details>`;
+    }
   });
   node.eps.slice().sort((a, b) => a.method.localeCompare(b.method)).forEach(e => html += mapEpRow(e, dim));
   return html;
+}
+
+function mapTreeLazyEnabled(eps){
+  return eps.length > 350 && !mapState.expandAll && !mapState.search;
+}
+
+function hydrateMapTreeNode(body){
+  const key = body.dataset.lazyKey;
+  if(!key) return;
+  const node = findMapTreeNode(key);
+  if(!node){ body.innerHTML = ''; body.removeAttribute('data-lazy-key'); return; }
+  const open = mapState.expandAll || !!mapState.search;
+  body.innerHTML = mapRenderNode(node, open, !!mapState.search, mapTreeLazyEnabled(mapFiltered()));
+  body.removeAttribute('data-lazy-key');
+  body.querySelectorAll('.map-ep[data-flow]').forEach(el => keyClick(el, () => flowPopup(Number(el.dataset.flow))));
 }
 
 function mapHintText(){
@@ -165,6 +237,7 @@ function mapHintText(){
 
 function setMapView(v){
   mapState.view = v;
+  if(v === 'graph') mapState._forceGraph = false; // re-evaluate the node cap each time Graph is chosen
   try{ localStorage.setItem(MAP_VIEW_KEY, v); }catch(e){}
   const seg = $('#mapViewSeg');
   if(seg) seg.querySelectorAll('button').forEach(x => { const on = x.dataset.v === v; x.classList.toggle('on', on); x.setAttribute('aria-pressed', on ? 'true' : 'false'); });
@@ -212,6 +285,7 @@ function renderMapParams(d){
     </tr>`).join('')}
     </tbody></table></div>`).join('');
   box.querySelectorAll('.map-param-inspect').forEach(b=>{b.onclick=ev=>{ev.stopPropagation();const tr=b.closest('[data-flow]');if(tr)flowPopup(Number(tr.dataset.flow));};});
+  box.querySelectorAll('.map-param-row[data-flow]').forEach(tr=>keyClick(tr,()=>flowPopup(Number(tr.dataset.flow))));
 }
 
 function renderMapCrumb(eps){
@@ -247,24 +321,43 @@ function mapScopeLabel(scope){
   return ({path:'path/host',headers:'headers',body:'body',all:'all'})[scope] || scope;
 }
 
+function mapPerfNote(eps){
+  const parts = [];
+  if(mapState.truncated && mapState.total > mapState.eps.length){
+    parts.push(`Showing first ${mapState.eps.length.toLocaleString()} of ${mapState.total.toLocaleString()} endpoints — filter by domain, tag, or search`);
+  }
+  if(eps.length > MAP_TREE_EAGER_MAX && mapState.view === 'tree'){
+    parts.push(`${eps.length.toLocaleString()} endpoints — Tree is slow at this size; try Table view or filter by domain`);
+  }
+  return parts.join(' · ');
+}
+
 export function renderMap(){
   if(mapState.view === 'params') return;
   const eps = mapFiltered();
   const hostN = new Set(eps.map(e => e.host)).size;
   const filtered = !!(mapState.search || mapState.method || mapState.statusClass || mapState.domain);
-  $('#mapCount').textContent = eps.length
-    ? `${eps.length} endpoint${eps.length === 1 ? '' : 's'} · ${hostN} host${hostN === 1 ? '' : 's'}`
+  let countText = eps.length
+    ? `${eps.length.toLocaleString()} endpoint${eps.length === 1 ? '' : 's'} · ${hostN} host${hostN === 1 ? '' : 's'}`
     : (mapState.eps.length ? (filtered ? 'No endpoints match the filters' : 'No endpoints') : 'No endpoints captured yet');
+  if(mapState.truncated && mapState.total > mapState.eps.length) countText += ` (${mapState.total.toLocaleString()} total)`;
+  $('#mapCount').textContent = countText;
   const warn = $('#mapWarn');
-  if(warn && mapState.searchNote){
-    warn.style.display = 'block';
-    warn.textContent = mapState.searchNote;
-  }else if(warn && mapUsesServerSearch() && (mapState.searchScope === 'body' || mapState.searchScope === 'all') && mapState.view !== 'graph'){
-    warn.style.display = 'block';
-    warn.textContent = 'Body search scans stored bodies (content-deduped, latest 8000 flows max). Filter by domain to narrow.';
-  }else if(warn && mapState.view !== 'graph'){
-    warn.style.display = 'none';
-    warn.textContent = '';
+  const perf = mapPerfNote(eps);
+  if(warn && mapState.view !== 'graph'){
+    if(perf){
+      warn.style.display = 'block';
+      warn.textContent = perf;
+    }else if(mapState.searchNote){
+      warn.style.display = 'block';
+      warn.textContent = mapState.searchNote;
+    }else if(mapUsesServerSearch() && (mapState.searchScope === 'body' || mapState.searchScope === 'all') && mapState.view !== 'graph'){
+      warn.style.display = 'block';
+      warn.textContent = 'Body search scans stored bodies (content-deduped, latest 8000 flows max). Filter by domain to narrow.';
+    }else if(warn && mapState.view !== 'graph'){
+      warn.style.display = 'none';
+      warn.textContent = '';
+    }
   }
   renderMapCrumb(eps);
   if(mapState.view === 'graph') renderMapGraph(eps);
@@ -276,15 +369,25 @@ export function renderMapTree(eps){
   const box = $('#mapTree'); if(!box) return;
   if(!eps.length){
     box.innerHTML = '<div class="hint" style="padding:12px">No endpoints match — capture traffic or relax the filters.</div>';
+    mapState._treeHosts = null;
     return;
   }
+  if(eps.length > MAP_TREE_EAGER_MAX && (mapState.expandAll || mapState.search)){
+    box.innerHTML = `<div class="hint" style="padding:16px;line-height:1.6">Too many endpoints (${eps.length.toLocaleString()}) to render expanded — switch to <b>Table</b> view, filter by domain, or narrow your search.</div>`;
+    mapState._treeHosts = null;
+    return;
+  }
+  mapState._treeHosts = buildMapTree(eps);
   const open = mapState.expandAll || !!mapState.search;
   const dim = !!mapState.search;
-  const hosts = buildMapTree(eps);
-  box.innerHTML = [...hosts.values()].sort((a, b) => a.name.localeCompare(b.name)).map(h =>
-    `<details class="map-host" open><summary>🌐 ${esc(h.name)}<span class="map-c">${mapCount(h)}</span></summary><div class="map-body">${mapRenderNode(h, open, dim)}</div></details>`
-  ).join('');
-  box.querySelectorAll('.map-ep[data-flow]').forEach(el => el.onclick = () => flowPopup(Number(el.dataset.flow)));
+  const lazy = mapTreeLazyEnabled(eps);
+  box.innerHTML = [...mapState._treeHosts.values()].sort((a, b) => a.name.localeCompare(b.name)).map(h => {
+    if(lazy){
+      return `<details class="map-host"><summary>🌐 ${esc(h.name)}<span class="map-c">${mapCount(h)}</span></summary><div class="map-body" data-lazy-key="${escAttr(h.key)}"></div></details>`;
+    }
+    return `<details class="map-host" open><summary>🌐 ${esc(h.name)}<span class="map-c">${mapCount(h)}</span></summary><div class="map-body">${mapRenderNode(h, open, dim, false)}</div></details>`;
+  }).join('');
+  box.querySelectorAll('.map-ep[data-flow]').forEach(el => keyClick(el, () => flowPopup(Number(el.dataset.flow))));
 }
 
 function mapSortEps(eps){
@@ -293,6 +396,35 @@ function mapSortEps(eps){
   return eps.slice().sort((a, b) => {
     const x = val(a), y = val(b);
     return (x > y ? 1 : x < y ? -1 : 0) * dir;
+  });
+}
+
+function mapTableRow(e, showHost){
+  const path = e.path || '/';
+  const sts = (e.statuses || []).map(s => `<span style="color:${statusColor(s)}">${s}</span>`).join(' ');
+  const hit = mapState.search && epMatchesSearch(e, mapState.search);
+  return `<tr data-flow="${e.lastFlowId || ''}" class="${hit ? 'map-hit-row' : ''}">
+    ${showHost ? `<td style="font-family:var(--mono);font-size:11px">${esc(e.host)}</td>` : ''}
+    <td class="map-tbl-m" style="color:${methodColor(e.method)}">${esc(e.method)}</td>
+    <td class="map-tbl-p" title="${escAttr(path)}">${esc(path)}</td>
+    <td class="map-tbl-sts">${sts || '—'}</td>
+    <td style="text-align:right;color:var(--fg3)">${e.hits > 1 ? e.hits+'×' : ''}</td>
+    <td class="map-tbl-act">${e.lastFlowId ? `<button class="btn" data-rep="${e.lastFlowId}" title="Send to Repeater">→ Rep</button>` : ''}</td>
+  </tr>`;
+}
+
+function wireMapTableRows(box){
+  box.querySelectorAll('tr[data-flow]').forEach(tr => {
+    const id = Number(tr.dataset.flow);
+    if(!id) return;
+    keyClick(tr, ev => {
+      if(ev.target.closest('[data-rep]')) return;
+      flowPopup(id);
+    });
+  });
+  box.querySelectorAll('[data-rep]').forEach(b => b.onclick = ev => {
+    ev.stopPropagation();
+    sendToRepeater({ id: Number(b.dataset.rep) });
   });
 }
 
@@ -306,45 +438,47 @@ function renderMapTable(eps){
   const showHost = !mapState.domain;
   const sk = mapState.sort.key, sd = mapState.sort.dir;
   const th = (k, label, w) => `<th class="${sk === k ? 'sorted' : ''}" data-sort="${k}"${w ? ` style="width:${w}"` : ''}>${label}${sk === k ? (sd > 0 ? ' ▲' : ' ▼') : ''}</th>`;
-  const rows = sorted.map(e => {
-    const path = e.path || '/';
-    const sts = (e.statuses || []).map(s => `<span style="color:${statusColor(s)}">${s}</span>`).join(' ');
-    const hit = mapState.search && epMatchesSearch(e, mapState.search);
-    return `<tr data-flow="${e.lastFlowId || ''}" class="${hit ? 'map-hit-row' : ''}">
-      ${showHost ? `<td style="font-family:var(--mono);font-size:11px">${esc(e.host)}</td>` : ''}
-      <td class="map-tbl-m" style="color:${methodColor(e.method)}">${esc(e.method)}</td>
-      <td class="map-tbl-p" title="${escAttr(path)}">${esc(path)}</td>
-      <td class="map-tbl-sts">${sts || '—'}</td>
-      <td style="text-align:right;color:var(--fg3)">${e.hits > 1 ? e.hits+'×' : ''}</td>
-      <td class="map-tbl-act">${e.lastFlowId ? `<button class="btn" data-rep="${e.lastFlowId}" title="Send to Repeater">→ Rep</button>` : ''}</td>
-    </tr>`;
-  }).join('');
-  box.innerHTML = `<table class="map-tbl"><thead><tr>
+  const head = `<thead><tr>
     ${showHost ? th('host', 'Host', '140px') : ''}
     ${th('method', 'Method', '72px')}
     ${th('path', 'Path', '')}
     ${th('status', 'Status', '88px')}
     ${th('hits', 'Hits', '52px')}
     <th style="width:72px"></th>
-  </tr></thead><tbody>${rows}</tbody></table>`;
-  box.querySelectorAll('th[data-sort]').forEach(h => h.onclick = () => {
+  </tr></thead>`;
+
+  if(sorted.length >= MAP_TABLE_VIRTUAL_MIN){
+    box.innerHTML = `<div class="map-virt"><table class="map-tbl map-virt-head">${head}</table><div class="map-virt-scroll"><div class="map-virt-spacer"></div><table class="map-tbl map-virt-body"><tbody></tbody></table></div></div>`;
+    const scrollEl = box.querySelector('.map-virt-scroll');
+    const bodyTbl = box.querySelector('.map-virt-body');
+    const spacer = box.querySelector('.map-virt-spacer');
+    spacer.style.height = (sorted.length * MAP_ROW_H) + 'px';
+    let paintQueued = false;
+    const paint = () => {
+      paintQueued = false;
+      const st = scrollEl.scrollTop;
+      const vh = scrollEl.clientHeight || 400;
+      const start = Math.max(0, Math.floor(st / MAP_ROW_H) - 15);
+      const end = Math.min(sorted.length, Math.ceil((st + vh) / MAP_ROW_H) + 15);
+      const tbody = bodyTbl.querySelector('tbody');
+      tbody.innerHTML = sorted.slice(start, end).map(e => mapTableRow(e, showHost)).join('');
+      bodyTbl.style.transform = `translateY(${start * MAP_ROW_H}px)`;
+      wireMapTableRows(bodyTbl);
+    };
+    scrollEl.onscroll = () => { if(!paintQueued){ paintQueued = true; requestAnimationFrame(paint); } };
+    paint();
+  }else{
+    const rows = sorted.map(e => mapTableRow(e, showHost)).join('');
+    box.innerHTML = `<table class="map-tbl">${head}<tbody>${rows}</tbody></table>`;
+    wireMapTableRows(box);
+  }
+
+  box.querySelectorAll('th[data-sort]').forEach(h => keyClick(h, () => {
     const k = h.dataset.sort;
     if(mapState.sort.key === k) mapState.sort.dir *= -1;
     else{ mapState.sort.key = k; mapState.sort.dir = 1; }
-    renderMap(); // route through renderMap so crumb/count/warn stay consistent
-  });
-  box.querySelectorAll('tr[data-flow]').forEach(tr => {
-    const id = Number(tr.dataset.flow);
-    if(!id) return;
-    tr.onclick = ev => {
-      if(ev.target.closest('[data-rep]')) return;
-      flowPopup(id);
-    };
-  });
-  box.querySelectorAll('[data-rep]').forEach(b => b.onclick = ev => {
-    ev.stopPropagation();
-    sendToRepeater({ id: Number(b.dataset.rep) });
-  });
+    renderMap();
+  }));
 }
 
 let mapSearchTimer = null;
@@ -361,8 +495,7 @@ function mapApplySearch(){
 $('#mapSearch') && ($('#mapSearch').oninput = e => {
   mapState.search = e.target.value.trim();
   clearTimeout(mapSearchTimer);
-  if(mapUsesServerSearch()) mapSearchTimer = setTimeout(mapApplySearch, 350);
-  else mapApplySearch();
+  mapSearchTimer = setTimeout(mapApplySearch, mapUsesServerSearch() ? 350 : 280);
 });
 $('#mapSearchScope') && ($('#mapSearchScope').onchange = e => {
   mapState.searchScope = e.target.value || 'path';
@@ -379,12 +512,30 @@ $('#mapDomain') && ($('#mapDomain').onchange = e => {
 $('#mapMethod') && ($('#mapMethod').onchange = e => { mapState.method = e.target.value; mapState._needFit = true; renderMap(); });
 $('#mapRefresh') && ($('#mapRefresh').onclick = loadEndpoints);
 $('#mapExpand').onclick = () => {
+  const eps = mapFiltered();
+  if(!mapState.expandAll && eps.length > MAP_TREE_EAGER_MAX){
+    toast(`Too many endpoints (${eps.length.toLocaleString()}) — filter by domain or search first`);
+    return;
+  }
   mapState.expandAll = !mapState.expandAll;
   $('#mapExpand').textContent = mapState.expandAll ? 'Collapse all' : 'Expand all';
   mapState._needFit = true;
   renderMap();
 };
 $('#mapStatus') && ($('#mapStatus').onchange = e => { mapState.statusClass = Number(e.target.value) || 0; mapState._needFit = true; renderMap(); });
+function syncMapHideNoise(){
+  const b=$('#mapHideNoise'); if(!b) return;
+  b.classList.toggle('on',!!mapState.hideNoise);
+  b.setAttribute('aria-pressed',mapState.hideNoise?'true':'false');
+  b.textContent=mapState.hideNoise?'Hiding 403/404-only':'Showing all statuses';
+}
+syncMapHideNoise();
+$('#mapHideNoise')&&($('#mapHideNoise').onclick=()=>{
+  mapState.hideNoise=!mapState.hideNoise;
+  try{localStorage.setItem(MAP_HIDE_NOISE_KEY,mapState.hideNoise?'1':'0');}catch(e){}
+  syncMapHideNoise();
+  loadEndpoints();
+});
 // Tag is a server-side filter (changes which endpoints come back) — re-fetch.
 $('#mapTag') && ($('#mapTag').onchange = e => { mapState.tag = e.target.value; mapState.domain = null; mapState._needFit = true; loadEndpoints(); });
 
@@ -412,15 +563,21 @@ function mapExpandForSearch(eps){
   const q = mapState.search.toLowerCase();
   if(!q) return;
   const root = buildGraphTree(eps);
-  function subtreeMatch(n){
-    if(n.type === 'ep') return epMatchesSearch(n.ep, q);
-    return n.children.some(subtreeMatch);
+  // Single bottom-up pass: a node "has a match" if it's a matching endpoint or any
+  // descendant matches. Uncollapse every ancestor of a match so it's visible. This
+  // is O(N) — the old code recomputed a full subtree search at every node (O(N²)).
+  function mark(n){
+    let has;
+    if(n.type === 'ep'){
+      has = epMatchesSearch(n.ep, q);
+    } else {
+      has = false;
+      for(const c of n.children){ if(mark(c)) has = true; }
+    }
+    if(has) mapState.collapsed.delete(n.key);
+    return has;
   }
-  function walk(n){
-    if(subtreeMatch(n)) mapState.collapsed.delete(n.key);
-    n.children.forEach(walk);
-  }
-  root.children.forEach(walk);
+  root.children.forEach(mark);
 }
 
 export function graphLayout(hosts){
@@ -509,11 +666,22 @@ export function renderMapGraph(eps){
   if(mapState.search) mapExpandForSearch(eps);
   const lay = graphLayout(buildGraphTree(eps).children);
   mapState._g = lay;
+  if(lay.nodes.length > GRAPH_NODE_MAX && !mapState._forceGraph){
+    g.removeAttribute('transform');
+    g.innerHTML = `<text class="g-dim" x="20" y="28">Graph has ${lay.nodes.length.toLocaleString()} nodes — too dense to read.</text>`;
+    if(warn){
+      warn.style.display = 'block';
+      warn.innerHTML = `Graph capped at ${GRAPH_NODE_MAX} nodes (${lay.nodes.length.toLocaleString()} match). Filter by domain or use Table view — or <a href="#" id="mapGraphForce" style="color:var(--accent);text-decoration:underline">show graph anyway</a>.`;
+      const force = $('#mapGraphForce');
+      if(force) force.onclick = ev => { ev.preventDefault(); mapState._forceGraph = true; warn.style.display = 'none'; renderMapGraph(eps); };
+    }
+    return;
+  }
   if(warn){
     if(mapState.searchNote){
       warn.style.display = 'block';
       warn.textContent = mapState.searchNote;
-    }else if(lay.nodes.length > GRAPH_NODE_CAP){
+    }else if(lay.nodes.length > GRAPH_NODE_MAX * 0.75){
       warn.style.display = 'block';
       warn.textContent = `Graph has ${lay.nodes.length} nodes — hard to read. Filter by domain, use Table view, or search to narrow.`;
     }else if(!mapUsesServerSearch() || (mapState.searchScope !== 'body' && mapState.searchScope !== 'all')){
@@ -605,3 +773,10 @@ $('#mapFit') && ($('#mapFit').onclick = mapFitNow);
 
 // Apply saved view on load (DOM ready — this module loads after index.html paints).
 setMapView(mapState.view);
+
+{const tree=$('#mapTree');if(tree)tree.addEventListener('toggle',e=>{
+  const det=e.target;
+  if(det.tagName!=='DETAILS'||!det.open)return;
+  const body=det.querySelector(':scope > .map-body[data-lazy-key]');
+  if(body)hydrateMapTreeNode(body);
+},true);}

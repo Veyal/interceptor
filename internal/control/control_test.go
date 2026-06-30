@@ -522,17 +522,18 @@ func TestScannerRunFindsIssues(t *testing.T) {
 	if len(out.Issues) < 2 {
 		t.Fatalf("expected at least 2 issues, got %d", len(out.Issues))
 	}
-	var foundHSTS, foundCORS bool
+	var foundHeaders, foundCORS bool
 	for _, i := range out.Issues {
-		if i["title"] == "Missing Strict-Transport-Security (HSTS)" {
-			foundHSTS = true
+		// Security headers are now a single consolidated finding (was a separate HSTS title).
+		if i["title"] == "Missing security response headers" {
+			foundHeaders = true
 		}
 		if i["title"] == "Overly permissive CORS policy" {
 			foundCORS = true
 		}
 	}
-	if !foundHSTS || !foundCORS {
-		t.Fatalf("missing expected findings: hsts=%v cors=%v (%v)", foundHSTS, foundCORS, out.Issues)
+	if !foundHeaders || !foundCORS {
+		t.Fatalf("missing expected findings: headers=%v cors=%v (%v)", foundHeaders, foundCORS, out.Issues)
 	}
 }
 

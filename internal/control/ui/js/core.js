@@ -33,9 +33,10 @@ export function wireRowKey(el, onActivate){
   el.addEventListener('keydown',e=>{
     if(e.key!=='Enter'&&e.key!==' ') return;
     // Let Enter/Space fall through when focus is on a real control inside the row
-    // (button/input/textarea/select/link) — those have their own activation.
+    // (button/input/textarea/select/link, or anything we've promoted to role=button
+    // such as a tag chip) — those have their own activation.
     const t=e.target;
-    if(t!==el&&t.closest&&t.closest('button,input,textarea,select,a')) return;
+    if(t!==el&&t.closest&&t.closest('button,input,textarea,select,a,[role="button"]')) return;
     e.preventDefault();
     if(onActivate) onActivate(e); else el.click();
   });
@@ -49,6 +50,170 @@ export function setSeg(btn,on){
   btn.classList.toggle('on',!!on);
   btn.setAttribute('aria-pressed',on?'true':'false');
 }
+
+// ui-select — themed dropdowns that replace the OS-native select menu. The native
+// <select> stays in the DOM (hidden) so existing .value / .onchange / innerHTML
+// code keeps working; we mirror options into a custom menu and dispatch change.
+let uiSelectOpen=null;
+
+function closeUiSelectMenu(inst){
+  if(!inst)return;
+  inst.menu.hidden=true;
+  inst.menu.classList.remove('ui-select-menu-fixed');
+  inst.menu.style.cssText='';
+  inst.trigger.setAttribute('aria-expanded','false');
+  if(uiSelectOpen&&uiSelectOpen.menu===inst.menu)uiSelectOpen=null;
+}
+
+export function closeAllUiSelects(){
+  if(uiSelectOpen)closeUiSelectMenu(uiSelectOpen);
+}
+
+function openUiSelectMenu(inst){
+  closeAllUiSelects();
+  const r=inst.trigger.getBoundingClientRect();
+  inst.menu.classList.add('ui-select-menu-fixed');
+  inst.menu.style.left=r.left+'px';
+  inst.menu.style.top=(r.bottom+4)+'px';
+  inst.menu.style.width=Math.max(r.width,120)+'px';
+  inst.menu.hidden=false;
+  inst.trigger.setAttribute('aria-expanded','true');
+  uiSelectOpen=inst;
+  inst.menu.querySelector('.ui-select-opt.sel')?.scrollIntoView({block:'nearest'});
+}
+
+export function syncUiSelectStyles(sel){
+  const inst=sel&&sel._uiSelect;
+  if(!inst)return;
+  const w=inst.wrap,s=sel;
+  w.style.display=s.style.display;
+  w.style.maxWidth=s.style.maxWidth;
+  w.style.width=s.style.width;
+  w.style.minWidth=s.style.minWidth;
+  w.style.flex=s.style.flex;
+}
+
+export function refreshUiSelect(sel){
+  const inst=sel&&sel._uiSelect;
+  if(inst)inst.render();
+}
+
+export function enhanceSelect(sel){
+  if(!sel||sel.tagName!=='SELECT'||sel._uiSelect||sel.dataset.uiSelect==='off')return sel;
+
+  const wrap=document.createElement('div');
+  wrap.className='ui-select';
+  if(sel.classList.contains('btn'))wrap.classList.add('ui-select-btn');
+  if(sel.classList.contains('rep-method'))wrap.classList.add('ui-select-rep');
+  if(sel.closest('.search'))wrap.classList.add('ui-select-search');
+  if(sel.closest('.rules-tbl')||sel.closest('td'))wrap.classList.add('ui-select-inline');
+  if(sel.closest('.settings-body .field'))wrap.classList.add('ui-select-field');
+
+  const parent=sel.parentNode;
+  parent.insertBefore(wrap,sel);
+  wrap.appendChild(sel);
+  sel.classList.add('ui-select-native');
+  sel.tabIndex=-1;
+
+  const trigger=document.createElement('button');
+  trigger.type='button';
+  trigger.className='ui-select-trigger';
+  trigger.setAttribute('aria-haspopup','listbox');
+  trigger.setAttribute('aria-expanded','false');
+  const valueEl=document.createElement('span');
+  valueEl.className='ui-select-value';
+  const caret=document.createElement('span');
+  caret.className='ui-select-caret';
+  caret.setAttribute('aria-hidden','true');
+  caret.textContent='▾';
+  trigger.append(valueEl,caret);
+
+  const menu=document.createElement('div');
+  menu.className='ui-select-menu';
+  menu.setAttribute('role','listbox');
+  menu.hidden=true;
+
+  wrap.insertBefore(trigger,sel);
+  wrap.appendChild(menu);
+
+  const al=sel.getAttribute('aria-label');
+  if(al)trigger.setAttribute('aria-label',al);
+  const sid=sel.id;
+  if(sid){
+    trigger.id=sid+'Ui';
+    const lbl=document.querySelector(`label[for="${sid}"]`);
+    if(lbl&&!lbl.id)lbl.id=sid+'Lbl';
+    if(lbl)trigger.setAttribute('aria-labelledby',lbl.id);
+  }
+
+  const inst={sel,wrap,trigger,menu,valueEl,
+    syncStyles(){syncUiSelectStyles(sel);},
+    render(){
+      syncUiSelectStyles(sel);
+      const cur=sel.value;
+      const opts=[...sel.options];
+      menu.innerHTML=opts.map(o=>{
+        const v=o.value;
+        const selOn=v===cur;
+        const dis=o.disabled;
+        return `<button type="button" role="option" class="ui-select-opt${selOn?' sel':''}" data-value="${escAttr(v)}"${dis?' disabled':''} aria-selected="${selOn?'true':'false'}"><span class="ui-select-opt-title">${esc(o.textContent)}</span></button>`;
+      }).join('');
+      const picked=opts.find(o=>o.value===cur)||opts[0];
+      valueEl.textContent=picked?picked.textContent:(sel.getAttribute('placeholder')||'…');
+      trigger.disabled=!!sel.disabled;
+      if(sel.classList.contains('rep-method'))valueEl.style.color=methodColor(sel.value);
+      else valueEl.style.color='';
+    },
+    close(){closeUiSelectMenu(inst);}
+  };
+
+  trigger.addEventListener('click',e=>{
+    e.stopPropagation();
+    if(sel.disabled)return;
+    if(!menu.hidden){inst.close();return;}
+    openUiSelectMenu(inst);
+  });
+
+  menu.addEventListener('click',e=>{
+    const opt=e.target.closest('.ui-select-opt');
+    if(!opt||opt.disabled)return;
+    const v=opt.dataset.value;
+    if(sel.value!==v){
+      sel.value=v;
+      sel.dispatchEvent(new Event('change',{bubbles:true}));
+    }
+    inst.render();
+    inst.close();
+  });
+
+  sel.addEventListener('change',()=>inst.render());
+
+  const mo=new MutationObserver(()=>inst.render());
+  mo.observe(sel,{childList:true,subtree:true,attributes:true,attributeFilter:['disabled','hidden','class']});
+
+  sel._uiSelect=inst;
+  inst.render();
+  return sel;
+}
+
+export function initUiSelects(root=document){
+  root.querySelectorAll('select:not(.ui-select-native)').forEach(enhanceSelect);
+}
+
+document.addEventListener('click',()=>closeAllUiSelects());
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeAllUiSelects();});
+window.addEventListener('scroll',()=>closeAllUiSelects(),true);
+window.addEventListener('resize',()=>closeAllUiSelects());
+new MutationObserver(muts=>{
+  for(const m of muts){
+    m.addedNodes.forEach(n=>{
+      if(n.nodeType!==1)return;
+      if(n.tagName==='SELECT')enhanceSelect(n);
+      else initUiSelects(n);
+    });
+  }
+}).observe(document.documentElement,{childList:true,subtree:true});
+
 export async function api(path,opts){const r=await fetch(path,opts);if(!r.ok){let m=r.statusText;try{m=(await r.json()).error||m}catch(e){}throw new Error(m);}const ct=r.headers.get('content-type')||'';return ct.includes('json')?r.json():r.text();}
 
 export const methodColor=m=>({GET:'var(--blue)',POST:'var(--accent)',PUT:'var(--amber)',PATCH:'var(--violet)',DELETE:'var(--red)'}[m]||'var(--fg2)');
@@ -595,3 +760,5 @@ export function accordionize(box){
   }
   box.appendChild(frag);
 }
+
+initUiSelects();

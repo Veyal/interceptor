@@ -38,6 +38,12 @@ Usage:
   interceptor update       install the latest release
   interceptor version      print the running version
 
+Common flags / env:
+  --project <name|path>    open a specific project (or INTERCEPTOR_PROJECT)
+  --open                   open the UI in your browser on start (or INTERCEPTOR_OPEN_BROWSER)
+  INTERCEPTOR_CONTROL_ADDR control-plane listen addr (default 127.0.0.1:9966;
+                           set e.g. 127.0.0.1:9967 to run a second instance)
+
 Update flags:
   --check                  report whether an update is available
   --version vX.Y.Z         install a specific release

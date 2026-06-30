@@ -227,14 +227,31 @@ func (h *Hub) loginMacroFromFlow(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	var in struct {
+		Enabled     *bool `json:"enabled"`
+		RefreshSecs *int  `json:"refreshSecs"`
+		ReauthOn401 *bool `json:"reauthOn401"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&in)
 	def := (f.Scheme == "https" && f.Port == 443) || (f.Scheme == "http" && f.Port == 80)
 	target := fmt.Sprintf("%s://%s", f.Scheme, f.Host)
 	if !def {
 		target = fmt.Sprintf("%s://%s:%d", f.Scheme, f.Host, f.Port)
 	}
 	raw := string(h.rawRequest(f))
+	enabled := true
+	if in.Enabled != nil {
+		enabled = *in.Enabled
+	}
+	reauth := true
+	if in.ReauthOn401 != nil {
+		reauth = *in.ReauthOn401
+	}
 	m := sender.LoginMacro{
-		Enabled: true, Target: target, Request: raw, ReauthOn401: true,
+		Enabled: enabled, Target: target, Request: raw, ReauthOn401: reauth,
+	}
+	if in.RefreshSecs != nil {
+		m.RefreshSecs = *in.RefreshSecs
 	}
 	b, _ := json.Marshal(m)
 	_ = h.st.SetSetting("session.loginMacro", string(b))

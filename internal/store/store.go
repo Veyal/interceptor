@@ -84,6 +84,9 @@ CREATE INDEX IF NOT EXISTS idx_flows_host ON flows(host);
 CREATE INDEX IF NOT EXISTS idx_flows_status ON flows(status);
 CREATE INDEX IF NOT EXISTS idx_flows_method ON flows(method);
 CREATE INDEX IF NOT EXISTS idx_flows_ts ON flows(ts);
+-- Composite index backs the Map's GROUP BY host, method, path aggregation and the
+-- host=? filter, so a large flows table is walked via the index instead of a full scan.
+CREATE INDEX IF NOT EXISTS idx_flows_endpoint ON flows(host, method, path);
 
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
@@ -414,6 +417,13 @@ func (s *Store) QueryFlows(limit int) ([]*Flow, error) {
 		out = append(out, f)
 	}
 	return out, rows.Err()
+}
+
+// FlowCount returns the total number of captured flows.
+func (s *Store) FlowCount() (int64, error) {
+	var n int64
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM flows`).Scan(&n)
+	return n, err
 }
 
 // SetSetting upserts a key/value setting.

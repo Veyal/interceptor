@@ -175,7 +175,7 @@ func (s *Server) dispatch(method string, params json.RawMessage) (any, *rpcError
 			"protocolVersion": ver,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "interceptor", "version": version.Version},
-			"instructions":    "Interceptor — an AI web-pentest workspace; a human watches everything you do and can take over manually, so record your work as you go.\n\nSETUP (do first): check_readiness for a setup checklist → scope_from_url to focus on the target → for HTTPS the client must trust the CA (ca_info) → route the target's traffic through the proxy. Re-run check_readiness if list_flows/scans come back empty.\n\nMETHODOLOGY: (1) Recon & map — list_flows + analyze_flow to triage captured endpoints and spot injection points; suggest_discovery_paths + start_discovery to forced-browse more. (2) Auth & access control — set_session to stay authenticated; authz_run / authz_check_sessions to find IDOR / broken access control. (3) Injection & logic — send_request to probe, start_intruder to fuzz §markers; run_scanner (passive, no traffic) then active_scan (real payloads: xss/sqli/ssti/redirect/traversal/timing-cmdi — pass arm=true once, fires in-scope only); oob_* for blind callbacks. (4) Verify each candidate before reporting (re-send the PoC; rule out false positives).\n\nRECORD AS YOU GO: create_finding with a description (detail) and the security impact (what an attacker gains / business consequence) FIRST — every finding starts as a written description before any evidence is attached. Then call add_finding_poc to attach the relevant captured flows as PoC evidence; every finding should have at least one PoC flow when one exists. Use update_finding to mark verified or false_positive. list_findings tracks progress and avoids duplicates. get_notes/append_notes for freeform methodology, creds, scope notes.\n\nNOTES: flow ids come from list_flows; bodies truncate to maxBytes (default 4000); scanners obey scope (list_scope/scope_from_url/add_scope_rule). host_stats + prune_history manage project size (destructive, shown live in Activity). Everything you do is tagged AI and visible to the human in History and the Activity feed. Pass an optional `intent` (a short why) on consequential tools — it's shown to the human next to the action. Before any high-impact or ambiguous step (large fuzz, destructive action, unclear scope), call request_human_input to ask the operator and wait for their answer — never exceed their authority.",
+			"instructions":    "Interceptor — an AI web-pentest workspace; a human watches everything you do and can take over manually, so record your work as you go.\n\nSETUP: check_readiness (structured JSON blockers: OOB, scope, auth identities, login macro) → fix blockers → scope_from_url → ca_info + route traffic through proxy. Re-run check_readiness if list_flows/scans come back empty.\n\nAUTH: list_flows tag=auth → promote_flow_to_authz (Surveyor, Admin, …) → authz_run inScope:true → set_login_macro_from_flow → run_login_macro (refresh CSRF).\n\nRECON: start_discovery (wordlist optional — server default) → suggest_discovery_paths.\n\nSCAN: run_scanner (passive) → active_scan arm:true inScope:true csrfAware:true → cross_host_token_replay mode:auto for SSO/JWT apps → oob_* for blind callbacks.\n\nRECORD: create_finding (body blocks) → add_finding_poc position:N → update_finding impact/detail (detail-only updates preserve interleaved PoC blocks).\n\nEverything you do is tagged AI. Pass optional `intent` on consequential tools. Use request_human_input before destructive or ambiguous steps.",
 		}, nil
 	case "tools/list":
 		return map[string]any{"tools": s.toolList()}, nil
@@ -1064,12 +1064,22 @@ func (s *Server) registerTools() {
 		})
 
 	s.add("export_report",
-		"Render the full engagement report as Markdown: every curated finding (severity, status, detail, remediation, attached PoC flows) plus an appendix of passive-scan issues. This is the shared writeup the human exports — call it to hand off or summarize. Pass includeIssues=false to omit the passive-scan appendix.",
-		obj(map[string]any{"includeIssues": p("boolean", "include passive-scan issues appendix (default true)")}),
+		"Render the engagement report: curated findings with PoC flows. Passive scan is omitted by default — pass includeIssues=true for the appendix. format=html for HTML.",
+		obj(map[string]any{
+			"includeIssues": p("boolean", "include passive-scan issues appendix (default false)"),
+			"format":        p("string", "md (default) or html"),
+		}),
 		func(a map[string]any) (string, error) {
 			p := "/api/findings/report"
-			if !argBool(a, "includeIssues", true) {
-				p += "?issues=0"
+			var q []string
+			if argBool(a, "includeIssues", false) {
+				q = append(q, "issues=1")
+			}
+			if strings.ToLower(argStr(a, "format")) == "html" {
+				q = append(q, "format=html")
+			}
+			if len(q) > 0 {
+				p += "?" + strings.Join(q, "&")
 			}
 			return s.apiGet(p)
 		})
@@ -1277,11 +1287,13 @@ func (s *Server) registerTools() {
 			"flowId":      p("integer", "scan one flow's endpoint"),
 			"inScope":     p("boolean", "scan all in-scope endpoints"),
 			"maxRequests": p("integer", "probe budget (default 2000)"),
+			"csrfAware":   p("boolean", "Laravel CSRF bootstrap + skip endpoints after 419 storms (default true)"),
 		}),
 		func(a map[string]any) (string, error) {
 			return s.api(http.MethodPost, "/api/activescan/start", map[string]any{
 				"arm": argBool(a, "arm", false), "flowId": argInt(a, "flowId", 0),
 				"inScope": argBool(a, "inScope", false), "maxRequests": argInt(a, "maxRequests", 0),
+				"csrfAware": argBool(a, "csrfAware", true),
 			})
 		})
 
@@ -1309,71 +1321,71 @@ func (s *Server) registerTools() {
 	s.add("ca_info", "How to trust the CA so HTTPS can be intercepted (proxy address + CA location).", obj(map[string]any{}),
 		func(a map[string]any) (string, error) {
 			settings, _ := s.apiGet("/api/settings")
-			return fmt.Sprintf("To intercept HTTPS, point the client at the proxy and trust the local CA (a one-time MANUAL step per client — Interceptor never edits the OS trust store for you).\nSettings: %s\nCA download: %s/api/ca.crt (also at ~/.interceptor/ca/ca.crt).\nTrust it on the client:\n• macOS: open the .crt → Keychain Access → System keychain → set the Interceptor CA to Always Trust.\n• Windows: double-click → Install Certificate → Current User → Trusted Root Certification Authorities.\n• Linux (Debian/Ubuntu): copy to /usr/local/share/ca-certificates/interceptor.crt → sudo update-ca-certificates. (Fedora/RHEL: /etc/pki/ca-trust/source/anchors/ → sudo update-ca-trust.)\n• Firefox: Settings → Privacy & Security → Certificates → View Certificates → Authorities → Import.\n• curl/tools one-off: curl --cacert ~/.interceptor/ca/ca.crt -x http://127.0.0.1:8080 https://… (or SSL_CERT_FILE / REQUESTS_CA_BUNDLE).\nHTTP needs none of this — the CA is only for decrypting HTTPS.", strings.TrimSpace(settings), s.base), nil
+			return fmt.Sprintf("To intercept HTTPS, point the client at the proxy and trust the local CA (a one-time MANUAL step per client — Interceptor never edits the OS trust store for you).\nSettings: %s\nCA download: %s/api/ca.crt (also at ~/.interceptor/ca/ca.crt).\nTrust it on the client:\n• macOS: open the .crt → Keychain Access → System keychain → set the Interceptor CA to Always Trust.\n• Windows: double-click → Install Certificate → Current User → Trusted Root Certification Authorities.\n• Linux (Debian/Ubuntu): copy to /usr/local/share/ca-certificates/interceptor.crt → sudo update-ca-certificates. (Fedora/RHEL: /etc/pki/ca-trust/source/anchors/ → sudo update-ca-trust.)\n• Firefox: Settings → Privacy & Security → Certificates → View Certificates → Authorities → Import.\n• Android (adb): android_setup (USB reverse + CA) or Settings → TLS → Android (ADB).\n• curl/tools one-off: curl --cacert ~/.interceptor/ca/ca.crt -x http://127.0.0.1:8080 https://… (or SSL_CERT_FILE / REQUESTS_CA_BUNDLE).\nHTTP needs none of this — the CA is only for decrypting HTTPS.", strings.TrimSpace(settings), s.base), nil
+		})
+
+	s.add("android_status",
+		"List USB-connected Android devices (requires adb on PATH): serial, model, emulator hint, suggested CA mode, LAN host, device proxy state.",
+		obj(map[string]any{
+			"serial": p("string", "optional device serial for proxy status"),
+		}),
+		func(a map[string]any) (string, error) {
+			q := ""
+			if ser := argStr(a, "serial"); ser != "" {
+				q = "?serial=" + url.QueryEscape(ser)
+			}
+			return s.apiGet("/api/android/status" + q)
+		})
+
+	s.add("android_setup",
+		"One-click Android HTTPS intercept via adb: set global proxy + install CA. USB mode uses adb reverse (default). Wi‑Fi mode uses host LAN IP (Interceptor must bind 0.0.0.0). caMode auto picks system CA for emulators, user CA for physical devices.",
+		obj(map[string]any{
+			"serial":    p("string", "device serial when multiple are connected"),
+			"proxyMode": p("string", "usb (default) or wifi"),
+			"caMode":    p("string", "user, system, or auto (default auto)"),
+			"wifiHost":  p("string", "LAN IP override for wifi mode (default: auto-detect)"),
+		}),
+		func(a map[string]any) (string, error) {
+			body := map[string]any{}
+			if v := argStr(a, "serial"); v != "" {
+				body["serial"] = v
+			}
+			if v := argStr(a, "proxyMode"); v != "" {
+				body["proxyMode"] = v
+			}
+			if v := argStr(a, "caMode"); v != "" {
+				body["caMode"] = v
+			}
+			if v := argStr(a, "wifiHost"); v != "" {
+				body["wifiHost"] = v
+			}
+			return s.api(http.MethodPost, "/api/android/setup", body)
+		})
+
+	s.add("android_teardown",
+		"Clear Android global proxy and adb reverse. Optionally remove the Interceptor system CA (rooted device/emulator).",
+		obj(map[string]any{
+			"serial":         p("string", "device serial when multiple connected"),
+			"removeSystemCA": p("boolean", "remove Interceptor CA from /system/etc/security/cacerts/ (default false)"),
+		}),
+		func(a map[string]any) (string, error) {
+			body := map[string]any{"removeSystemCA": argBool(a, "removeSystemCA", false)}
+			if v := argStr(a, "serial"); v != "" {
+				body["serial"] = v
+			}
+			return s.api(http.MethodPost, "/api/android/unproxy", body)
 		})
 
 	s.add("check_readiness",
-		"Pre-flight setup checklist before testing: is the proxy listening, is target scope set, and has any (in-scope) traffic been captured? Run this when you start on a target, or when scans/list_flows come back empty — it tells you and the human exactly which setup step is missing.",
+		"Pre-flight setup checklist (structured JSON): proxy, scope, traffic, OOB, auth identities, login macro, active-scan arm state. Returns ready + blockers with fix hints. Run at session start or when list_flows/scans are empty.",
 		obj(map[string]any{}),
 		func(a map[string]any) (string, error) {
-			var b strings.Builder
-			mark := func(c bool) string {
-				if c {
-					return "✓"
-				}
-				return "✗"
+			raw, err := s.apiGet("/api/readiness")
+			if err != nil {
+				return "", err
 			}
 			settings, _ := s.apiGet("/api/settings")
-			var st struct {
-				ProxyAddr string `json:"proxyAddr"`
-			}
-			json.Unmarshal([]byte(settings), &st)
-			addr := st.ProxyAddr
-			if addr == "" {
-				addr = "(unknown)"
-			}
-			fmt.Fprintf(&b, "%s Proxy listening at %s — point the target's browser/curl here.\n", mark(st.ProxyAddr != ""), addr)
-			fmt.Fprintf(&b, "• For HTTPS, trust the CA on the client: %s/api/ca.crt (or ~/.interceptor/ca/ca.crt). Without it, https sites won't intercept.\n", s.base)
-
-			scope, _ := s.apiGet("/api/scope")
-			var sc struct {
-				Rules []struct {
-					Action  string `json:"action"`
-					Enabled bool   `json:"enabled"`
-				} `json:"rules"`
-			}
-			json.Unmarshal([]byte(scope), &sc)
-			includes := 0
-			for _, r := range sc.Rules {
-				if r.Enabled && r.Action == "include" {
-					includes++
-				}
-			}
-			if includes > 0 {
-				fmt.Fprintf(&b, "%s Scope set (%d include rule(s)) — scanners/active_scan focus on it.\n", mark(true), includes)
-			} else {
-				fmt.Fprintf(&b, "%s No include scope — everything is in scope. Set one with scope_from_url so active_scan won't hit unrelated hosts.\n", mark(false))
-			}
-
-			captured := s.flowsExist("/api/flows?limit=1")
-			if captured {
-				fmt.Fprintf(&b, "%s Traffic captured.\n", mark(true))
-			} else {
-				fmt.Fprintf(&b, "%s No traffic captured yet — drive the target through the proxy.\n", mark(false))
-			}
-			if includes > 0 {
-				inScope := s.inScopeTraffic()
-				fmt.Fprintf(&b, "%s In-scope traffic captured.\n", mark(inScope))
-				if !inScope {
-					b.WriteString("  (recent captures may be out-of-scope noise — drive the target app or check host/scheme rules)\n")
-				}
-			}
-			if st.ProxyAddr != "" && captured {
-				b.WriteString("\nReady. Triage with list_flows/analyze_flow, then record findings via create_finding + add_finding_poc.")
-			} else {
-				b.WriteString("\nNot fully ready — resolve the ✗ items first.")
-			}
-			return b.String(), nil
+			return raw + "\n\nCA (HTTPS): " + s.base + "/api/ca.crt\nSettings: " + strings.TrimSpace(settings), nil
 		})
 
 	s.add("scope_from_url",
@@ -1643,8 +1655,9 @@ func (s *Server) registerTools() {
 		"Take a JWT from one flow and replay the same path to every unique in-scope host in history — automates cross-environment token confusion detection (e.g. qa-internal Bearer accepted on qa-external because they share a JWT secret).",
 		obj(map[string]any{
 			"flowId":    pt("integer"),
-			"jwtFlowId": p("integer", "flow whose Authorization: Bearer token to extract — defaults to flowId"),
+			"jwtFlowId": p("integer", "flow whose JWT to extract — defaults to flowId"),
 			"jwt":       p("string", "raw JWT string (alternative to jwtFlowId)"),
+			"mode":      p("string", "auto | bearer | path — auto picks path replay for SSO URL/path tokens"),
 		}, "flowId"),
 		func(a map[string]any) (string, error) {
 			body := map[string]any{"flowId": argInt(a, "flowId", 0)}
@@ -1653,6 +1666,9 @@ func (s *Server) registerTools() {
 			}
 			if v := argStr(a, "jwt"); v != "" {
 				body["jwt"] = v
+			}
+			if v := argStr(a, "mode"); v != "" {
+				body["mode"] = v
 			}
 			return s.api(http.MethodPost, "/api/authz/cross-host-replay", body)
 		})
@@ -1670,5 +1686,98 @@ func (s *Server) registerTools() {
 		obj(map[string]any{"baseUrl": pt("string")}, "baseUrl"),
 		func(a map[string]any) (string, error) {
 			return s.api(http.MethodPost, "/api/oob/base", map[string]any{"baseUrl": argStr(a, "baseUrl")})
+		})
+
+	s.add("oob_enable", "Enable the OOB interaction catcher (one-click; required before oob_new).",
+		obj(map[string]any{"enabled": p("boolean", "default true")}),
+		func(a map[string]any) (string, error) {
+			return s.api(http.MethodPut, "/api/settings", map[string]any{"oobEnabled": argBool(a, "enabled", true)})
+		})
+
+	s.add("get_flow_auth",
+		"Extract Cookie/Authorization/XSRF headers from a captured flow for authz or session setup.",
+		obj(map[string]any{"flowId": pt("integer")}, "flowId"),
+		func(a map[string]any) (string, error) {
+			id, err := reqFlowID(a)
+			if err != nil {
+				return "", err
+			}
+			return s.apiGet(fmt.Sprintf("/api/authz/flow-auth/%d", id))
+		})
+
+	s.add("promote_flow_to_authz",
+		"Promote a flow's auth headers into an authz identity (role) for authz_run diffing.",
+		obj(map[string]any{
+			"flowId": pt("integer"),
+			"name":   p("string", "identity label e.g. Surveyor, Admin"),
+			"merge":  p("boolean", "update existing same name or append (default true)"),
+		}, "flowId", "name"),
+		func(a map[string]any) (string, error) {
+			id, err := reqFlowID(a)
+			if err != nil {
+				return "", err
+			}
+			body := map[string]any{"name": argStr(a, "name"), "merge": argBool(a, "merge", true)}
+			return s.api(http.MethodPost, fmt.Sprintf("/api/authz/from-flow/%d", id), body)
+		})
+
+	s.add("set_login_macro_from_flow",
+		"Capture a flow's request as the login macro (CSRF/session refresh before active scan).",
+		obj(map[string]any{
+			"flowId":      pt("integer"),
+			"enabled":     p("boolean", "default true"),
+			"refreshSecs": p("integer", "auto-refresh interval"),
+			"reauthOn401": p("boolean", "default true"),
+		}, "flowId"),
+		func(a map[string]any) (string, error) {
+			id, err := reqFlowID(a)
+			if err != nil {
+				return "", err
+			}
+			body := map[string]any{}
+			if _, ok := a["enabled"]; ok {
+				body["enabled"] = argBool(a, "enabled", true)
+			}
+			if v := argInt(a, "refreshSecs", 0); v > 0 {
+				body["refreshSecs"] = v
+			}
+			if _, ok := a["reauthOn401"]; ok {
+				body["reauthOn401"] = argBool(a, "reauthOn401", true)
+			}
+			return s.api(http.MethodPost, fmt.Sprintf("/api/session/login/from-flow/%d", id), body)
+		})
+
+	s.add("set_login_macro",
+		"Configure the login macro directly (raw HTTP request + target URL).",
+		obj(map[string]any{
+			"enabled":     pt("boolean"),
+			"target":      p("string", "scheme://host[:port]"),
+			"request":     p("string", "raw HTTP request (request line + headers + body)"),
+			"refreshSecs": p("integer", "auto-refresh interval; 0 = manual/401 only"),
+			"reauthOn401": p("boolean", "retry sends after re-login on 401"),
+		}, "enabled", "target", "request"),
+		func(a map[string]any) (string, error) {
+			lm := map[string]any{
+				"enabled":     argBool(a, "enabled", false),
+				"target":      argStr(a, "target"),
+				"request":     argStr(a, "request"),
+				"refreshSecs": argInt(a, "refreshSecs", 0),
+				"reauthOn401": argBool(a, "reauthOn401", true),
+			}
+			return s.api(http.MethodPost, "/api/session", map[string]any{"loginMacro": lm})
+		})
+
+	s.add("test_login_macro",
+		"Dry-run the login macro — returns login response status and headers it would capture (does not apply session).",
+		obj(map[string]any{}),
+		func(a map[string]any) (string, error) {
+			return s.api(http.MethodPost, "/api/session/login/test", nil)
+		})
+
+	s.add("get_discovery_wordlist",
+		"Return the built-in default content-discovery wordlist (same fallback start_discovery uses when wordlist is empty).",
+		obj(map[string]any{}),
+		func(a map[string]any) (string, error) {
+			return s.apiGet("/api/discovery/wordlist")
 		})
 }

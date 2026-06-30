@@ -126,10 +126,50 @@ func (h *Hub) recordDiscovered(runID int64, results []discovery.Result) {
 	}()
 }
 
+// parseDiscoveryWords normalizes wordlist input; falls back to the built-in list.
+func parseDiscoveryWords(wordlist string, words []string) []string {
+	raw := words
+	if len(raw) == 0 {
+		raw = strings.Split(wordlist, "\n")
+	}
+	out := filterWordlistLines(raw)
+	if len(out) == 0 {
+		out = filterWordlistLines(strings.Split(defaultWordlist, "\n"))
+	}
+	return out
+}
+
+func filterWordlistLines(lines []string) []string {
+	var out []string
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l == "" || strings.HasPrefix(l, "#") {
+			continue
+		}
+		out = append(out, l)
+	}
+	return out
+}
+
+func mergeWordlists(base, extra []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, w := range append(base, extra...) {
+		w = strings.TrimSpace(w)
+		if w == "" || seen[w] {
+			continue
+		}
+		seen[w] = true
+		out = append(out, w)
+	}
+	return out
+}
+
 type discoverySpecIn struct {
 	BaseURL    string            `json:"baseUrl"`
 	Wordlist   string            `json:"wordlist"`   // newline-separated (textarea)
 	Words      []string          `json:"words"`      // optional structured form
+	UseSeeds   *bool             `json:"useSeeds"`   // merge history path seeds (default true)
 	Extensions string            `json:"extensions"` // comma/space separated, e.g. ".php .bak"
 	Threads    int               `json:"threads"`
 	DelayMs    int               `json:"delayMs"`
@@ -149,9 +189,15 @@ func (h *Hub) discoveryStart(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "bad JSON")
 		return
 	}
-	words := in.Words
-	if len(words) == 0 {
-		words = strings.Split(in.Wordlist, "\n")
+	words := parseDiscoveryWords(in.Wordlist, in.Words)
+	useSeeds := true
+	if in.UseSeeds != nil {
+		useSeeds = *in.UseSeeds
+	}
+	if useSeeds && in.BaseURL != "" {
+		if f := flowFromURL(in.BaseURL); f != nil {
+			words = mergeWordlists(words, h.collectPathSeeds(f.Host))
+		}
 	}
 	spec := discovery.Spec{
 		BaseURL:    in.BaseURL,
