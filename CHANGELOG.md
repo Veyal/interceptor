@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-06-30
+
+**Control where the UI listens:** change the control-plane port from Settings or the command line — no more digging for env vars.
+
 ### Added
 - **Control UI address in Settings.** Change where the web UI and REST API listen (port or bind address) from **Settings → Proxy & network**, same loopback/external-bind rules as the proxy listener. Persisted as `control.addr`.
 - **`--control-port` / `--control-addr` flags.** Set the control UI/API listen address at launch without env vars (e.g. `interceptor --control-port=9967` or `interceptor --control_port=1234`). CLI overrides env and persisted settings for that run.
