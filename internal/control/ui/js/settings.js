@@ -111,7 +111,8 @@ $$('#setNav button').forEach(b=>b.onclick=()=>{
 let savedAiModel='';
 let apiLoaded=false;
 
-export async function loadSettings(){try{const s=await api('/api/settings');state.proxyAddr=s.proxyAddr;$('#proxyAddr').textContent=s.proxyAddr;$('#setAddr').value=s.proxyAddr;
+export async function loadSettings(){try{const s=await api('/api/settings');state.proxyAddr=s.proxyAddr;state.controlAddr=s.controlAddr||'127.0.0.1:9966';$('#proxyAddr').textContent=s.proxyAddr;$('#controlAddr').textContent=state.controlAddr;$('#setAddr').value=s.proxyAddr;$('#setControlAddr').value=state.controlAddr;
+  const tun=$('#oobModalTunnelCmd');if(tun)tun.textContent='cloudflared tunnel --url http://'+state.controlAddr;
   if($('#setUpstream'))$('#setUpstream').value=s.upstreamProxy||'';
   state.aiDisabled=!!s.aiDisabled;
   state.oobEnabled=!!s.oobEnabled;
@@ -535,7 +536,16 @@ export async function openProjectModal(){
 {const ni=$('#pmNew');if(ni)ni.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();const v=ni.value.trim();if(v)doSwitchProject(v);}});}
 $('#saveAddrBtn').onclick=async()=>{
   try{const s=await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({proxyAddr:$('#setAddr').value})});
-    $('#proxyAddr').textContent=s.proxyAddr;toast('proxy now on '+s.proxyAddr);}catch(e){toast(e.message);}
+    state.proxyAddr=s.proxyAddr;$('#proxyAddr').textContent=s.proxyAddr;toast('proxy now on '+s.proxyAddr);}catch(e){toast(e.message);}
+};
+$('#saveControlAddrBtn').onclick=async()=>{
+  try{const s=await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({controlAddr:$('#setControlAddr').value})});
+    state.controlAddr=s.controlAddr;$('#controlAddr').textContent=s.controlAddr;
+    const newUrl='http://'+s.controlAddr;
+    if(location.host!==s.controlAddr)toast('Control UI now on '+newUrl+' — open that URL if this page stops updating');
+    else toast('control UI now on '+s.controlAddr);
+    const tun=$('#oobModalTunnelCmd');if(tun)tun.textContent='cloudflared tunnel --url '+newUrl;
+  }catch(e){toast(e.message);}
 };
 export async function loadSysProxy(){
   try{const s=await api('/api/sysproxy');const sec=$('#sysProxySection');const b=$('#sysProxyToggle');

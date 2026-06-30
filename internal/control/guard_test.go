@@ -162,6 +162,63 @@ func TestIsLoopbackHost(t *testing.T) {
 	}
 }
 
+func TestPutSettingsRejectsExternalControlBind(t *testing.T) {
+	h, _, _ := newHub(t)
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	put := func(body string) int {
+		req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/settings", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("PUT: %v", err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if c := put(`{"controlAddr":"0.0.0.0:9966"}`); c != http.StatusBadRequest {
+		t.Fatalf("external control bind 0.0.0.0 must be rejected, got %d", c)
+	}
+	if c := put(`{"controlAddr":"192.168.1.5:9966"}`); c != http.StatusBadRequest {
+		t.Fatalf("LAN control bind must be rejected, got %d", c)
+	}
+}
+
+func TestPutSettingsRebindsControlAddr(t *testing.T) {
+	h, st, _ := newHub(t)
+	fake := &fakeRebinder{addr: "127.0.0.1:9966"}
+	h.SetControlRebinder(fake)
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/settings", strings.NewReader(`{"controlAddr":"127.0.0.1:9967"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, body %s", resp.StatusCode, readAll(resp.Body))
+	}
+	if fake.addr != "127.0.0.1:9967" {
+		t.Fatalf("rebind addr = %q, want 127.0.0.1:9967", fake.addr)
+	}
+	if v, ok, _ := st.GetSetting("control.addr"); !ok || v != "127.0.0.1:9967" {
+		t.Fatalf("persisted control.addr = %q, ok=%v", v, ok)
+	}
+	if h.SelfAddr != "127.0.0.1:9967" {
+		t.Fatalf("SelfAddr = %q", h.SelfAddr)
+	}
+}
+
+type fakeRebinder struct{ addr string }
+
+func (f *fakeRebinder) Rebind(addr string) error { f.addr = addr; return nil }
+func (f *fakeRebinder) Addr() string             { return f.addr }
+
 func TestPutSettingsRejectsExternalBind(t *testing.T) {
 	h, _, _ := newHub(t)
 	ts := httptest.NewServer(h.Handler())
