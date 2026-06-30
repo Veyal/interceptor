@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Veyal/interceptor/internal/auth/jwtextract"
 	"github.com/Veyal/interceptor/internal/sender"
 	"github.com/Veyal/interceptor/internal/store"
 )
@@ -88,10 +89,7 @@ func (h *Hub) authzFlowAuth(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusNotFound, "flow not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"requestAuth":  extractAuthHeaders(f.ReqHeaders),
-		"cookieHints":  cookieExpiryHints(f.ResHeaders),
-	})
+	writeJSON(w, http.StatusOK, flowAuthPayload(f))
 }
 
 // authzCheckSessions replays one flow under each identity and reports whether
@@ -410,6 +408,7 @@ func (h *Hub) authzCrossHostReplay(w http.ResponseWriter, r *http.Request) {
 		FlowID    int64  `json:"flowId"`    // reference endpoint (path to replay)
 		JWTFlowID int64  `json:"jwtFlowId"` // source of JWT; defaults to flowId
 		JWT       string `json:"jwt"`        // raw JWT (alternative to jwtFlowId)
+		Mode      string `json:"mode"`       // auto | bearer | path (default auto)
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		httpErr(w, http.StatusBadRequest, "bad json")
@@ -427,6 +426,7 @@ func (h *Hub) authzCrossHostReplay(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jwt := strings.TrimSpace(in.JWT)
+	jwtSource := "explicit"
 	if jwt == "" {
 		srcID := in.JWTFlowID
 		if srcID == 0 {
@@ -442,11 +442,37 @@ func (h *Hub) authzCrossHostReplay(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		jwt = extractBearerToken(srcFlow.ReqHeaders)
+		rawQuery := ""
+		if i := strings.Index(srcFlow.Path, "?"); i >= 0 {
+			rawQuery = srcFlow.Path[i+1:]
+		}
+		pathOnly := srcFlow.Path
+		if i := strings.Index(pathOnly, "?"); i >= 0 {
+			pathOnly = pathOnly[:i]
+		}
+		jwt, jwtSource = jwtextract.Extract(jwtextract.Input{
+			ReqHeaders: srcFlow.ReqHeaders,
+			Path:       pathOnly,
+			RawQuery:   rawQuery,
+			ReqBody:    h.bodyBytes(srcFlow.ReqBodyHash),
+			ResBody:    h.bodyBytes(srcFlow.ResBodyHash),
+		})
 	}
 	if jwt == "" {
-		httpErr(w, http.StatusBadRequest, "no Bearer token found — provide jwt directly or pick a flow that has an Authorization: Bearer header")
+		httpErr(w, http.StatusBadRequest, "no JWT found — provide jwt directly or pick a flow with Bearer/path/JSON token")
 		return
+	}
+
+	mode := strings.ToLower(strings.TrimSpace(in.Mode))
+	if mode == "" {
+		mode = "auto"
+	}
+	if mode == "auto" {
+		if jwtextract.SourceUsesPath(jwtSource) {
+			mode = "path"
+		} else {
+			mode = "bearer"
+		}
 	}
 
 	type hostKey struct {
@@ -474,8 +500,14 @@ func (h *Hub) authzCrossHostReplay(w http.ResponseWriter, r *http.Request) {
 	}
 
 	path := ref.Path
+	if i := strings.Index(path, "?"); i >= 0 {
+		path = path[:i]
+	}
 	if path == "" {
 		path = "/"
+	}
+	if mode == "path" {
+		path = jwtextract.ReplayPath(path, jwt)
 	}
 
 	type hostResult struct {
@@ -500,7 +532,11 @@ func (h *Hub) authzCrossHostReplay(w http.ResponseWriter, r *http.Request) {
 		targetURL := t.scheme + "://" + hostport + path
 
 		hdrs := cloneHeaders(ref.ReqHeaders)
-		hdrs["Authorization"] = []string{"Bearer " + jwt}
+		if mode == "bearer" {
+			hdrs["Authorization"] = []string{"Bearer " + jwt}
+		} else {
+			delete(hdrs, "Authorization")
+		}
 
 		flow, _ := h.snd.Send(sender.Request{
 			Method:    ref.Method,
@@ -528,11 +564,13 @@ func (h *Hub) authzCrossHostReplay(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"flowId":  in.FlowID,
-		"method":  ref.Method,
-		"path":    path,
-		"jwt":     jwtPreview,
-		"results": results,
+		"flowId":    in.FlowID,
+		"method":    ref.Method,
+		"path":      path,
+		"mode":      mode,
+		"jwtSource": jwtSource,
+		"jwt":       jwtPreview,
+		"results":   results,
 	})
 }
 

@@ -29,11 +29,12 @@ type Endpoint struct {
 
 // EndpointFilter narrows which flows are aggregated into endpoints.
 type EndpointFilter struct {
-	Host         string
-	Search       string
-	SearchScope  string // path, headers, body, all — see EndpointSearch* constants
-	ExcludeFlags int64
-	Tag          string // only endpoints with at least one flow carrying this tag
+	Host          string
+	Search        string
+	SearchScope   string // path, headers, body, all — see EndpointSearch* constants
+	ExcludeFlags  int64
+	Tag           string // only endpoints with at least one flow carrying this tag
+	HideNoiseOnly bool   // drop endpoints that only ever returned 403/404 (forced-browse noise)
 }
 
 // parseStatusCSV turns GROUP_CONCAT(DISTINCT status) ("200,404") into a sorted

@@ -1,4 +1,4 @@
-import { $, esc, escAttr, toast, api, methodColor, statusColor, statusText, highlightHTTP, prettify, beautifyBody, fmtDur, fmtSize, openCtxMenu, DEC_OPS, contentTypeFromRaw, pickTextFile, normalizeListText, parseListLines, previewListLines, LIST_PREVIEW_LINES, wireRowKey } from './core.js';
+import { $, esc, escAttr, toast, api, methodColor, statusColor, statusText, highlightHTTP, prettify, beautifyBody, fmtDur, fmtSize, openCtxMenu, DEC_OPS, contentTypeFromRaw, pickTextFile, normalizeListText, parseListLines, previewListLines, LIST_PREVIEW_LINES, wireRowKey, uiPrompt } from './core.js';
 
 // repStatusLine builds a rich response summary: "200 OK · 142 ms · 4.1 KB".
 function repStatusLine(f){
@@ -33,7 +33,7 @@ export function renderRepTabs(){
   const bar=$('#repTabs');if(!bar)return;
   bar.innerHTML=repTabs.map(t=>`<div class="rep-tab${t.tid===repActive?' on':''}" data-tid="${t.tid}" title="${escAttr(t.title||'new tab')}">
     <span class="rt-label" style="color:${t.tid===repActive?methodColor(t.method):'inherit'}">${esc(t.title||'new tab')}</span>
-    <span class="rt-close" data-close="${t.tid}" title="close tab">✕</span></div>`).join('')
+    <button type="button" class="rt-close" data-close="${t.tid}" aria-label="close tab" title="close tab">✕</button></div>`).join('')
     +`<button class="rep-tab-add" id="repTabAdd" title="New tab">＋</button>`;
   bar.querySelectorAll('.rep-tab').forEach(el=>{el.onclick=e=>{if(e.target.dataset.close!=null)return;repSwitch(Number(el.dataset.tid));};wireRowKey(el,()=>repSwitch(Number(el.dataset.tid)));});
   bar.querySelectorAll('[data-close]').forEach(x=>x.onclick=e=>{e.stopPropagation();repCloseTab(Number(x.dataset.close));});
@@ -81,14 +81,20 @@ export async function repSend(){
 }
 export async function renderRepResponse(){
   const t=repCur();if(!t||!t.resId)return;
-  try{const raw=await api('/api/flows/'+t.resId+'/raw?side=res');$('#repResView').innerHTML=highlightHTTP((t.resView==='pretty')?prettify(raw):raw,t.resView==='pretty',contentTypeFromRaw(raw));}
-  catch(e){$('#repResView').textContent='(error: '+e.message+')';}
+  try{const raw=await api('/api/flows/'+t.resId+'/raw?side=res');
+    // A tab switch during the fetch would otherwise paint this response into the
+    // now-active tab's shared #repResView pane.
+    if(repCur()!==t)return;
+    $('#repResView').innerHTML=highlightHTTP((t.resView==='pretty')?prettify(raw):raw,t.resView==='pretty',contentTypeFromRaw(raw));}
+  catch(e){if(repCur()===t)$('#repResView').textContent='(error: '+e.message+')';}
 }
 export async function loadRepHistory(){
   const box=$('#repHistory');if(!box)return;const t=repCur();const ep=repTabEndpoint(t);
   const setCount=n=>{const tg=$('#repHistToggle');if(tg)tg.textContent='⟲ History'+(n?' ('+n+')':'');};
   try{
-    const d=await api('/api/repeater/history');const flows=ep?(d.flows||[]).filter(f=>repFlowEndpoint(f)===ep):[];
+    const d=await api('/api/repeater/history');
+    if(repCur()!==t)return; // tab switched mid-fetch — don't paint stale history
+    const flows=ep?(d.flows||[]).filter(f=>repFlowEndpoint(f)===ep):[];
     setCount(flows.length);
     if(!flows.length){box.innerHTML='<div class="hint" style="padding:10px">'+(ep?'No sends to this endpoint yet.':'Send a request to start this tab’s history.')+'</div>';return;}
     box.innerHTML=flows.map(f=>`<div class="h ${t&&f.id===t.resId?'sel':''}" data-id="${f.id}">
@@ -103,9 +109,12 @@ export async function repLoadSend(id){
   const t=repCur();if(!t)return;
   try{
     const d=await api('/api/flows/'+id);
+    const raw=await api('/api/flows/'+id+'/raw?side=req');
+    if(repCur()!==t)return; // user switched tabs while loading — keep their new tab intact
     const def=(d.scheme==='https'&&d.port===443)||(d.scheme==='http'&&d.port===80);
+    const i=raw.indexOf('\r\n\r\n');
     t.method=d.method;t.url=`${d.scheme}://${d.host}${def?'':':'+d.port}${d.path}`;t.headers=headersToText(d.reqHeaders);
-    const raw=await api('/api/flows/'+id+'/raw?side=req');const i=raw.indexOf('\r\n\r\n');t.body=i>=0?raw.slice(i+4):'';
+    t.body=i>=0?raw.slice(i+4):'';
     t.resId=id;t.status=repStatusLine(d);t.color=statusColor(d.status);t.title=repTitle(t);
     renderRepTabs();repLoadEditor();repPersist();
   }catch(e){toast(e.message);}
@@ -141,7 +150,17 @@ export function repInit(){
   }catch(e){}
   if(!ok){repTabs=[repBlank()];repActive=repTabs[0].tid;}
   renderRepTabs();repLoadEditor();
-  ['#repMethod','#repUrl'].forEach(s=>{const el=$(s);if(el)el.addEventListener('input',()=>{repSaveEditor();renderRepTabs();repPersistDebounced();});});
+  ['#repMethod','#repUrl'].forEach(s=>{const el=$(s);if(el)el.addEventListener('input',()=>{
+    repSaveEditor();
+    // Typing in method/url only changes the active tab's label — don't rebuild the
+    // whole tab bar (and re-wire every tab) on every keystroke. Update the label.
+    const t=repCur(); if(t){
+      const lbl=document.querySelector('#repTabs .rep-tab.on .rt-label');
+      if(lbl){lbl.textContent=t.title||'new tab'; lbl.style.color=t.tid===repActive?methodColor(t.method):'inherit';}
+      const tab=document.querySelector('#repTabs .rep-tab.on'); if(tab)tab.title=t.title||'new tab';
+    }
+    repPersistDebounced();
+  });});
   ['#repHeaders','#repBody'].forEach(s=>{const el=$(s);if(el)el.addEventListener('input',()=>{repSaveEditor();repPersistDebounced();});});
   repWireEncodeCtx();
 }
@@ -239,7 +258,7 @@ function intrMarkers(){return (($('#intrTemplate').value||'').match(/§[^§]*§/
 let intrSeq=1, intrTabs=[], intrActive=null, intrPersistT=null;
 function intrBlank(){return {tid:intrSeq++,target:'',template:INTR_TPL,type:'sniper',threads:1,delay:0,repeat:20,sniper:INTR_SNIPER,pos:INTR_POS.slice(),sniperLines:null,posLines:[],sniperFile:null,posFiles:[],grep:'',extract:'',proc:''};}
 function intrCur(){return intrTabs.find(t=>t.tid===intrActive)||null;}
-function intrTypeLabel(t){return t==='repeat'?'null':(t||'sniper');}
+function intrTypeLabel(t){return t==='repeat'?'repeat':(t||'sniper');}
 function intrTitle(t){if(!t)return 'new attack';let h='';try{h=new URL(t.target).host;}catch(e){h=(t.target||'').replace(/^https?:\/\//,'');}return intrTypeLabel(t.type)+(h?' · '+h:' attack');}
 function intrReadEditor(){return {target:$('#intrTarget').value,template:$('#intrTemplate').value,
   threads:parseInt($('#intrThreads').value,10)||1,delay:parseInt($('#intrDelay').value,10)||0,repeat:parseInt($('#intrRepeat').value,10)||20,
@@ -269,7 +288,7 @@ function intrPersistDebounced(){clearTimeout(intrPersistT);intrPersistT=setTimeo
 function intrTouch(){intrSaveCur();renderIntrTabs();intrPersistDebounced();} // save editor → active tab
 function renderIntrTabs(){
   const bar=$('#intrTabs');if(!bar)return;
-  bar.innerHTML=intrTabs.map(t=>`<div class="rep-tab${t.tid===intrActive?' on':''}" data-tid="${t.tid}" title="${escAttr(intrTitle(t))}"><span class="rt-label">${esc(intrTitle(t))}</span><span class="rt-close" data-close="${t.tid}" title="close tab">✕</span></div>`).join('')+`<button class="rep-tab-add" id="intrTabAdd" title="New attack">＋</button>`;
+  bar.innerHTML=intrTabs.map(t=>`<div class="rep-tab${t.tid===intrActive?' on':''}" data-tid="${t.tid}" title="${escAttr(intrTitle(t))}"><span class="rt-label">${esc(intrTitle(t))}</span><button type="button" class="rt-close" data-close="${t.tid}" aria-label="close tab" title="close tab">✕</button></div>`).join('')+`<button class="rep-tab-add" id="intrTabAdd" title="New attack">＋</button>`;
   bar.querySelectorAll('.rep-tab').forEach(el=>{el.onclick=e=>{if(e.target.dataset.close!=null)return;intrSwitch(Number(el.dataset.tid));};wireRowKey(el,()=>intrSwitch(Number(el.dataset.tid)));});
   bar.querySelectorAll('[data-close]').forEach(x=>x.onclick=e=>{e.stopPropagation();intrCloseTab(Number(x.dataset.close));});
   $('#intrTabAdd').onclick=()=>{intrSaveCur();intrTabs.push(intrBlank());intrActive=intrTabs[intrTabs.length-1].tid;renderIntrTabs();intrApply(intrCur());intrPersist();};
@@ -440,15 +459,34 @@ function updateIntrCount(){
     if(cnt)cnt.textContent=P?`${reqs.toLocaleString()} request${reqs===1?'':'s'}`:`${n.toLocaleString()} payloads · mark § first`;
   }
 }
+// The 5 attack types are presented as 3 primary modes — Sniper / Lists / Repeat —
+// with the list-combination (Battering / Pitchfork / Cluster) chosen by a sub-
+// select that appears under "Lists". intrState.type still holds one of the 5.
+const LIST_TYPES=['battering','pitchfork','cluster'];
+function intrPrimary(){return intrState.type==='sniper'?'sniper':intrState.type==='repeat'?'repeat':'__lists__';}
 function updateIntrMode(){
   const repeat=intrState.type==='repeat';
-  $('#intrType').querySelectorAll('button').forEach(x=>{const on=x.dataset.t===intrState.type;x.classList.toggle('on',on);x.setAttribute('aria-pressed',on?'true':'false');});
+  const primary=intrPrimary();
+  $('#intrType').querySelectorAll('button').forEach(x=>{const on=x.dataset.t===primary;x.classList.toggle('on',on);x.setAttribute('aria-pressed',on?'true':'false');});
+  const lm=document.getElementById('intrListMode');
+  if(lm){
+    const isList=primary==='__lists__';
+    lm.style.display=isList?'':'none';
+    if(isList&&LIST_TYPES.includes(intrState.type))lm.value=intrState.type;
+  }
   const h=$('#intrHint');if(h)h.textContent=intrModeText();
   const rw=$('#intrRepeatWrap');if(rw)rw.style.display=repeat?'inline-flex':'none'; // "× N sends" only in Race
   const mk=$('#intrWrap');if(mk)mk.style.opacity=repeat?'.4':''; // § markers irrelevant in Race
   renderPayloadInputs();
 }
-$('#intrType').querySelectorAll('button').forEach(b=>b.onclick=()=>{intrState.type=b.dataset.t;updateIntrMode();intrTouch();});
+$('#intrType').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  const t=b.dataset.t;
+  if(t==='__lists__'){if(!LIST_TYPES.includes(intrState.type))intrState.type='cluster';}
+  else intrState.type=t;
+  updateIntrMode();intrTouch();
+});
+const _intrListMode=document.getElementById('intrListMode');
+if(_intrListMode)_intrListMode.onchange=()=>{intrState.type=_intrListMode.value;updateIntrMode();intrTouch();};
 $('#intrWrap').onclick=()=>{const ta=$('#intrTemplate');const a=ta.selectionStart,b=ta.selectionEnd,v=ta.value;ta.value=v.slice(0,a)+'§'+v.slice(a,b)+'§'+v.slice(b);ta.focus();ta.selectionStart=a+1;ta.selectionEnd=b+1;intrTemplateChanged();intrTouch();};
 // Re-derive the per-marker inputs whenever the template's § markers change. (Input
 // listeners for the editor fields are wired in intrInit so they also save to the tab.)
@@ -498,8 +536,8 @@ function loadIntrPresets(){
     updateIntrMode();intrTouch();toast('loaded preset');
   };
 }
-if($('#intrPresetSave'))$('#intrPresetSave').onclick=()=>{
-  const name=prompt('Preset name');if(!name)return;
+if($('#intrPresetSave'))$('#intrPresetSave').onclick=async()=>{
+  const name=await uiPrompt({title:'Save attack preset',placeholder:'preset name'});if(!name)return;
   let list=[];try{list=JSON.parse(localStorage.getItem(INTR_PRESETS_KEY)||'[]');}catch(e){}
   list.unshift({name,target:$('#intrTarget').value,template:$('#intrTemplate').value,type:intrState.type,
     sniper:intrState.sniper,pos:intrState.pos.slice(),threads:$('#intrThreads').value,delay:$('#intrDelay').value,
@@ -531,22 +569,59 @@ export function renderIntr(st){
   const box=$('#intrResults');
   if(st.error){box.innerHTML='<div class="hint" style="padding:12px;color:var(--red)">'+esc(st.error)+'</div>';return;}
   if(!res.length){box.innerHTML='<div class="hint" style="padding:12px">'+(running?'sending…':'Set a target, mark § injection points in the template, add payloads, then Start.')+'</div>';return;}
-  box.innerHTML=res.map(r=>`<div class="intr-row ${r.flagged?'flag':''}${r.matched?' match':''}">
+  if(res.length>=INTR_VIRT_MIN) renderIntrVirtual(box,res);
+  else box.innerHTML=res.map(intrRowHTML).join('');
+}
+// Virtualized Intruder results: rendering thousands of result rows on every poll
+// (every 120ms while running) rebuilds the whole DOM and janks the tab. Render only
+// the visible window, repaint on scroll — same pattern as the Map table / Proxy rows.
+const INTR_ROW_H=25, INTR_VIRT_MIN=200;
+function intrRowHTML(r){
+  return `<div class="intr-row ${r.flagged?'flag':''}${r.matched?' match':''}">
     <div style="color:var(--fg3)">${r.id}</div>
     <div class="pl">${esc(r.payload)}${r.flagged?' ⚑':''}${r.anomaly?' <span class="intr-anomaly" title="length anomaly">∿</span>':''}${r.matched?' <span title="grep matched">✓</span>':''}${r.extracted?' <span class="ext" title="extracted">→ '+esc(r.extracted)+'</span>':''}</div>
     <div style="color:${statusColor(r.status)};font-weight:700;text-align:center">${r.error?'ERR':(r.status||'—')}</div>
     <div style="color:${r.anomaly?'var(--amber)':'var(--fg2)'};text-align:right;font-weight:${r.anomaly?'700':'400'}">${r.length}</div>
-    <div style="color:var(--fg3);text-align:right">${r.timeMs}ms</div></div>`).join('');
+    <div style="color:var(--fg3);text-align:right">${r.timeMs}ms</div></div>`;
+}
+function paintIntrWindow(box){
+  const res=box._res||[];const st=box.scrollTop,vh=box.clientHeight||360;
+  const start=Math.max(0,Math.floor(st/INTR_ROW_H)-8);
+  const end=Math.min(res.length,Math.ceil((st+vh)/INTR_ROW_H)+8);
+  const body=box.querySelector('.intr-virt-body');if(!body)return;
+  body.style.transform=`translateY(${start*INTR_ROW_H}px)`;
+  body.innerHTML=res.slice(start,end).map(intrRowHTML).join('');
+}
+function renderIntrVirtual(box,res){
+  box._res=res;
+  let sp=box.querySelector('.intr-virt-spacer');
+  if(!sp){
+    box.classList.add('intr-virt');
+    box.innerHTML='<div class="intr-virt-spacer"></div><div class="intr-virt-body"></div>';
+    if(!box._virtBound){
+      box.addEventListener('scroll',()=>{if(box._virtQ)return;box._virtQ=true;requestAnimationFrame(()=>{box._virtQ=false;paintIntrWindow(box);});});
+      box._virtBound=true;
+    }
+    sp=box.querySelector('.intr-virt-spacer');
+  }
+  sp.style.height=(res.length*INTR_ROW_H)+'px';
+  paintIntrWindow(box);
 }
 intrInit(); // load saved tabs + history, wire editor inputs (seeds the editor too)
-export function sendToIntruder(f){
-  Promise.all([api('/api/flows/'+f.id),api('/api/flows/'+f.id+'/raw?side=req')]).then(([d,raw])=>{
+export async function sendToIntruder(f){
+  // Switch to the Intruder tab first for responsiveness (matches sendToRepeater),
+  // and capture the active attack tab before any await so a sub-tab switch during
+  // the fetch can't make intrTouch() save the request into the wrong tab.
+  document.querySelector('.tab[data-tab="intruder"]').click();
+  const target=intrCur();
+  try{
+    const [d,raw]=await Promise.all([api('/api/flows/'+f.id),api('/api/flows/'+f.id+'/raw?side=req')]);
+    if(intrCur()!==target)return;
     const def=(d.scheme==='https'&&d.port===443)||(d.scheme==='http'&&d.port===80);
     $('#intrTarget').value=`${d.scheme}://${d.host}${def?'':':'+d.port}`;
     $('#intrTemplate').value=raw.replace(/\r\n/g,'\n');
     updateIntrMode(); // refresh marker-derived payload inputs for the new template
-    intrTouch();      // save the loaded request into the active attack tab
-    document.querySelector('.tab[data-tab="intruder"]').click();
+    intrTouch();      // save the loaded request into the captured attack tab
     toast('loaded #'+f.id+' into Intruder · add § markers');
-  }).catch(e=>toast(e.message));
+  }catch(e){toast(e.message);}
 }

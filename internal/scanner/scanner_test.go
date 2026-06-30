@@ -25,6 +25,44 @@ func has(issues []store.Issue, title string) bool {
 	return false
 }
 
+func TestDBErrorPossibleSQLi(t *testing.T) {
+	// A database error string in the response body is a strong passive SQLi signal.
+	for _, body := range []string{
+		`{"error":"You have an error in your SQL syntax near '1'"}`,
+		`ORA-00942: table or view does not exist`,
+		`SQLSTATE[42000]: Syntax error or access violation`,
+		`sqlite3.OperationalError: near "x": syntax error`,
+	} {
+		flow := &store.Flow{Scheme: "https", Method: "GET", Host: "shop.example", Path: "/p?id=1", Status: 500,
+			ResHeaders: map[string][]string(http.Header{"Content-Type": {"application/json"}, "Strict-Transport-Security": {"max-age=1"}})}
+		got := Analyze(flow, nil, []byte(body))
+		if !has(got, "Possible SQL injection (DB error in response)") {
+			t.Fatalf("expected SQLi finding for %q; got: %s", body, titles(got))
+		}
+	}
+	// Negative: a benign response with no DB error signature must not flag.
+	benign := &store.Flow{Scheme: "https", Method: "GET", Host: "shop.example", Path: "/p?id=1", Status: 200,
+		ResHeaders: map[string][]string(http.Header{"Content-Type": {"application/json"}, "Strict-Transport-Security": {"max-age=1"}})}
+	got := Analyze(benign, nil, []byte(`{"product":"widget","price":9.99}`))
+	if has(got, "Possible SQL injection (DB error in response)") {
+		t.Fatalf("benign response should not flag SQLi; got: %s", titles(got))
+	}
+}
+
+func TestDisabledBuiltinSkipped(t *testing.T) {
+	// Disabling the security-headers check must suppress the merged finding.
+	flow := &store.Flow{Scheme: "https", Method: "GET", Host: "app.example", Path: "/", Status: 200, Mime: "text/html",
+		ResHeaders: map[string][]string(http.Header{"Content-Type": {"text/html"}})}
+	on := Analyze(flow, nil, []byte("<html></html>"))
+	if !has(on, "Missing security response headers") {
+		t.Fatalf("expected merged header finding when enabled; got: %s", titles(on))
+	}
+	off := AnalyzeWithDisabled(flow, nil, []byte("<html></html>"), map[string]bool{"security-headers": true})
+	if has(off, "Missing security response headers") {
+		t.Fatalf("disabled check must be skipped; got: %s", titles(off))
+	}
+}
+
 func TestAnalyzeHeaderHygiene(t *testing.T) {
 	flow := &store.Flow{
 		Scheme: "https", Method: "GET", Host: "app.example.com", Path: "/", Status: 200, Mime: "text/html",
@@ -36,8 +74,7 @@ func TestAnalyzeHeaderHygiene(t *testing.T) {
 	}
 	got := Analyze(flow, nil, []byte("<html></html>"))
 	for _, want := range []string{
-		"Missing Content-Security-Policy header",
-		"Missing Strict-Transport-Security (HSTS)",
+		"Missing security response headers",
 		"Overly permissive CORS policy",
 		"Server software version disclosed",
 	} {
@@ -96,8 +133,7 @@ func TestAnalyzeReflectionAuthAndFraming(t *testing.T) {
 	for _, want := range []string{
 		"Request parameter reflected in HTML response",
 		"HTTP Basic authentication in use",
-		"Missing X-Content-Type-Options: nosniff",
-		"Missing clickjacking protection",
+		"Missing security response headers",
 	} {
 		if !has(got, want) {
 			t.Fatalf("expected %q; got: %s", want, titles(got))
@@ -344,10 +380,12 @@ func TestNoCookieNoCacheIssue(t *testing.T) {
 	}
 }
 
-// --- Check 17: Missing Referrer-Policy ---
+// --- Merged security-headers check (was check 17: Missing Referrer-Policy) ---
 
 func TestMissingReferrerPolicy(t *testing.T) {
-	// Positive: HTML response without Referrer-Policy → Low finding.
+	// Positive: HTML response with every other security header present but no
+	// Referrer-Policy → one consolidated "Missing security response headers"
+	// finding at Low (CSP & HSTS are present, so the bundle isn't Medium).
 	flow := &store.Flow{
 		Scheme: "https", Method: "GET", Host: "app.example.com", Path: "/page", Status: 200, Mime: "text/html",
 		ResHeaders: map[string][]string(http.Header{
@@ -360,29 +398,32 @@ func TestMissingReferrerPolicy(t *testing.T) {
 		}),
 	}
 	got := Analyze(flow, nil, []byte("<html><body>hello</body></html>"))
-	if !has(got, "Missing Referrer-Policy header") {
-		t.Fatalf("expected Referrer-Policy finding; got: %s", titles(got))
+	if !has(got, "Missing security response headers") {
+		t.Fatalf("expected consolidated security-headers finding; got: %s", titles(got))
 	}
 	for _, i := range got {
-		if i.Title == "Missing Referrer-Policy header" && i.Severity != "Low" {
-			t.Fatalf("expected Low severity, got %s", i.Severity)
+		if i.Title == "Missing security response headers" && i.Severity != "Low" {
+			t.Fatalf("expected Low severity (only Referrer-Policy missing); got %s", i.Severity)
 		}
 	}
 }
 
 func TestMissingReferrerPolicyNegative(t *testing.T) {
-	// Negative: HTML response with Referrer-Policy present → no finding.
+	// Negative: HTML response with ALL security headers present → no finding.
 	flow := &store.Flow{
 		Scheme: "https", Method: "GET", Host: "app.example.com", Path: "/page", Status: 200, Mime: "text/html",
 		ResHeaders: map[string][]string(http.Header{
 			"Content-Type":              {"text/html; charset=utf-8"},
 			"Strict-Transport-Security": {"max-age=63072000"},
+			"X-Content-Type-Options":    {"nosniff"},
+			"X-Frame-Options":           {"DENY"},
+			"Content-Security-Policy":   {"default-src 'self'"},
 			"Referrer-Policy":           {"strict-origin-when-cross-origin"},
 		}),
 	}
 	got := Analyze(flow, nil, []byte("<html><body>hello</body></html>"))
-	if has(got, "Missing Referrer-Policy header") {
-		t.Fatalf("should not flag when Referrer-Policy is present; got: %s", titles(got))
+	if has(got, "Missing security response headers") {
+		t.Fatalf("should not flag when all security headers are present; got: %s", titles(got))
 	}
 }
 

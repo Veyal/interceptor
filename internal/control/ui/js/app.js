@@ -9,7 +9,7 @@ import { repInit, repSend, sendToRepeater, sendToIntruder, scheduleIntr } from '
 import { loadIssues, runScan, loadScanTargets, openActive, openDecoder, openChecks, loadActive, loadChecksList, loadOob, renderAsScopePanel } from './scanner.js';
 import { loadEndpoints } from './map.js';
 import { loadDiscovery, refreshDiscovery } from './discovery.js';
-import { loadSettings, loadSysProxy, loadSession, loadProject, openProjectModal, applyAiDisabledUI, applyOobDisabledUI } from './settings.js';
+import { loadSettings, loadSysProxy, loadAndroid, loadSession, loadProject, openProjectModal, applyAiDisabledUI, applyOobDisabledUI } from './settings.js';
 import { loadNotes, flushNotesSave, focusNotes, organizeNotes } from './notes.js';
 import { renderActivity, onActivity, loadActivity, clearActSeen } from './activity.js';
 import { loadFindings } from './findings.js';
@@ -19,6 +19,7 @@ import './flowmodal.js'; // side-effect: flow inspect popup + modal handlers
 import './ai.js'; // side-effect: wires the AI assist modal (its openAi is also imported by proxy.js)
 import './authz.js'; // side-effect: wires authz modal buttons
 import { openAuthz, renderAuthzScopePanel } from './authz.js';
+import { maybeShowSetup } from './setup.js';
 
 /* ---- tabs ---- */
 function activateTab(t){
@@ -118,12 +119,19 @@ function renderIcptStat(){
 }
 setInterval(renderCapStat,1000);
 
-let mapRefreshT=null;
+let mapRefreshT=null, mapLoadedSig='';
 function scheduleMapRefresh(){
   clearTimeout(mapRefreshT);
   mapRefreshT=setTimeout(()=>{
-    if(document.querySelector('.tab[data-tab="map"]')?.classList.contains('active')) loadEndpoints();
-  },900);
+    if(!document.querySelector('.tab[data-tab="map"]')?.classList.contains('active')) return;
+    // On a busy proxy the SSE stream fires constantly; don't re-fetch + re-render
+    // the (potentially huge) map unless new flows actually arrived since the last
+    // load. Newest id + count is a cheap "did anything change" signal.
+    const sig=state.flows.length+':'+((state.flows[0]&&state.flows[0].id)||0);
+    if(sig===mapLoadedSig) return;
+    mapLoadedSig=sig;
+    loadEndpoints();
+  },2000);
 }
 
 /* ---- live events ---- */
@@ -240,10 +248,13 @@ function cmdkClose(){cmdk.open=false;if(cmdk.el)cmdk.el.style.display='none';}
 
 /* ---- global keyboard shortcuts ---- */
 function selectedFlow(){return state.selId?state.flows.find(x=>x.id===state.selId):null;}
+function activePanel(){const p=document.querySelector('.panel.active');return p?p.dataset.panel:'';}
+// Flow send shortcuts apply only where History selection is the focus — not Settings, Repeater, etc.
+function flowSendShortcutAllowed(){return activePanel()==='proxy';}
 document.addEventListener('keydown',e=>{
   const mod=e.ctrlKey||e.metaKey;
   const tag=(e.target.tagName||'').toLowerCase();
-  const typing=tag==='input'||tag==='textarea'||e.target.isContentEditable;
+  const typing=tag==='input'||tag==='textarea'||tag==='select'||e.target.isContentEditable;
   if(mod&&e.key.toLowerCase()==='b'){
     e.preventDefault();goToNotes();return;
   }
@@ -254,9 +265,18 @@ document.addEventListener('keydown',e=>{
     if(!rep||!rep.classList.contains('active'))return;
     e.preventDefault();repSend();return;
   }
-  if(mod&&e.key.toLowerCase()==='r'){const f=selectedFlow();if(f){e.preventDefault();sendToRepeater(f);}return;}
-  if(!mod&&!typing&&e.key==='r'){const f=selectedFlow();if(f){const p=document.querySelector('.panel[data-panel="proxy"]');if(p&&p.classList.contains('active')){e.preventDefault();sendToRepeater(f);}}return;}
-  if(mod&&e.key.toLowerCase()==='i'){const f=selectedFlow();if(f){e.preventDefault();sendToIntruder(f);}return;}
+  if(mod&&e.key.toLowerCase()==='r'){
+    if(typing||!flowSendShortcutAllowed())return;
+    const f=selectedFlow();if(f){e.preventDefault();sendToRepeater(f);}return;
+  }
+  if(!mod&&!typing&&e.key==='r'){
+    if(!flowSendShortcutAllowed())return;
+    const f=selectedFlow();if(f){e.preventDefault();sendToRepeater(f);}return;
+  }
+  if(mod&&e.key.toLowerCase()==='i'){
+    if(typing||!flowSendShortcutAllowed())return;
+    const f=selectedFlow();if(f){e.preventDefault();sendToIntruder(f);}return;
+  }
   // Ctrl+Shift+F forward / Ctrl+D drop the selected held item — Intercept tab only
   if(document.querySelector('.tab[data-tab="intercept"]').classList.contains('active')){
     const drop=mod&&!typing&&e.key.toLowerCase()==='d';
@@ -304,6 +324,9 @@ applyTheme(currentTheme()); // sync the button icon with the theme applied pre-p
 
 /* ---- boot ---- */
 async function refreshIntercept(){try{state.intercept=await api('/api/intercept');renderIntercept();}catch(e){}}
-renderChips();loadSettings();loadSysProxy();loadSession();loadFlows();loadRules();loadScope();loadViews();refreshIntercept().then(()=>renderIcptStat());repInit();loadIssues();loadActivity();loadProject();loadVersion(true);loadHumanInput();loadFindings();loadTags();connectEvents();restoreTab();
+renderChips();loadSettings();loadSysProxy();loadAndroid();loadSession();loadFlows();loadRules();loadScope();loadViews();refreshIntercept().then(()=>renderIcptStat());repInit();loadIssues();loadActivity();loadProject();loadVersion(true);loadHumanInput();loadFindings();loadTags();connectEvents();restoreTab();
+// First-run setup wizard: shown once after the initial flow load, unless the
+// user already completed/skipped it or already has captured traffic.
+setTimeout(()=>{ if(state.flows && !state.flows.length) maybeShowSetup(); }, 600);
 {const cb=$('#cmdkBtn');if(cb)cb.onclick=()=>cmdkOpen();}
 {const hb=$('#helpBtn');if(hb)hb.onclick=()=>openModal($('#shortcutsModal'));}

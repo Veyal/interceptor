@@ -1,5 +1,6 @@
 import { $, esc, escAttr, state, toast, api, openModal, closeModal, copyText, fmtTime, renderMD, pickTextFile, normalizeListText, DEC_OPS, wireRowKey, saveFile, uiConfirm, methodColor, statusColor } from './core.js';
 import { flowPopup } from './flowmodal.js';
+import { openFinding } from './findings.js';
 
 /* ---- out-of-band (OOB) interaction catcher ---- */
 export async function loadOob(){
@@ -31,19 +32,13 @@ $('#oobClear')&&($('#oobClear').onclick=async()=>{try{await api('/api/oob/intera
 const OOB_TUNNEL_CMD='cloudflared tunnel --url http://127.0.0.1:9966';
 $('#oobModalTunnelCopy')&&($('#oobModalTunnelCopy').onclick=()=>copyText(OOB_TUNNEL_CMD,'Tunnel command copied'));
 
-/* ---- Scanner sub-tabs (legacy) ----
-   Findings is now its own top-level tab; the Scanner tab is passive-only.
-   setScanSub remains as a no-op shim so any lingering callers (e.g. old saved
-   state or cross-links) don't throw. If asked for the findings view, it now
-   activates the standalone Findings tab. */
-export function setScanSub(sub){
-  if(sub==='findings'){
-    document.querySelector('.tab[data-tab="findings"]')?.click();
-  }
-}
-
 /* ---- custom checks editor ---- */
 let checkMode='code',checkDocsLoaded=false;
+// checkKind tracks which kind of check the editor is editing: 'passive' (inspects
+// a captured flow) or 'active' (sends probes via /api/active-checks). Drives the
+// Save/Test/Delete endpoint and the New template.
+let checkKind='passive';
+const checkEndpoint=()=>checkKind==='active'?'/api/active-checks':'/api/checks';
 function checkSetMode(mode){
   checkMode=mode;
   const seg=$('#checkModeSeg');
@@ -71,44 +66,110 @@ function updateCheckFlowHint(){
   el.textContent=state.selId!=null?('Test flow: #'+state.selId+' (selected)'):'Test uses latest captured flow';
 }
 export async function loadChecksList(){
-  try{const d=await api('/api/checks');const box=$('#checksList');const cs=d.checks||[];const dis=new Set(d.disabled||[]);
-    if(!cs.length){box.innerHTML='<div class="hint" style="padding:10px">No custom checks yet — click <b>+ New check</b>.</div>';return;}
-    box.innerHTML=cs.map(c=>`<div data-id="${escAttr(c.id)}" style="padding:8px 10px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;cursor:pointer;font-size:11.5px">
-      <input type="checkbox" class="check-en" data-id="${escAttr(c.id)}" ${dis.has(c.id)?'':'checked'} title="enabled on scan">
-      <span style="flex:1;font-weight:700;color:${c.error?'var(--red)':'var(--fg)'}">${esc(c.id)}${c.error?' ⚠':''}</span></div>`).join('');
-    box.querySelectorAll('[data-id]').forEach(el=>el.onclick=e=>{if(e.target.classList.contains('check-en'))return;loadCheck(el.dataset.id);});
+  try{
+    const d=await api('/api/checks');const box=$('#checksList');if(!box)return;
+    const cs=d.checks||[];const dis=new Set(d.disabled||[]);
+    const builtin=d.builtin||[];const active=d.active||[];
+    const sevBadge=s=>`<span class="sev ${escAttr(s)}" style="font-size:9px">${esc(s)}</span>`;
+    const catBadge=c=>c?`<span style="font-size:9px;color:var(--fg3);border:1px solid var(--line);border-radius:4px;padding:0 4px">${esc(c)}</span>`:'';
+    // Built-in passive checks: toggleable, not deletable/editable. Grouped by category.
+    let html='';
+    if(builtin.length){
+      html+=`<div class="checks-sec">BUILT-IN · PASSIVE <span class="hint" style="font-weight:400;text-transform:none;letter-spacing:0">— toggle on/off; bundled with the app</span></div>`;
+      html+=builtin.map(b=>`<div class="checks-row checks-builtin" title="${escAttr(b.description||'')}" aria-label="built-in check ${escAttr(b.title)}">
+        <input type="checkbox" class="check-en" data-id="${escAttr(b.id)}" ${dis.has(b.id)?'':'checked'} aria-label="enable ${escAttr(b.title)}">
+        <span class="checks-title">${esc(b.title)}</span>${sevBadge(b.severity)}${catBadge(b.category)}</div>`).join('');
+    }
+    // Custom Starlark checks: full CRUD. Click a row to edit.
+    html+=`<div class="checks-sec">CUSTOM · STARLARK <span class="hint" style="font-weight:400;text-transform:none;letter-spacing:0">— yours; click to edit</span></div>`;
+    if(!cs.length){
+      html+='<div class="hint" style="padding:6px 10px">No custom checks yet — click <b>+ New check</b>. Built-in checks run out of the box.</div>';
+    }else{
+      html+=cs.map(c=>`<div class="checks-row checks-custom" data-id="${escAttr(c.id)}" aria-label="custom check ${escAttr(c.id)}${c.error?' (error)':''}" title="click to edit">
+        <input type="checkbox" class="check-en" data-id="${escAttr(c.id)}" ${dis.has(c.id)?'':'checked'} aria-label="enable check ${escAttr(c.id)}">
+        <span class="checks-title" style="color:${c.error?'var(--red)':'var(--fg)'}">${esc(c.id)}${c.error?' ⚠':''}</span>${catBadge('custom')}</div>`).join('');
+    }
+    // Active probes: toggleable like passive, but tagged — they send real traffic
+    // when you arm & run an active scan.
+    if(active.length){
+      html+=`<div class="checks-sec">ACTIVE · PROBES <span class="hint" style="font-weight:400;text-transform:none;letter-spacing:0">— toggle on/off; fire only when you arm &amp; run an active scan (sends traffic)</span></div>`;
+      html+=active.map(a=>`<div class="checks-row checks-active" title="${escAttr(a.fix||'')}" aria-label="active probe ${escAttr(a.title)}">
+        <input type="checkbox" class="check-en" data-id="${escAttr(a.id)}" ${dis.has(a.id)?'':'checked'} aria-label="enable ${escAttr(a.title)}">
+        <span style="width:14px;flex:none;color:var(--amber)" title="sends traffic">⚡</span>
+        <span class="checks-title">${esc(a.title)}</span>${sevBadge(a.severity)}${catBadge(a.class)}</div>`).join('');
+    }
+    // User-authored active checks (Starlark, sends traffic) — full CRUD like passive.
+    let csA=[];
+    try{csA=(await api('/api/active-checks')).checks||[];}catch(e){}
+    html+=`<div class="checks-sec">CUSTOM · ACTIVE <span class="hint" style="font-weight:400;text-transform:none;letter-spacing:0">— yours; author probes (⚡ sends traffic); click to edit</span></div>`;
+    if(!csA.length){
+      html+='<div class="hint" style="padding:6px 10px">No custom active checks — click <b>+ New active</b> to author one.</div>';
+    }else{
+      html+=csA.map(c=>`<div class="checks-row checks-custom checks-custom-active" data-id="${escAttr(c.id)}" data-active="1" aria-label="custom active check ${escAttr(c.id)}${c.error?' (error)':''}" title="click to edit">
+        <input type="checkbox" class="check-en" data-id="custom-active:${escAttr(c.id)}" ${dis.has('custom-active:'+c.id)?'':'checked'} aria-label="enable active check ${escAttr(c.id)}">
+        <span style="width:14px;flex:none;color:var(--amber)">⚡</span>
+        <span class="checks-title" style="color:${c.error?'var(--red)':'var(--fg)'}">${esc(c.id)}${c.error?' ⚠':''}</span>${catBadge('active')}</div>`).join('');
+    }
+    box.innerHTML=html;
+    // Custom rows open the editor (passive + active).
+    box.querySelectorAll('.checks-custom[data-id]').forEach(el=>{
+      const id=el.dataset.id, kind=el.dataset.active==='1'?'active':'passive';
+      el.onclick=e=>{if(e.target.classList.contains('check-en'))return;loadCheck(id,kind);};
+      wireRowKey(el,()=>loadCheck(id,kind));
+    });
+    // Any checkbox change (built-in or custom) recomputes the disabled set.
     box.querySelectorAll('.check-en').forEach(cb=>cb.onchange=async()=>{
       const disabled=[...box.querySelectorAll('.check-en')].filter(x=>!x.checked).map(x=>x.dataset.id);
-      try{await api('/api/checks/disabled',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({disabled})});}catch(e){toast(e.message);}
+      try{await api('/api/checks/disabled',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({disabled})});
+        toast('check '+(cb.checked?'enabled':'disabled'));}catch(e){toast(e.message);}
     });
   }catch(e){const box=$('#checksList');if(box)box.innerHTML=`<div class="hint" style="padding:10px;color:var(--red)">Couldn't load checks: ${esc(e.message)}</div>`;}
 }
-export async function loadCheck(id){
-  try{const d=await api('/api/checks/'+encodeURIComponent(id));$('#checkId').value=id;$('#checkSrc').value=d.source||'';
-    $('#checkOut').innerHTML='<span class="hint">Loaded <b>'+esc(id)+'</b>.</span>';}catch(e){toast(e.message);}
+const ACTIVE_CHECK_TEMPLATE=`# Active check: send probes at an injection point, confirm a vuln.
+# ⚡ probe(payload) sends a real request — it counts against the run's budget.
+def check(point, baseline, probe):
+    r = probe("'")
+    if re_search("(?i)SQL syntax", r.body):
+        return [finding("High", "SQL injection (custom)", evidence=r.body[:80], fix="parameterize queries")]
+    return []
+`;
+function refreshCheckEditorMode(){
+  // The AI "Describe" tab is passive-only; hide it for active checks.
+  const describe=$('#checkModeSeg button[data-mode="describe"]');
+  if(describe) describe.style.display = checkKind==='active'?'none':'';
+  if(checkKind==='active' && checkMode==='describe') checkSetMode('code');
 }
-export function checkNew(){$('#checkId').value='';$('#checkSrc').value="def check(flow):\n    # inspect flow, return a list of finding(...)\n    return []\n";
-  $('#checkOut').innerHTML='<span class="hint">New check — give it an id and Save.</span>';$('#checkId').focus();}
+export async function loadCheck(id, kind='passive'){
+  checkKind=kind; refreshCheckEditorMode();
+  try{const d=await api(checkEndpoint()+'/'+encodeURIComponent(id));$('#checkId').value=id;$('#checkSrc').value=d.source||'';
+    $('#checkOut').innerHTML='<span class="hint">Loaded <b>'+esc(id)+'</b> ('+(kind==='active'?'active · sends traffic':'passive')+').</span>';}catch(e){toast(e.message);}
+}
+export function checkNew(kind='passive'){
+  checkKind=kind; refreshCheckEditorMode();
+  $('#checkId').value='';
+  $('#checkSrc').value = kind==='active' ? ACTIVE_CHECK_TEMPLATE : "def check(flow):\n    # inspect flow, return a list of finding(...)\n    return []\n";
+  $('#checkOut').innerHTML='<span class="hint">New '+(kind==='active'?'active':'passive')+' check — give it an id and Save.</span>';$('#checkId').focus();
+}
 export async function checkTest(){
   const out=$('#checkOut');out.innerHTML='<span class="hint">running…</span>';
-  try{const r=await api('/api/checks/test',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({source:$('#checkSrc').value,flowId:state.selId||0})});
+  try{const r=await api(checkEndpoint()+'/test',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({source:$('#checkSrc').value,flowId:state.selId||0})});
     if(r.error){out.innerHTML='<span style="color:var(--red);white-space:pre-wrap">'+esc(r.error)+'</span>';return;}
-    const fs=r.findings||[];
-    out.innerHTML=(r.note?'<div class="hint" style="margin-bottom:6px">'+esc(r.note)+'</div>':'')+
-      (fs.length?fs.map(f=>`<div style="padding:3px 0"><span class="sev ${escAttr(f.severity)}">${esc(f.severity)}</span> ${esc(f.title)}${f.fix?' <span class="hint">— '+esc(f.fix)+'</span>':''}</div>`).join('')
-        :'<span class="hint">No findings on flow #'+(r.flowId||'?')+' (check compiles & runs).</span>');
+    const f=r.finding;
+    const note=r.note||(f?('finding on flow #'+(f.flowId||'?')):'no finding');
+    out.innerHTML='<div class="hint" style="margin-bottom:6px">'+esc(note)+(checkKind==='active'?' · ⚡ sent real probes':'')+'</div>'+
+      (f?`<div style="padding:3px 0"><span class="sev ${escAttr(f.severity)}">${esc(f.severity)}</span> ${esc(f.title)}${f.evidence?' <span class="hint">— '+esc(f.evidence)+'</span>':''}</div>`:'<span class="hint">No finding (check compiles &amp; runs).</span>');
   }catch(e){out.innerHTML='<span style="color:var(--red)">'+esc(e.message)+'</span>';}
 }
 export async function checkSave(){
   const id=$('#checkId').value.trim();if(!id){toast('set a check id first');return;}
-  try{await api('/api/checks/'+encodeURIComponent(id),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({source:$('#checkSrc').value})});
-    $('#checkOut').innerHTML='<span style="color:var(--accent)">Saved ✓ — runs on the next scan.</span>';loadChecksList();}
+  try{await api(checkEndpoint()+'/'+encodeURIComponent(id),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({source:$('#checkSrc').value})});
+    $('#checkOut').innerHTML='<span style="color:var(--accent)">Saved ✓ — '+(checkKind==='active'?'runs on the next active scan':'runs on the next scan')+'.</span>';loadChecksList();}
   catch(e){$('#checkOut').innerHTML='<span style="color:var(--red);white-space:pre-wrap">'+esc(e.message)+'</span>';}
 }
 export async function checkDelete(){
   const id=$('#checkId').value.trim();if(!id)return;
-  if(!await uiConfirm('Delete check',`Delete check <b>${esc(id)}</b>? Its Starlark source will be removed and won't run on future scans.`,'Delete','btn danger','var(--red)'))return;
-  try{await api('/api/checks/'+encodeURIComponent(id),{method:'DELETE'});checkNew();loadChecksList();toast('deleted '+id);}catch(e){toast(e.message);}
+  if(!await uiConfirm('Delete check',`Delete ${checkKind} check <b>${esc(id)}</b>? Its Starlark source will be removed and won't run on future scans.`,'Delete','btn danger','var(--red)'))return;
+  try{await api(checkEndpoint()+'/'+encodeURIComponent(id),{method:'DELETE'});checkNew();loadChecksList();toast('deleted '+id);}catch(e){toast(e.message);}
 }
 async function checkAiGenerate(){
   if(state.aiDisabled){toast('AI features are disabled — enable in Settings → AI assist');return;}
@@ -140,7 +201,8 @@ async function checkAiGenerate(){
 export function openChecks(){openModal($('#checksModal'));loadChecksList();updateCheckFlowHint();if(!$('#checkSrc').value)checkNew();checkSetMode('code');}
 if($('#checksBtn'))$('#checksBtn').onclick=openChecks;
 if($('#checksClose'))$('#checksClose').onclick=()=>closeModal($('#checksModal'));
-if($('#checkNew'))$('#checkNew').onclick=checkNew;
+if($('#checkNew'))$('#checkNew').onclick=()=>checkNew('passive');
+if($('#checkNewActive'))$('#checkNewActive').onclick=()=>checkNew('active');
 if($('#checkTest'))$('#checkTest').onclick=checkTest;
 if($('#checkSave'))$('#checkSave').onclick=checkSave;
 if($('#checkDelete'))$('#checkDelete').onclick=checkDelete;
@@ -366,19 +428,31 @@ export function renderScanDetail(){
     ${i.evidence?`<div class="evidence" style="margin-top:6px">${esc(i.evidence)}</div>`:''}</div>`).join('');
   $('#scanDetail').innerHTML=`<div class="scan-wrap">
     <span class="sev ${escAttr(g.severity)}">${esc(g.severity)}</span>
-    <h1 style="font-size:17px;font-weight:700;margin:12px 0 6px;line-height:1.3">${esc(g.title)}</h1>
+    <div class="row" style="align-items:center;gap:10px;margin:12px 0 6px;flex-wrap:wrap">
+      <h1 style="font-size:17px;font-weight:700;line-height:1.3;flex:1;margin:0;min-width:0">${esc(g.title)}</h1>
+      <button class="btn accent" id="scanPromote" title="Create a curated finding from this issue — title, detail, fix, and every PoC flow attached">➕ Promote to Finding</button>
+    </div>
     ${(shared&&first.detail)?`<p style="font-size:13px;color:var(--fg2);line-height:1.6">${esc(first.detail)}</p>`:''}
     <div style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3);margin:14px 0 6px">AFFECTED TARGETS (${g.items.length})</div>
     ${tgts}
     ${first.fix?`<div style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3);margin:14px 0 6px">REMEDIATION</div><div class="fixbox">${esc(first.fix)}</div>`:''}</div>`;
   $('#scanDetail').querySelectorAll('.scan-tgt[data-flow]').forEach(el=>{el.onclick=()=>flowPopup(Number(el.dataset.flow));wireRowKey(el,()=>flowPopup(Number(el.dataset.flow)));});
+  const pm=$('#scanPromote'); if(pm) pm.onclick=()=>promoteFinding(g);
+}
+// promoteFinding turns a passive-scan issue group into a curated Finding (with all
+// its PoC flows attached), then opens it — bridging the two views of "vulns" that
+// were previously disconnected silos.
+async function promoteFinding(g){
+  const first=g.items[0]||{};
+  const flowIds=g.items.map(i=>i.flowId).filter(Boolean);
+  try{
+    const f=await api('/api/findings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+      title:g.title,severity:g.severity,source:'scanner',
+      detail:first.detail||'',evidence:first.evidence||'',fix:first.fix||'',
+      flowIds,
+    })});
+    toast('Promoted to Finding #'+f.id+(flowIds.length?' · '+flowIds.length+' PoC flow'+(flowIds.length===1?'':'s'):''));
+    openFinding(f.id);
+  }catch(e){toast(e.message);}
 }
 $('#scanRun').onclick=runScan;
-$('#scanReport').onclick=async()=>{
-  if(!scanState.issues.length){toast('no findings yet — run a scan first');return;}
-  try{
-    const md=await api('/api/scanner/report');
-    await saveFile(new Blob([md],{type:'text/markdown'}),'interceptor-findings.md','text/markdown');
-    toast('Downloading scan report…');
-  }catch(e){if(!(e&&e.name==='AbortError'))toast(e.message);}
-};

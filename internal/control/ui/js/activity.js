@@ -19,13 +19,10 @@ function sameWorkflow(a,b){
   return Math.abs((a.ts||0)-(b.ts||0))<=WORKFLOW_GAP_MS;
 }
 // ---- client-side filtering over the loaded feed ----
-// Every activity item originates from the AI over MCP, so a human/AI source split
-// is meaningless today. The useful split is deliberate vs passive: actions where
-// the AI stated an intent ("💭 With intent") versus bare recon calls. Plus a
-// free-text substring filter over the intent string.
-const actFilter={mode:'all',intent:''};
+// A single substring filter over each action's stated intent — enough to find
+// "what was the AI trying to do" without a noisy mode toggle.
+const actFilter={intent:''};
 function passesFilter(it){
-  if(actFilter.mode==='intent'&&!(it.intent||'').trim())return false;
   if(actFilter.intent&&!(it.intent||'').toLowerCase().includes(actFilter.intent))return false;
   return true;
 }
@@ -58,14 +55,6 @@ export function renderActivity(){
     selectFlow(id);
   });
 }
-export let aiPulseTimer=null;
-export function flashAiPulse(tool){
-  const p=$('#aiPulse');if(!p)return;
-  p.style.display='inline-flex';p.classList.add('live');
-  const lbl=$('#aiPulseLbl');if(lbl)lbl.textContent=tool?('AI · '+tool):'AI active';
-  clearTimeout(aiPulseTimer);
-  aiPulseTimer=setTimeout(()=>{p.classList.remove('live');if(lbl)lbl.textContent='AI active';},2500);
-}
 export function onActivity(it){
   if(!it||state.aiDisabled)return;
   state.activity.unshift(it);
@@ -73,20 +62,10 @@ export function onActivity(it){
   const onTab=document.querySelector('.tab[data-tab="activity"]').classList.contains('active');
   if(onTab)renderActivity();
   else{state.actUnseen++;const b=$('#actBadge');if(b){b.style.display='inline-block';b.textContent=state.actUnseen;}}
-  flashAiPulse(it.tool);
 }
 export async function loadActivity(){try{const d=await api('/api/activity');state.activity=d.activity||[];renderActivity();}catch(e){}}
 export function clearActSeen(){state.actUnseen=0;const b=$('#actBadge');if(b)b.style.display='none';}
 $('#actClear').onclick=async()=>{try{await api('/api/activity',{method:'DELETE'});}catch(e){}state.activity=[];renderActivity();clearActSeen();};
-$('#aiPulse').onclick=()=>document.querySelector('.tab[data-tab="activity"]').click();
-$('#aiPulse').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('#aiPulse').click();}});
-// Intent segmented toggle (All / With intent) — re-render the visible feed.
-const actSrcSeg=$('#actSrcSeg');
-if(actSrcSeg)actSrcSeg.querySelectorAll('button').forEach(b=>b.onclick=()=>{
-  actFilter.mode=b.dataset.src;
-  actSrcSeg.querySelectorAll('button').forEach(x=>{const on=x===b;x.classList.toggle('on',on);x.setAttribute('aria-pressed',on?'true':'false');});
-  renderActivity();
-});
 // Free-text intent filter (substring, case-insensitive).
 const actIntentFilter=$('#actIntentFilter');
 if(actIntentFilter)actIntentFilter.oninput=()=>{actFilter.intent=actIntentFilter.value.trim().toLowerCase();renderActivity();};

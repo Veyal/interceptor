@@ -31,7 +31,43 @@ import (
 	"github.com/Veyal/interceptor/internal/version"
 )
 
-const controlAddr = "127.0.0.1:9966"
+const defaultControlAddr = "127.0.0.1:9966"
+
+// resolveControlAddr picks the control-plane listen address: the
+// INTERCEPTOR_CONTROL_ADDR env (e.g. "127.0.0.1:9967" to run a second instance),
+// falling back to defaultControlAddr. A non-loopback bind requires
+// INTERCEPTOR_ALLOW_EXTERNAL_BIND=1 (same gate as the proxy); otherwise we fall
+// back to the loopback default so the control plane (API + captured traffic) is
+// never exposed on a LAN interface without explicit opt-in. The request-time
+// loopback Host/Origin guard in internal/control still applies regardless of bind.
+func resolveControlAddr() string {
+	addr := os.Getenv("INTERCEPTOR_CONTROL_ADDR")
+	if addr == "" {
+		addr = defaultControlAddr
+	}
+	if !isLoopbackBind(addr) && os.Getenv("INTERCEPTOR_ALLOW_EXTERNAL_BIND") == "" {
+		log.Printf("control addr %q is non-loopback; ignoring (set INTERCEPTOR_ALLOW_EXTERNAL_BIND=1 to allow)", addr)
+		return defaultControlAddr
+	}
+	return addr
+}
+
+// isLoopbackBind reports whether an address (host or host:port) names the
+// loopback interface: 127.0.0.0/8, ::1, "localhost", or empty (all-interfaces
+// bare ":port" is intentionally NOT loopback).
+func isLoopbackBind(addr string) bool {
+	host := addr
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		host = h
+	}
+	if host == "" || host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
 
 func main() {
 	if len(os.Args) > 1 {
@@ -59,7 +95,7 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "mcp" {
 		base := os.Getenv("INTERCEPTOR_CONTROL_URL")
 		if base == "" {
-			base = "http://" + controlAddr
+			base = "http://" + resolveControlAddr()
 		}
 		if err := mcp.New(base).Serve(os.Stdin, os.Stdout); err != nil {
 			log.Fatal(err)
@@ -77,6 +113,10 @@ func run() error {
 		return err
 	}
 	globalDir := filepath.Join(home, ".interceptor")
+
+	// Control-plane listen address: env-configurable (INTERCEPTOR_CONTROL_ADDR) so
+	// you can run a second instance / custom port; loopback by default.
+	controlAddr := resolveControlAddr()
 
 	// --project <name|path> (or INTERCEPTOR_PROJECT) skips the startup prompt.
 	fs := flag.NewFlagSet("interceptor", flag.ContinueOnError)
@@ -136,9 +176,12 @@ func run() error {
 	hub := control.New(st, eng, ca, pm, sc)
 	// User-authored Starlark scanner checks are global (shared across projects).
 	checksDir := filepath.Join(globalDir, "checks")
+	activeChecksDir := filepath.Join(globalDir, "active-checks")
 	migrateGlobalChecks(globalDir, filepath.Join(globalDir, "projects"))
 	_ = os.MkdirAll(checksDir, 0o755)
+	_ = os.MkdirAll(activeChecksDir, 0o755)
 	hub.ChecksDir = checksDir
+	hub.ActiveChecksDir = activeChecksDir
 	hub.SelfAddr = controlAddr // so the active scanner never targets our own API
 	hub.ProjectName = projectName
 	hub.ProjectDir = dir
@@ -173,7 +216,9 @@ func run() error {
 	pm.handler = prx
 
 	proxyAddr := "127.0.0.1:8080"
-	if v, ok, _ := st.GetSetting("proxy.addr"); ok && v != "" {
+	if v := os.Getenv("INTERCEPTOR_PROXY_ADDR"); v != "" {
+		proxyAddr = v // env wins (lets you run a second instance / custom port without the UI)
+	} else if v, ok, _ := st.GetSetting("proxy.addr"); ok && v != "" {
 		proxyAddr = v
 	}
 	// Never record traffic aimed at our own listeners, so proxying localhost

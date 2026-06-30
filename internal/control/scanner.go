@@ -41,7 +41,7 @@ func (h *Hub) scannerRun(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		req, res := h.bodyBytes(f.ReqBodyHash), h.bodyBytes(f.ResBodyHash)
-		all = append(all, scanner.Analyze(f, req, res)...)
+		all = append(all, scanner.AnalyzeWithDisabled(f, req, res, disabled)...)
 
 		if len(checks) > 0 {
 			cf := checkscript.Flow{

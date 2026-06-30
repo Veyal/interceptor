@@ -146,3 +146,41 @@ func TestEndpointsAllSearch(t *testing.T) {
 		t.Fatalf("all search: got %d endpoints, want 2", len(eps))
 	}
 }
+
+func TestEndpointsHideNoiseOnly(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	s.InsertFlow(&Flow{TS: time.UnixMilli(1), Method: "GET", Host: "app.test", Path: "/alive", Status: 200})
+	s.InsertFlow(&Flow{TS: time.UnixMilli(2), Method: "GET", Host: "app.test", Path: "/missing", Status: 404})
+	s.InsertFlow(&Flow{TS: time.UnixMilli(3), Method: "GET", Host: "app.test", Path: "/forbidden", Status: 403})
+	s.InsertFlow(&Flow{TS: time.UnixMilli(4), Method: "GET", Host: "app.test", Path: "/mixed", Status: 404})
+	s.InsertFlow(&Flow{TS: time.UnixMilli(5), Method: "GET", Host: "app.test", Path: "/mixed", Status: 200})
+
+	all, _, err := s.Endpoints(EndpointFilter{ExcludeFlags: FlagIntruder | FlagActiveScan})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 4 {
+		t.Fatalf("unfiltered: got %d endpoints, want 4", len(all))
+	}
+
+	filtered, _, err := s.Endpoints(EndpointFilter{
+		ExcludeFlags:  FlagIntruder | FlagActiveScan,
+		HideNoiseOnly: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 2 {
+		t.Fatalf("hide noise: got %d endpoints, want 2 (/alive and /mixed)", len(filtered))
+	}
+	for _, e := range filtered {
+		if e.Path == "/missing" || e.Path == "/forbidden" {
+			t.Fatalf("noise endpoint should be hidden: %+v", e)
+		}
+	}
+}

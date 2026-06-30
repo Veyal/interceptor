@@ -1,0 +1,140 @@
+package control
+
+import (
+	"encoding/json"
+	"net/http"
+)
+
+// readinessCheck is one row in the agent setup checklist.
+type readinessCheck struct {
+	ID     string `json:"id"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail"`
+	Fix    string `json:"fix,omitempty"`
+}
+
+// readinessReport is the structured pre-flight result for MCP and UI.
+type readinessReport struct {
+	Ready    bool             `json:"ready"`
+	Checks   []readinessCheck `json:"checks"`
+	Blockers []string         `json:"blockers"`
+}
+
+func (h *Hub) buildReadiness() readinessReport {
+	var rep readinessReport
+	add := func(id string, ok bool, detail, fix string) {
+		rep.Checks = append(rep.Checks, readinessCheck{ID: id, OK: ok, Detail: detail, Fix: fix})
+		if !ok {
+			rep.Blockers = append(rep.Blockers, id)
+		}
+	}
+
+	proxyAddr := h.currentProxyAddr()
+	add("proxy", proxyAddr != "", "listening "+proxyAddr, "start Interceptor or check bind address in Settings")
+
+	includes := 0
+	if rules, err := h.st.ListScopeRules(); err == nil {
+		for _, r := range rules {
+			if r.Enabled && r.Action == "include" {
+				includes++
+			}
+		}
+	}
+	if includes > 0 {
+		add("scope", true, itoa64(int64(includes))+" include rule(s)", "")
+	} else {
+		add("scope", false, "no include rules — everything in scope", "scope_from_url to focus on the target")
+	}
+
+	flowN, _ := h.st.FlowCount()
+	trafficOK := flowN > 0
+	add("traffic", trafficOK, flowCountDetail(flowN), "route the target through the proxy and browse the app")
+
+	inScopeOK := true
+	if includes > 0 {
+		inScopeOK = h.hasInScopeTraffic()
+		add("in_scope_traffic", inScopeOK, inScopeDetail(inScopeOK), "browse in-scope hosts or relax scope rules")
+	}
+
+	oobOK := h.oobEnabled()
+	oobDetail := "enabled"
+	oobFix := ""
+	if !oobOK {
+		oobDetail = "disabled"
+		oobFix = "oob_enable or Settings → enable OOB"
+	}
+	add("oob", oobOK, oobDetail, oobFix)
+
+	ids := h.authzIdentities()
+	authN := 0
+	for _, id := range ids {
+		if identityHasAuth(id) && !id.Broken {
+			authN++
+		}
+	}
+	add("auth_identities", authN > 0, itoa64(int64(authN))+" identities", "promote_flow_to_authz or set_authz")
+
+	lm := h.loadLoginMacro()
+	loginOK := lm.Enabled && lm.Request != ""
+	loginDetail := "not configured"
+	if loginOK {
+		loginDetail = "configured for " + lm.Target
+	}
+	add("login_macro", loginOK, loginDetail, "set_login_macro_from_flow or set_login_macro")
+
+	h.as.mu.Lock()
+	armed := h.as.armed
+	h.as.mu.Unlock()
+	add("active_scan_armed", armed, armedStatus(armed), "active_scan with arm:true once authorized")
+
+	rep.Ready = proxyAddr != "" && trafficOK && inScopeOK
+	return rep
+}
+
+func (h *Hub) getReadiness(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.buildReadiness())
+}
+
+func flowCountDetail(n int64) string {
+	if n == 0 {
+		return "no flows captured"
+	}
+	return itoa64(n) + " flows captured"
+}
+
+func inScopeDetail(ok bool) string {
+	if ok {
+		return "in-scope traffic present"
+	}
+	return "no in-scope traffic yet"
+}
+
+func armedStatus(armed bool) string {
+	if armed {
+		return "armed"
+	}
+	return "disarmed"
+}
+
+func itoa64(n int64) string {
+	if n == 0 {
+		return "0"
+	}
+	var b [20]byte
+	i := len(b)
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(b[i:])
+}
+
+func readinessText(rep readinessReport) string {
+	summary := "ready"
+	if !rep.Ready {
+		summary = "not ready"
+	}
+	raw, _ := json.MarshalIndent(rep, "", "  ")
+	return summary + " — structured checklist:\n" + string(raw)
+}

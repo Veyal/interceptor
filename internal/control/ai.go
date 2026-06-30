@@ -90,7 +90,7 @@ func (h *Hub) collectAssistFlows(ids []int64, kind string) []assistFlow {
 			Res:   clip(string(h.rawResponse(f)), per),
 		}
 		if kind == "summarize" {
-			for _, is := range scanner.Analyze(f, h.bodyBytes(f.ReqBodyHash), h.bodyBytes(f.ResBodyHash)) {
+			for _, is := range scanner.AnalyzeWithDisabled(f, h.bodyBytes(f.ReqBodyHash), h.bodyBytes(f.ResBodyHash), h.checksDisabledSet()) {
 				af.Findings += "- " + is.Severity + ": " + is.Title + "\n"
 			}
 		}

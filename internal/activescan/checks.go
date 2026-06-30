@@ -18,7 +18,7 @@ var Checks = []Check{
 // Reflected XSS: inject a marker wrapped in angle brackets/quotes and confirm it
 // comes back unencoded (i.e. `<marker>` survives in the response).
 var xssCheck = Check{
-	Class: "xss", Severity: "High", Title: "Reflected cross-site scripting (XSS)",
+	ID: "active-xss", Class: "xss", Severity: "High", Title: "Reflected cross-site scripting (XSS)",
 	Fix: "Contextually output-encode user input and set a Content-Security-Policy.",
 	Run: func(p Point, base Response, probe Prober) *Hit {
 		m := mark()
@@ -35,7 +35,7 @@ var sqlErrRe = regexp.MustCompile(`(?i)(SQL syntax|mysql_fetch|valid MySQL resul
 // Error-based SQL injection: append a quote and look for a DB error that wasn't
 // already present in the baseline.
 var sqliErrorCheck = Check{
-	Class: "sqli", Severity: "High", Title: "SQL injection (error-based)",
+	ID: "active-sqli-error", Class: "sqli", Severity: "High", Title: "SQL injection (error-based)",
 	Fix: "Use parameterized queries / prepared statements; never concatenate input into SQL.",
 	Run: func(p Point, base Response, probe Prober) *Hit {
 		if sqlErrRe.MatchString(base.Body) {
@@ -56,7 +56,7 @@ var sqliErrorCheck = Check{
 // Boolean-based SQL injection: a true condition should match the baseline length
 // while a false condition diverges noticeably.
 var sqliBooleanCheck = Check{
-	Class: "sqli", Severity: "High", Title: "SQL injection (boolean-based)",
+	ID: "active-sqli-boolean", Class: "sqli", Severity: "High", Title: "SQL injection (boolean-based)",
 	Fix: "Use parameterized queries / prepared statements.",
 	Run: func(p Point, base Response, probe Prober) *Hit {
 		tru := probe(p.Value + "' AND '1'='1")
@@ -85,7 +85,7 @@ var sqliBooleanCheck = Check{
 // Server-side template injection: 7*731 = 5117 is distinctive enough to avoid
 // natural collisions.
 var sstiCheck = Check{
-	Class: "ssti", Severity: "High", Title: "Server-side template injection (SSTI)",
+	ID: "active-ssti", Class: "ssti", Severity: "High", Title: "Server-side template injection (SSTI)",
 	Fix: "Never render user input as a template; if unavoidable, use a sandboxed engine.",
 	Run: func(p Point, base Response, probe Prober) *Hit {
 		if strings.Contains(base.Body, "5117") {
@@ -105,7 +105,7 @@ const redirectCanary = "interceptor-oob.example"
 
 // Open redirect: confirm a 3xx Location (or it) points at our off-host canary.
 var openRedirectCheck = Check{
-	Class: "redirect", Severity: "Medium", Title: "Open redirect",
+	ID: "active-open-redirect", Class: "redirect", Severity: "Medium", Title: "Open redirect",
 	Fix: "Validate redirect targets against an allow-list of known hosts/paths.",
 	Run: func(p Point, base Response, probe Prober) *Hit {
 		for _, pl := range []string{"https://" + redirectCanary + "/x", "//" + redirectCanary + "/x"} {
@@ -126,7 +126,7 @@ var passwdRe = regexp.MustCompile(`root:.*?:0:0:`)
 
 // Path traversal / LFI: pull /etc/passwd via several traversal encodings.
 var pathTraversalCheck = Check{
-	Class: "lfi", Severity: "High", Title: "Path traversal / local file inclusion",
+	ID: "active-lfi", Class: "lfi", Severity: "High", Title: "Path traversal / local file inclusion",
 	Fix: "Reject `..` and absolute paths; resolve against a fixed base and allow-list filenames.",
 	Run: func(p Point, base Response, probe Prober) *Hit {
 		if passwdRe.MatchString(base.Body) {
@@ -149,9 +149,12 @@ var pathTraversalCheck = Check{
 // OS command injection (timing): a `sleep` payload delays the response, confirmed
 // against the baseline and a sleep-0 control. Lower confidence by nature.
 var cmdInjectionCheck = Check{
-	Class: "cmdi", Severity: "High", Title: "OS command injection (timing)",
+	ID: "active-cmdi", Class: "cmdi", Severity: "High", Title: "OS command injection (timing)",
 	Fix: "Never pass input to a shell; use exec with an argument array and validate input.",
 	Run: func(p Point, base Response, probe Prober) *Hit {
+		if base.Status == 419 || base.Status == 401 || base.Status == 403 || base.Status == 502 {
+			return nil
+		}
 		if base.Duration > 3*time.Second {
 			return nil // baseline already slow; timing is unreliable
 		}
@@ -204,7 +207,7 @@ var crlfPayloads = []string{
 // A baseline guard prevents mis-flagging an endpoint that already emits the
 // canary header for some unrelated reason.
 var crlfCheck = Check{
-	Class: "crlf", Severity: "High", Title: "CRLF injection / HTTP response splitting",
+	ID: "active-crlf", Class: "crlf", Severity: "High", Title: "CRLF injection / HTTP response splitting",
 	Fix: "Strip or reject CR (\\r, %0d) and LF (\\n, %0a) characters from any input that is reflected into HTTP response headers. Use a framework that sets headers via a typed API rather than string concatenation.",
 	Run: func(p Point, base Response, probe Prober) *Hit {
 		// Baseline guard: if the canary header is already present in the
@@ -341,7 +344,7 @@ func xmlStripDoctype(body string) string {
 // requests that carry an XML body, as detected by Points()).  The payload is
 // deliberately safe — it uses an internal entity only; no SYSTEM/file reads.
 var xxeCheck = Check{
-	Class: "xxe", Severity: "High", Title: "XML External Entity injection (XXE)",
+	ID: "active-xxe", Class: "xxe", Severity: "High", Title: "XML External Entity injection (XXE)",
 	Fix: "Disable DTD processing and external entity resolution in your XML parser (e.g. set FEATURE_SECURE_PROCESSING, disallow DOCTYPE declarations, or use a DTD-rejecting library).",
 	Run: func(p Point, base Response, probe Prober) *Hit {
 		// Only act on whole-body XML points produced by Points().

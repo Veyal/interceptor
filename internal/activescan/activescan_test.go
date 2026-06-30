@@ -213,6 +213,34 @@ func TestRunRespectsCancel(t *testing.T) {
 	}
 }
 
+// TestRunHonorsDisabledChecks confirms a check toggled off in the Checks manager
+// is skipped by the engine (no probes sent, no finding) — same toggle surface as
+// passive checks.
+func TestRunHonorsDisabledChecks(t *testing.T) {
+	send := func(tg Target) Response {
+		// Server reflects q unencoded — would be XSS-vulnerable if the check ran.
+		return Response{Status: 200, FlowID: 1, Body: "<html>search: " + valueOfQuery(tg.URL, "q") + "</html>"}
+	}
+	// Baseline: XSS fires when enabled.
+	on, _ := Run(context.Background(), Target{Method: "GET", URL: "http://victim/search?q=hi"}, send, Options{MaxRequests: 50})
+	var xss bool
+	for _, f := range on {
+		if f.Class == "xss" {
+			xss = true
+		}
+	}
+	if !xss {
+		t.Fatalf("XSS should fire when enabled; got %+v", on)
+	}
+	// With active-xss disabled, no XSS finding.
+	off, _ := Run(context.Background(), Target{Method: "GET", URL: "http://victim/search?q=hi"}, send, Options{MaxRequests: 50, Disabled: map[string]bool{"active-xss": true}})
+	for _, f := range off {
+		if f.Class == "xss" {
+			t.Fatalf("disabled active-xss must not fire; got %+v", off)
+		}
+	}
+}
+
 // valueOfQuery reads (and URL-decodes) a query param from a URL string.
 func valueOfQuery(rawurl, key string) string {
 	u, err := url.Parse(rawurl)

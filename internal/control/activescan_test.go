@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Veyal/interceptor/internal/activescan"
+	"github.com/Veyal/interceptor/internal/activescan/breaker"
 	"github.com/Veyal/interceptor/internal/store"
 )
 
@@ -21,7 +22,7 @@ func TestActiveScanProbeLogAndHistory(t *testing.T) {
 	defer target.Close()
 
 	h, s, _ := newHub(t)
-	send := h.activeSender(context.Background(), 0)
+	send := h.activeSender(context.Background(), 0, false, breaker.New())
 	send(activescan.Target{Method: http.MethodGet, URL: target.URL + "/a?q=1"})
 	send(activescan.Target{Method: http.MethodGet, URL: target.URL + "/b?q=2"})
 
@@ -64,7 +65,7 @@ func TestActiveScanProbeLogAndHistory(t *testing.T) {
 
 func TestActiveScanLogsTransportError(t *testing.T) {
 	h, s, _ := newHub(t)
-	send := h.activeSender(context.Background(), 0)
+	send := h.activeSender(context.Background(), 0, false, breaker.New())
 	send(activescan.Target{Method: http.MethodGet, URL: "http://127.0.0.1:1/nope"})
 
 	h.as.mu.Lock()

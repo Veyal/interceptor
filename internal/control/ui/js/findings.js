@@ -12,9 +12,50 @@ let findings = [], selFinding = null;
 let bodyBlocks = [];
 let bodyFindingId = null;
 let bodySaveTimer = null;
+let findDetailView = 'report';
+try { findDetailView = sessionStorage.getItem('findView') || 'report'; } catch { /* private mode */ }
+// True while a text-block textarea has focus. An SSE findings.update (e.g. a body
+// save round-tripping, or the AI recording) would otherwise rebuild the detail
+// pane mid-edit and discard the focused textarea + any unsaved keystrokes.
+let bodyEditing = false;
 
 const sevColor = s => ({ Critical: 'var(--red)', High: 'var(--red)', Medium: 'var(--amber)', Low: 'var(--blue)', Info: 'var(--fg3)' }[s] || 'var(--fg3)');
 const statusLabel = s => (s || '').replace(/_/g, ' ');
+
+function textChainLabel(md) {
+  return (md || '').replace(/```[\s\S]*?```/g, ' ').replace(/[#*_`~\[\]()]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function findingPocCount(f) {
+  return (f.blocks || []).filter(b => b.type === 'flow').length || (f.flows || []).length || 0;
+}
+
+function findingStepCount(f) {
+  const blocks = f.blocks || [];
+  if (blocks.length) {
+    return blocks.filter(b => (b.type === 'text' && textChainLabel(b.md)) || b.type === 'flow').length;
+  }
+  let n = 0;
+  if (f.detail) n++;
+  if (f.evidence && f.evidence !== f.detail) n++;
+  return n + findingPocCount(f);
+}
+
+function findingIsEmpty(f) {
+  return !findingStepCount(f) && !textChainLabel(f.impact);
+}
+
+function findingListMeta(f) {
+  const parts = [esc(statusLabel(f.status))];
+  const steps = findingStepCount(f);
+  const pocs = findingPocCount(f);
+  if (steps) parts.push(steps + ' step' + (steps === 1 ? '' : 's'));
+  else if (pocs) parts.push(pocs + ' PoC');
+  if (findingIsEmpty(f)) parts.push('<span class="hint">needs content</span>');
+  if (f.target) parts.push('<span class="hint">' + esc(f.target.length > 28 ? f.target.slice(0, 27) + '…' : f.target) + '</span>');
+  if (f.source === 'ai') parts.push('<span style="color:var(--accent)">AI</span>');
+  return parts.join(' · ');
+}
 
 export async function loadFindings() {
   try { const d = await api('/api/findings'); findings = d.findings || []; renderFindings(); }
@@ -28,98 +69,138 @@ function renderFindings() {
     box.innerHTML = '<div class="hint" style="padding:12px">No findings yet — create one, or the AI records them as it tests.</div>';
     selFinding = null; renderFindingDetail(); return;
   }
-  const pocCount = f => (f.blocks || []).filter(b => b.type === 'flow').length || (f.flows && f.flows.length) || 0;
-  box.innerHTML = findings.map(f => `<div class="find-row${f.id === selFinding ? ' sel' : ''}" data-id="${f.id}">
+  if (!selFinding || !findings.some(f => f.id === selFinding)) selFinding = findings[0].id;
+  box.innerHTML = findings.map(f => `<div class="find-row${f.id === selFinding ? ' sel' : ''}${findingIsEmpty(f) ? ' find-row-empty' : ''}" data-id="${f.id}">
     <span class="sev" style="color:${sevColor(f.severity)}">${esc(f.severity)}</span>
     <span class="find-title">${esc(f.title)}</span>
-    <span class="find-meta">${esc(statusLabel(f.status))}${pocCount(f) ? ' · ' + pocCount(f) + ' PoC' : ''}${f.source === 'ai' ? ' · <span style="color:var(--accent)">AI</span>' : ''}</span>
+    <span class="find-meta">${findingListMeta(f)}</span>
   </div>`).join('');
   box.querySelectorAll('.find-row').forEach(el => { el.onclick = () => { selFinding = Number(el.dataset.id); renderFindings(); renderFindingDetail(); }; wireRowKey(el); });
-  renderFindingDetail();
+  // Skip the detail rebuild while a text block is open for this same finding —
+  // otherwise an SSE findings.update (e.g. a body save round-tripping) wipes the
+  // focused textarea. An explicit row click still calls renderFindingDetail().
+  if (!(bodyEditing && selFinding === bodyFindingId)) renderFindingDetail();
 }
 
 // ---- block editor --------------------------------------------------------
+
+function autoResizeTextarea(ta) {
+  ta.style.height = 'auto';
+  ta.style.height = ta.scrollHeight + 'px';
+}
+
+function startTextEdit(block, ta) {
+  const i = Number(block.dataset.i);
+  ta.value = bodyBlocks[i]?.md || '';
+  bodyEditing = true;
+  const view = block.querySelector('.find-text-view');
+  block.classList.add('editing');
+  const h = view.offsetHeight || 24;
+  block.style.minHeight = h + 'px';
+  view.style.visibility = 'hidden';
+  view.style.position = 'absolute';
+  ta.style.display = '';
+  ta.style.minHeight = h + 'px';
+  autoResizeTextarea(ta);
+  ta.focus();
+  ta.setSelectionRange(ta.value.length, ta.value.length);
+}
+
+function finishTextEdit(block, ta, fid) {
+  bodyEditing = false;
+  const i = Number(block.dataset.i);
+  // If the user has switched to another finding since this edit began, the
+  // module-level bodyBlocks now belong to a different finding — bail rather than
+  // write this text into block[i] of the wrong finding.
+  if (bodyFindingId !== fid || !bodyBlocks[i]) {
+    return;
+  }
+  const md = ta.value;
+  bodyBlocks[i].md = md;
+  scheduleSave(fid);
+
+  const view = block.querySelector('.find-text-view');
+  block.classList.remove('editing');
+  block.style.minHeight = '';
+  view.style.visibility = '';
+  view.style.position = '';
+  ta.style.minHeight = '';
+
+  if (md.trim()) {
+    view.innerHTML = renderMD(md);
+    view.style.display = '';
+    ta.style.display = 'none';
+    block.classList.remove('find-doc-text-empty');
+  } else {
+    view.innerHTML = '';
+    view.style.display = 'none';
+    ta.style.display = '';
+    block.classList.add('find-doc-text-empty');
+    autoResizeTextarea(ta);
+  }
+  if (findDetailView === 'chain') renderFindingChain($('#findChain'), bodyBlocks, $('#findImpact')?.value || '');
+}
 
 function renderBlockEl(b, i, total) {
   const isFirst = i === 0, isLast = i === total - 1;
   const upBtn = isFirst ? '' : `<button class="btn xs" data-mv="${i}" data-dir="-1" title="Move up" style="padding:1px 5px;font-size:11px">↑</button>`;
   const dnBtn = isLast ? '' : `<button class="btn xs" data-mv="${i}" data-dir="1" title="Move down" style="padding:1px 5px;font-size:11px">↓</button>`;
   const delBtn = `<button class="btn xs danger" data-del="${i}" title="Remove" style="padding:1px 5px;font-size:11px">✕</button>`;
+  const controls = `<div class="find-block-controls">${upBtn}${dnBtn}${delBtn}</div>`;
 
   if (b.type === 'text') {
-    const preview = b.md ? `<div class="md block-preview" style="padding:6px 8px;min-height:28px;cursor:text;border-radius:6px 6px 0 0" data-preview="${i}">${renderMD(b.md)}</div>` : '';
-    const taStyle = b.md ? 'display:none' : '';
-    return `<div class="find-block find-block-text" data-i="${i}" style="border:1px solid var(--line);border-radius:6px;margin-bottom:8px;overflow:hidden">
-      ${preview}
-      <textarea class="rep-edit block-text" data-i="${i}" rows="3" style="border-radius:${b.md ? '0' : '6px 6px 0 0'};border:none;border-bottom:1px solid var(--line2);resize:vertical;${taStyle}" placeholder="Write markdown…">${esc(b.md || '')}</textarea>
-      <div class="row" style="padding:3px 6px;gap:3px;background:var(--bg3)">${upBtn}${dnBtn}<div class="spacer"></div>${delBtn}</div>
+    const hasMd = !!(b.md && b.md.trim());
+    return `<div class="find-block find-doc-text${hasMd ? '' : ' find-doc-text-empty'}" data-i="${i}">
+      ${controls}
+      <div class="find-text-view md"${hasMd ? '' : ' style="display:none"'}>${hasMd ? renderMD(b.md) : ''}</div>
+      <textarea class="find-text-edit block-text" data-i="${i}" rows="1" spellcheck="true"
+        ${hasMd ? 'style="display:none"' : ''}
+        placeholder="Describe the vulnerability, steps to reproduce, and what you observed…">${esc(b.md || '')}</textarea>
     </div>`;
   }
 
   // flow block. A missing flow (purged from history via prune_history / GC) is
-  // rendered as a dimmed, non-clickable "evidence deleted" badge — the reference
+  // rendered as a dimmed, non-clickable "evidence deleted" callout — the reference
   // and any annotation are preserved so the human knows the PoC is gone.
   if (b.missing) {
-    return `<div class="find-block find-block-flow find-block-missing" data-i="${i}"
-      style="border:1px dashed var(--line2);border-radius:6px;padding:8px 10px;margin-bottom:8px;opacity:.65">
-      <div class="row" style="gap:8px;align-items:flex-start">
-        <span style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--amber);padding-top:2px;white-space:nowrap">⚠ FLOW</span>
-        <div style="flex:1;min-width:0">
-          <div style="margin-bottom:4px;color:var(--amber);font-size:12px">PoC flow #${esc(String(b.flowId))} — evidence deleted <span class="hint">(re-capture this endpoint)</span></div>
-          <input class="btn block-note" data-i="${i}" value="${escAttr(b.note || '')}"
-            placeholder="annotation (optional)" style="width:100%;font-size:11px;background:var(--bg3)">
-        </div>
-        <div class="row" style="gap:3px;flex-shrink:0">${upBtn}${dnBtn}${delBtn}</div>
-      </div>
+    return `<div class="find-block find-doc-flow find-block-missing" data-i="${i}">
+      ${controls}
+      <blockquote class="find-poc-callout find-poc-missing">
+        <div>⚠ PoC flow #${esc(String(b.flowId))} — evidence deleted from history</div>
+        <span class="hint">Re-capture this endpoint to restore evidence</span>
+      </blockquote>
+      <input class="find-poc-note-input block-note" data-i="${i}" value="${escAttr(b.note || '')}" placeholder="Annotation (optional)">
     </div>`;
   }
-  const flowLabel = b.method
-    ? `<span style="color:var(--accent);font-weight:700">${esc(b.method)}</span> <span style="font-family:var(--mono);font-size:11px;color:var(--fg2)">${esc(b.host || '')}${esc(b.path || '')}</span> <span class="hint">${b.status ? '→ ' + b.status : ''}</span>`
+  const reqLine = b.method
+    ? `<span class="m">${esc(b.method)}</span> <span class="p">${esc(b.host || '')}${esc(b.path || '')}</span>${b.status ? `<span class="sts">→ ${b.status}</span>` : ''}`
     : `<span class="hint">flow #${esc(String(b.flowId))}</span>`;
-  return `<div class="find-block find-block-flow" data-i="${i}" data-flow="${b.flowId}"
-    style="border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin-bottom:8px;cursor:pointer">
-    <div class="row" style="gap:8px;align-items:flex-start">
-      <span style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3);padding-top:2px;white-space:nowrap">FLOW</span>
-      <div style="flex:1;min-width:0">
-        <div style="margin-bottom:4px">${flowLabel}</div>
-        <input class="btn block-note" data-i="${i}" value="${escAttr(b.note || '')}"
-          placeholder="annotation (optional)" style="width:100%;font-size:11px;background:var(--bg3)" onclick="event.stopPropagation()">
-      </div>
-      <div class="row" style="gap:3px;flex-shrink:0">${upBtn}${dnBtn}${delBtn}</div>
-    </div>
+  return `<div class="find-block find-doc-flow" data-i="${i}" data-flow="${b.flowId}">
+    ${controls}
+    <blockquote class="find-poc-callout">${reqLine ? `<div class="find-poc-req">${reqLine}</div>` : ''}</blockquote>
+    <input class="find-poc-note-input block-note" data-i="${i}" value="${escAttr(b.note || '')}"
+      placeholder="Annotation (optional)" onclick="event.stopPropagation()">
   </div>`;
 }
 
 function renderBodyEditor(container, fid) {
   if (!bodyBlocks.length) {
-    container.innerHTML = '<div class="hint" style="padding:6px 0">No content yet — add a text block or attach flows from Proxy History.</div>';
+    container.innerHTML = '<div class="find-doc-empty">No description yet — write the finding narrative below, or attach PoC flows from Proxy History.</div>';
     return;
   }
   container.innerHTML = bodyBlocks.map((b, i) => renderBlockEl(b, i, bodyBlocks.length)).join('');
 
-  // Preview → edit toggle for text blocks.
-  container.querySelectorAll('[data-preview]').forEach(div => {
-    div.onclick = () => {
-      const i = Number(div.dataset.preview);
-      div.style.display = 'none';
-      const ta = container.querySelector(`.block-text[data-i="${i}"]`);
-      if (ta) { ta.style.display = ''; ta.focus(); ta.style.borderRadius = '0'; }
-    };
-  });
+  // Text blocks: rendered markdown at rest; overlay edit on click without layout jump.
+  container.querySelectorAll('.find-doc-text').forEach(block => {
+    const view = block.querySelector('.find-text-view');
+    const ta = block.querySelector('.block-text');
+    if (!view || !ta) return;
 
-  // Text block: save on blur, restore preview.
-  container.querySelectorAll('.block-text').forEach(ta => {
-    ta.addEventListener('blur', () => {
-      const i = Number(ta.dataset.i);
-      if (!bodyBlocks[i]) return;
-      bodyBlocks[i].md = ta.value;
-      scheduleSave(fid);
-      // Refresh the block to show new preview.
-      const blockEl = container.querySelector(`.find-block[data-i="${i}"]`);
-      if (blockEl) blockEl.outerHTML = renderBlockEl(bodyBlocks[i], i, bodyBlocks.length);
-      // Re-wire after DOM replacement (simple: re-render whole editor).
-      renderBodyEditor(container, fid);
-    });
+    if (ta.style.display !== 'none') autoResizeTextarea(ta);
+    ta.addEventListener('input', () => autoResizeTextarea(ta));
+
+    view.addEventListener('click', () => startTextEdit(block, ta));
+    ta.addEventListener('blur', () => finishTextEdit(block, ta, fid));
   });
 
   // Flow note: save on blur.
@@ -138,7 +219,7 @@ function renderBodyEditor(container, fid) {
       const i = Number(btn.dataset.mv), j = i + Number(btn.dataset.dir);
       if (j < 0 || j >= bodyBlocks.length) return;
       [bodyBlocks[i], bodyBlocks[j]] = [bodyBlocks[j], bodyBlocks[i]];
-      renderBodyEditor(container, fid);
+      renderFindBody(fid, $('#findImpact')?.value || '');
       scheduleSave(fid);
     };
   });
@@ -148,40 +229,152 @@ function renderBodyEditor(container, fid) {
     btn.onclick = e => {
       e.stopPropagation();
       bodyBlocks.splice(Number(btn.dataset.del), 1);
-      renderBodyEditor(container, fid);
+      renderFindBody(fid, $('#findImpact')?.value || '');
       scheduleSave(fid);
     };
   });
 
   // Flow click → open flow modal. Missing (purged) flow blocks aren't clickable.
-  container.querySelectorAll('.find-block-flow:not(.find-block-missing)').forEach(el => {
+  container.querySelectorAll('.find-doc-flow:not(.find-block-missing) .find-poc-callout').forEach(el => {
     el.onclick = ev => {
-      if (ev.target.closest('[data-del],[data-mv],.block-note')) return;
-      flowPopup(Number(el.dataset.flow));
+      if (ev.target.closest('[data-del],[data-mv],.block-note,.find-poc-note-input')) return;
+      const block = el.closest('.find-doc-flow');
+      if (block) flowPopup(Number(block.dataset.flow));
     };
   });
 }
 
-function scheduleSave(fid) {
-  clearTimeout(bodySaveTimer);
-  bodySaveTimer = setTimeout(() => flushBodySave(fid), 700);
+// ---- attack-chain timeline (ordered blocks → vertical step flow) ------------
+
+/** Visible steps for the chain: non-empty text, all flows, optional impact tail. */
+export function chainSteps(blocks, impact) {
+  const steps = [];
+  (blocks || []).forEach((b, i) => {
+    if (b.type === 'flow') steps.push({ b, i });
+    else if (b.type === 'text' && textChainLabel(b.md)) steps.push({ b, i });
+  });
+  if (impact && impact.trim()) steps.push({ b: { type: 'impact', md: impact.trim() }, i: -1 });
+  return steps;
 }
 
-async function flushBodySave(fid) {
-  if (!fid) return;
-  // Strip enriched metadata before sending; store only type/md/flowId/note.
-  const minimal = bodyBlocks.map(b => {
+/** Step list + edge indices; kept for testability. */
+export function chainLayout(blocks, impact) {
+  const steps = chainSteps(blocks, impact);
+  const edges = [];
+  for (let i = 0; i < steps.length - 1; i++) edges.push([i, i + 1]);
+  return { nodes: steps, edges, w: 0, h: steps.length };
+}
+
+function chainFlowCard(b, i) {
+  if (b.missing) {
+    return `<blockquote class="find-poc-callout find-poc-missing">
+      <div>⚠ PoC flow #${esc(String(b.flowId))} — evidence deleted from history</div>
+      <span class="hint">Re-capture this endpoint to restore evidence</span>
+    </blockquote>
+    ${b.note ? `<div class="fc-step-note">${esc(b.note)}</div>` : ''}`;
+  }
+  const reqLine = b.method
+    ? `<span class="m">${esc(b.method)}</span> <span class="p">${esc(b.host || '')}${esc(b.path || '')}</span>${b.status ? `<span class="sts">→ ${b.status}</span>` : ''}`
+    : `<span class="hint">flow #${esc(String(b.flowId))}</span>`;
+  return `<blockquote class="find-poc-callout"><div class="find-poc-req">${reqLine}</div></blockquote>
+    ${b.note ? `<div class="fc-step-note">${esc(b.note)}</div>` : ''}`;
+}
+
+function chainStepHtml(item, num, isLast) {
+  const { b, i } = item;
+  const kind = b.type === 'impact' ? 'impact' : b.type === 'flow' ? (b.missing ? 'missing' : 'flow') : 'text';
+  const badgeLabel = b.type === 'impact' ? '!' : String(num);
+  let card = '', attrs = `data-kind="${kind}" data-i="${i}"`;
+  if (b.type === 'text') {
+    card = `<div class="fc-card fc-card-text md">${renderMD(b.md)}</div>`;
+  } else if (b.type === 'impact') {
+    card = `<div class="fc-card fc-card-impact"><div class="fc-card-label">Impact</div><div class="fc-card-body">${esc(b.md)}</div></div>`;
+  } else {
+    attrs += b.missing ? '' : ` data-flow="${b.flowId}"`;
+    card = `<div class="fc-card fc-card-flow">${chainFlowCard(b, i)}</div>`;
+  }
+  const vline = isLast ? '' : '<div class="fc-vline" aria-hidden="true"></div>';
+  return `<div class="fc-step" ${attrs} role="listitem">
+    <div class="fc-rail"><div class="fc-badge fc-badge-${kind}">${badgeLabel}</div>${vline}</div>
+    <div class="fc-content">${card}</div>
+  </div>`;
+}
+
+function renderFindingChain(wrap, blocks, impact) {
+  if (!wrap) return;
+  const steps = chainSteps(blocks, impact);
+  if (!steps.length) {
+    wrap.innerHTML = '<div class="find-chain-empty hint">No steps yet — add narrative paragraphs and PoC flows in Report view.</div>';
+    return;
+  }
+  wrap.innerHTML = `<div class="find-chain" role="list" aria-label="Attack chain">${steps.map((item, n) => chainStepHtml(item, n + 1, n === steps.length - 1)).join('')}</div>`;
+
+  wrap.querySelectorAll('.fc-step[data-kind="flow"]').forEach(el => {
+    el.onclick = () => {
+      const fid = el.dataset.flow;
+      if (fid) flowPopup(Number(fid));
+    };
+  });
+  wrap.querySelectorAll('.fc-step[data-kind="text"]').forEach(el => {
+    el.title = 'Open in Report view';
+    el.onclick = () => {
+      const idx = Number(el.dataset.i);
+      setFindDetailView('report');
+      requestAnimationFrame(() => {
+        const block = document.querySelector(`#findBody .find-block[data-i="${idx}"]`);
+        block?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        block?.classList.add('find-block-flash');
+        setTimeout(() => block?.classList.remove('find-block-flash'), 1200);
+      });
+    };
+  });
+}
+
+function setFindDetailView(view) {
+  findDetailView = view;
+  try { sessionStorage.setItem('findView', view); } catch { /* private mode */ }
+  const seg = $('#findViewSeg');
+  if (seg) seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.view === view));
+  const hint = document.querySelector('.find-view-hint');
+  if (hint) hint.textContent = view === 'chain' ? 'Attack steps top-to-bottom · click a step to inspect' : 'Narrative report · markdown + PoC flows';
+  const article = document.querySelector('.find-article');
+  if (article) article.classList.toggle('find-chain-active', view === 'chain');
+  renderFindBody(bodyFindingId, $('#findImpact')?.value || '');
+}
+
+function renderFindBody(fid, impactText) {
+  const docEl = $('#findBody');
+  const chainEl = $('#findChain');
+  if (findDetailView === 'chain') {
+    if (chainEl) renderFindingChain(chainEl, bodyBlocks, impactText);
+  } else {
+    renderBodyEditor(docEl, fid);
+  }
+}
+
+function scheduleSave(fid) {
+  clearTimeout(bodySaveTimer);
+  // Snapshot the blocks now: switching findings before the 700 ms debounce fires
+  // would otherwise make the deferred save read a module-level bodyBlocks that now
+  // belongs to a different finding and PATCH it onto this one.
+  const snap = bodyBlocks.map(b => {
     const r = { type: b.type };
     if (b.md !== undefined) r.md = b.md;
     if (b.flowId) r.flowId = b.flowId;
     if (b.note) r.note = b.note;
     return r;
   });
+  bodySaveTimer = setTimeout(() => flushBodySave(fid, snap), 700);
+}
+
+async function flushBodySave(fid, snapshot) {
+  if (!fid || !snapshot) return;
+  // Strip enriched metadata before sending; store only type/md/flowId/note.
   try {
     await api('/api/findings/' + fid, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ body: JSON.stringify(minimal) }),
+      body: JSON.stringify({ body: JSON.stringify(snapshot) }),
     });
   } catch (e) { toast('body save: ' + e.message); }
 }
@@ -194,63 +387,85 @@ function renderFindingDetail() {
   if (!f) { box.innerHTML = '<div class="hint" style="padding:16px">Select a finding.</div>'; return; }
 
   const statusSel = STATUSES.map(s => `<option value="${s}"${s === f.status ? ' selected' : ''}>${esc(statusLabel(s))}</option>`).join('');
-  box.innerHTML = `<div class="find-head">
-      <span class="sev" style="color:${sevColor(f.severity)};font-weight:700">${esc(f.severity)}</span>
-      <b style="font-size:14px" id="findTitleText">${esc(f.title)}</b>
-      <button class="btn xs" id="findRename" title="Rename finding" aria-label="Rename finding">✎</button>
-      <div class="spacer"></div>
-      <select id="findStatus" class="btn" style="background:var(--bg3)" aria-label="Finding status">${statusSel}</select>
-      <button class="btn danger" id="findDelete">Delete</button>
+  const missBanner = (() => {
+    const miss = (f.blocks || []).filter(b => b.type === 'flow' && b.missing).length;
+    return miss ? `<div class="find-missing-banner">⚠ ${miss} PoC flow${miss === 1 ? '' : 's'} deleted from history — re-capture the endpoint${miss === 1 ? '' : 's'} to restore evidence.</div>` : '';
+  })();
+  box.innerHTML = `<article class="find-article${findDetailView === 'chain' ? ' find-chain-active' : ''}">
+    <header class="find-header">
+      <div class="find-header-top">
+        <span class="find-sev-badge" style="color:${sevColor(f.severity)}">${esc(f.severity)}</span>
+        <h2 class="find-title-text" id="findTitleText">${esc(f.title)}</h2>
+        <button class="btn xs" id="findRename" title="Rename finding" aria-label="Rename finding">✎</button>
+      </div>
+      <div class="find-meta-bar">
+        <select id="findStatus" class="btn" style="background:var(--bg3)" aria-label="Finding status">${statusSel}</select>
+        ${f.target ? `<span class="find-target hint">${esc(f.target)}</span>` : ''}
+        <div class="find-cvss-field">
+          <label for="findCvss">CVSS</label>
+          <input id="findCvss" class="find-cvss-inline" type="text" value="${escAttr(f.cvss || '')}" placeholder="e.g. 7.5">
+        </div>
+        <div class="spacer"></div>
+        <button class="btn danger xs" id="findDelete">Delete</button>
+      </div>
+    </header>
+    ${missBanner}
+    <div class="find-view-bar">
+      <div class="seg find-view-seg" id="findViewSeg" role="tablist" aria-label="Finding view">
+        <button type="button" data-view="report"${findDetailView === 'report' ? ' class="on"' : ''}>Edit</button>
+        <button type="button" data-view="chain"${findDetailView === 'chain' ? ' class="on"' : ''}>Timeline</button>
+      </div>
+      <span class="hint find-view-hint">${findDetailView === 'chain' ? 'Read-only attack timeline · click a step to inspect' : 'Editable narrative · add paragraphs & PoC flows'}</span>
     </div>
-    ${f.target ? `<div class="hint" style="margin:2px 0 10px">Target: ${esc(f.target)}</div>` : ''}
-    ${(() => {
-      const miss = (f.blocks || []).filter(b => b.type === 'flow' && b.missing).length;
-      return miss ? `<div class="find-missing-banner" style="margin:0 0 10px;padding:6px 10px;border:1px dashed var(--amber);border-radius:6px;background:var(--bg3);color:var(--amber);font-size:12px">⚠ ${miss} PoC flow${miss === 1 ? '' : 's'} deleted from history — re-capture the endpoint${miss === 1 ? '' : 's'} to restore evidence.</div>` : '';
-    })()}
-    <div id="findBody" style="margin-bottom:4px"></div>
-    <div class="row" style="gap:6px;margin-bottom:12px">
-      <button class="btn" id="findAddText" style="font-size:11px;padding:3px 8px">＋ Text</button>
-      <button class="btn" id="findAddFlow" style="font-size:11px;padding:3px 8px">＋ Flow (<span id="findSelCount">${state.selected ? state.selected.size : 0}</span> selected)</button>
+    <div class="find-body-wrap">
+      <div class="find-doc" id="findBody"></div>
+      <div class="find-chain-wrap" id="findChain"></div>
     </div>
-    <div style="margin-bottom:4px">
-      <div class="find-sec" style="margin-bottom:4px">Impact</div>
-      <textarea id="findImpact" class="rep-edit" rows="2" placeholder="Security impact — what an attacker gains…" style="border-radius:6px">${esc(f.impact || '')}</textarea>
+    <div class="find-doc-actions" id="findDocActions">
+      <button class="btn" id="findAddText">＋ Paragraph</button>
+      <button class="btn" id="findAddFlow">＋ PoC flow (<span id="findSelCount">${state.selected ? state.selected.size : 0}</span> selected)</button>
     </div>
-    <div style="margin-bottom:4px">
-      <div class="find-sec" style="margin-bottom:4px">CVSS</div>
-      <input id="findCvss" class="btn" type="text" value="${escAttr(f.cvss || '')}" placeholder="e.g. 7.5 or CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N" style="width:100%;border-radius:6px;background:var(--bg3)">
-    </div>`;
+    <aside class="find-impact">
+      <h3>Impact</h3>
+      <textarea id="findImpact" class="find-impact-text" rows="3" placeholder="What an attacker gains — business consequence, data exposed, privilege escalation…">${esc(f.impact || '')}</textarea>
+    </aside>
+  </article>`;
 
   // Load body blocks for this finding.
   bodyFindingId = f.id;
   bodyBlocks = (f.blocks || []).map(b => ({ ...b }));
-  renderBodyEditor($('#findBody'), f.id);
+  renderFindBody(f.id, f.impact || '');
+
+  $('#findViewSeg')?.querySelectorAll('button').forEach(btn => {
+    btn.onclick = () => setFindDetailView(btn.dataset.view);
+  });
 
   // Wire controls.
   $('#findRename').onclick = async () => {
     const t = await uiPrompt({ title: 'Rename finding', value: f.title, placeholder: 'Finding title' });
     if (t == null || t === f.title) return;
-    try { await api('/api/findings/' + f.id, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: t }) }); }
+    try { await api('/api/findings/' + f.id, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: t }) }); f.title = t; const el = $('#findTitleText'); if (el) el.textContent = t; toast('finding renamed'); }
     catch (err) { toast(err.message); }
   };
   $('#findStatus').onchange = async e => {
-    try { await api('/api/findings/' + f.id, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: e.target.value }) }); }
+    try { await api('/api/findings/' + f.id, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: e.target.value }) }); f.status = e.target.value; toast('status: ' + statusLabel(e.target.value)); }
     catch (err) { toast(err.message); }
   };
   $('#findDelete').onclick = async () => {
-    try { await api('/api/findings/' + f.id, { method: 'DELETE' }); selFinding = null; }
+    try { await api('/api/findings/' + f.id, { method: 'DELETE' }); selFinding = null; toast('finding deleted'); loadFindings(); }
     catch (err) { toast(err.message); }
   };
   $('#findAddText').onclick = () => {
     bodyBlocks.push({ type: 'text', md: '' });
-    renderBodyEditor($('#findBody'), f.id);
-    // Auto-focus the new textarea.
+    setFindDetailView('report');
+    renderFindBody(f.id, $('#findImpact')?.value || '');
     const tas = document.querySelectorAll('#findBody .block-text');
     if (tas.length) tas[tas.length - 1].focus();
   };
   $('#findAddFlow').onclick = () => attachSelectedFlowsAsBlocks(f.id);
   $('#findImpact')?.addEventListener('blur', async () => {
     const impact = $('#findImpact').value;
+    if (findDetailView === 'chain') renderFindingChain($('#findChain'), bodyBlocks, impact);
     try { await api('/api/findings/' + f.id, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ impact }) }); }
     catch (err) { toast(err.message); }
   });
@@ -279,10 +494,25 @@ async function attachSelectedFlowsAsBlocks(findingId) {
 $('#findNew') && ($('#findNew').onclick = () => { $('#fcTitle').value = ''; $('#fcSeverity').value = 'Medium'; $('#fcDetail').value = ''; openModal($('#findCreateModal')); $('#fcTitle').focus(); });
 $('#fcClose') && ($('#fcClose').onclick = () => closeModal($('#findCreateModal')));
 $('#findExport') && ($('#findExport').onclick = async () => {
+  const fmt = ($('#findExportFmt') || {}).value || 'md';
   try {
-    const md = await api('/api/findings/report');
-    await saveFile(new Blob([md], { type: 'text/markdown' }), 'interceptor-report.md', 'text/markdown');
-    toast('Downloading engagement report…');
+    if (fmt === 'pdf') {
+      const html = await api('/api/findings/report?format=html');
+      // Note: 'noopener' makes window.open return null per spec, which would
+      // always trip the pop-up blocker branch and skip the print entirely.
+      const w = window.open('', '_blank');
+      if (!w) { toast('Allow pop-ups to export PDF'); return; }
+      w.document.write(html);
+      w.document.close();
+      setTimeout(() => { w.focus(); w.print(); }, 250);
+      toast('Print dialog — choose Save as PDF');
+      return;
+    }
+    const isHtml = fmt === 'html';
+    const body = await api('/api/findings/report' + (isHtml ? '?format=html' : ''));
+    const mime = isHtml ? 'text/html' : 'text/markdown';
+    await saveFile(new Blob([body], { type: mime }), 'interceptor-report.' + (isHtml ? 'html' : 'md'), mime);
+    toast('Report downloaded');
   } catch (e) { if (!(e && e.name === 'AbortError')) toast(e.message); }
 });
 $('#fcSave') && ($('#fcSave').onclick = async () => {
@@ -328,7 +558,7 @@ export function pickFindingForSelection() {
 function pickFindingForFlows(ids) {
   if (!ids.length) { toast('select flows first'); return; }
   const list = $('#findPickList'); if (!list) return;
-  const pocCount = f => (f.blocks || []).filter(b => b.type === 'flow').length || (f.flows && f.flows.length) || 0;
+  const pocCount = findingPocCount;
   const rows = findings.map(f => `<button class="btn find-pick" data-id="${f.id}" style="width:100%;text-align:left;margin-bottom:4px">
     <span class="sev" style="color:${sevColor(f.severity)}">${esc(f.severity)}</span> ${esc(f.title)}
     <span class="hint" style="float:right">${esc(statusLabel(f.status))}${pocCount(f) ? ' · ' + pocCount(f) + ' PoC' : ''}</span></button>`).join('');

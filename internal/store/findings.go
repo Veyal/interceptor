@@ -511,7 +511,13 @@ func (s *Store) GetFinding(id int64) (*Finding, error) {
 	if f.Flows, err = s.findingFlows(id); err != nil {
 		return nil, err
 	}
+	if f.Flows == nil {
+		f.Flows = []FindingFlow{}
+	}
 	f.Blocks = buildBlocks(f.Body, f.Detail, f.Evidence, f.Flows)
+	if f.Blocks == nil {
+		f.Blocks = []FindingBlock{}
+	}
 	return f, nil
 }
 
@@ -551,7 +557,13 @@ func (s *Store) ListFindings(severity, status string) ([]Finding, error) {
 		if out[i].Flows, err = s.findingFlows(out[i].ID); err != nil {
 			return nil, err
 		}
+		if out[i].Flows == nil {
+			out[i].Flows = []FindingFlow{}
+		}
 		out[i].Blocks = buildBlocks(out[i].Body, out[i].Detail, out[i].Evidence, out[i].Flows)
+		if out[i].Blocks == nil {
+			out[i].Blocks = []FindingBlock{}
+		}
 	}
 	return out, nil
 }

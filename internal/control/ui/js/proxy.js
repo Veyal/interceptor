@@ -53,6 +53,8 @@ const VIRT_BUF=40;
 let flowHasMore=false;         // the server may have older flows past what's loaded
 let loadingMore=false;         // a scroll-triggered page fetch is in flight
 let virtScrollBound=false;
+let virtActive=false;          // set in renderRows: true only while the list is virtualized
+let scrollTick=false;          // rAF guard: coalesce multiple scroll events per frame
 const EXCLUDE_NORM=64|128|512; // repeater, intruder, active scan
 const FLOW_COLS_KEY='proxy.cols';
 const FLOW_COLUMNS=[
@@ -82,12 +84,20 @@ function loadFlowCols(){
 }
 function saveFlowCols(){try{localStorage.setItem(FLOW_COLS_KEY,JSON.stringify(state.flowCols));}catch(e){}}
 function wireFlowSort(){
-  $$('.thead [data-sort]').forEach(h=>h.onclick=()=>{
+  const toggle=h=>{
     const k=h.dataset.sort;
     if(state.sort.key===k)state.sort.dir*=-1;
     else{state.sort.key=k;state.sort.dir=k==='id'||k==='time'?-1:1;}
     renderFlowHead();
     loadFlows();
+  };
+  $$('.thead [data-sort]').forEach(h=>{
+    // Sortable headers are mouse-only by default — promote to buttons so they're
+    // keyboard-operable and announced as such.
+    h.setAttribute('role','button');
+    h.tabIndex=0;
+    h.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggle(h);}});
+    h.onclick=()=>toggle(h);
   });
 }
 function sortDirParam(){return state.sort.dir>0?'asc':'desc';}
@@ -213,14 +223,21 @@ function wireFlowRow(r){
   wireRowKey(r,()=>flowRowClick(id,{})); // Enter/Space inspects the focused row
   r.setAttribute('aria-label','flow '+id);
   r.querySelectorAll('.flowtag').forEach(chip=>{
+    const t=chip.dataset.tagchip;
+    chip.setAttribute('role','button');
+    chip.tabIndex=0;
+    chip.setAttribute('aria-label','filter by tag '+t);
+    chip.addEventListener('keydown',e=>{
+      if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();filterByTag(t);}
+    });
     chip.oncontextmenu=e=>{
       e.preventDefault();e.stopPropagation();
-      openTagChipMenu(e.clientX,e.clientY,chip.dataset.tagchip,id);
+      openTagChipMenu(e.clientX,e.clientY,t,id);
     };
   });
   r.oncontextmenu=e=>{
     e.preventDefault();
-    const f=state.flows.find(x=>x.id===id);
+    const f=flowMap.get(id);
     const cell=e.target.closest('[data-field]');
     showCtx(e.clientX,e.clientY,f,cell?cell.dataset.field:'');
   };
@@ -264,15 +281,27 @@ export function patchFlowRow(f){
   }else box.prepend(nr);
 }
 export function upsertFlow(f){
-  const i=state.flows.findIndex(x=>x.id===f.id);
-  if(i>=0)state.flows[i]=f;
-  else if(sortIsLiveDefault())state.flows.unshift(f);
-  else scheduleReload();
+  const ex=flowMap.get(f.id);
+  if(ex){
+    Object.assign(ex,f); // refresh the object in place — state.flows holds `ex`
+  } else if(sortIsLiveDefault()){
+    state.flows.unshift(f);
+    flowMap.set(f.id,f);
+    if(f.method && !seenMethods.has(f.method)){ seenMethods.add(f.method); methodsDirty=true; }
+  } else { scheduleReload(); return; }
   $('#rowCount').textContent=state.flows.length;
 }
+let liveRenderQueued=false;
 function flowRowLiveUpdate(f){
-  if(state.flows.length>=VIRT_MIN)renderRows();
-  else patchFlowRow(f);
+  if(state.flows.length>=VIRT_MIN){
+    // Virtualized mode: a per-event full window rebuild janks under heavy traffic
+    // (one renderRows per flow). Coalesce — many events per frame collapse to one.
+    if(liveRenderQueued)return;
+    liveRenderQueued=true;
+    requestAnimationFrame(()=>{liveRenderQueued=false;renderRows();});
+    return;
+  }
+  patchFlowRow(f);
 }
 export function handleFlowNew(f){
   if(!f)return;
@@ -285,16 +314,16 @@ export function handleFlowNew(f){
 }
 export function handleFlowUpdate(f){
   if(!f)return;
-  const i=state.flows.findIndex(x=>x.id===f.id);
-  if(i<0){
-    if(canIncremental()&&flowMatchesFilters(f)){upsertFlow(f);refreshMethodFilter();flowRowLiveUpdate(f);}
-    else scheduleReload();
+  const ex=flowMap.get(f.id);
+  if(ex){
+    Object.assign(ex,f); // O(1) refresh — no findIndex over the loaded list
+    const proxy=document.querySelector('.panel[data-panel="proxy"]');
+    if(!proxy||!proxy.classList.contains('active'))return;
+    flowRowLiveUpdate(f);
     return;
   }
-  state.flows[i]=f;
-  const proxy=document.querySelector('.panel[data-panel="proxy"]');
-  if(!proxy||!proxy.classList.contains('active'))return;
-  flowRowLiveUpdate(f);
+  if(canIncremental()&&flowMatchesFilters(f)){upsertFlow(f);refreshMethodFilter();flowRowLiveUpdate(f);}
+  else scheduleReload();
 }
 
 export function applySort(flows){
@@ -332,9 +361,17 @@ export function renderRows(){
     return;}
   if(!virtScrollBound&&box){
     virtScrollBound=true;
-    box.addEventListener('scroll',()=>renderRows(),{passive:true});
+    // rAF-throttled: a non-virtualized list is fully in the DOM, so scrolling
+    // needs no re-render at all; a virtualized list recomputes its window at most
+    // once per frame instead of on every scroll tick.
+    box.addEventListener('scroll',()=>{
+      if(!virtActive||scrollTick)return;
+      scrollTick=true;
+      requestAnimationFrame(()=>{scrollTick=false;renderRows();});
+    },{passive:true});
   }
   if(flows.length>=VIRT_MIN&&box){
+    virtActive=true;
     const viewH=box.clientHeight||640,scrollTop=box.scrollTop||0;
     const start=Math.max(0,Math.floor(scrollTop/ROW_H)-VIRT_BUF);
     const end=Math.min(flows.length,start+Math.ceil(viewH/ROW_H)+2*VIRT_BUF);
@@ -343,6 +380,7 @@ export function renderRows(){
     $$('#rows .trow').forEach(wireFlowRow);
     return;
   }
+  virtActive=false;
   box.innerHTML=flows.map(f=>flowRowHTML(f)).join('');
   $$('#rows .trow').forEach(wireFlowRow);
 }
@@ -438,6 +476,8 @@ export async function loadFlows(){
     flowHasMore=flows.length>FLOW_FETCH&&!bodySearchActive();
     if(flows.length>FLOW_FETCH)flows=flows.slice(0,FLOW_FETCH);
     state.flows=flows;
+    seenMethods.clear(); flows.forEach(f=>{ if(f.method) seenMethods.add(f.method); }); methodsDirty=true;
+    flowMap.clear(); flows.forEach(f=>{ flowMap.set(f.id,f); });
     state.flowSearchNote=d.searchNote||'';
     const box=$('#rows');if(box)box.scrollTop=0;
     renderRows();
@@ -465,11 +505,11 @@ export async function loadMoreFlows(){
     if(flows.length>FLOW_FETCH)flows=flows.slice(0,FLOW_FETCH);
     if(flows.length){
       // Drop any ids already present (a flow could arrive live between pages).
-      const have=new Set(state.flows.map(f=>f.id));
-      const add=flows.filter(f=>!have.has(f.id));
+      const add=flows.filter(f=>!flowMap.has(f.id));
       if(add.length){
         const box=$('#rows');const keep=box?box.scrollTop:0;
         state.flows=state.flows.concat(add);
+        add.forEach(f=>flowMap.set(f.id,f));
         renderRows();
         if(box)box.scrollTop=keep;
       }
@@ -479,12 +519,22 @@ export async function loadMoreFlows(){
 }
 function refreshMethodFilter(){
   if(state.filters.method)return; // don't shrink the list while filtering by method
+  // Only rebuild when a genuinely new method has appeared — scanning all flows and
+  // rebuilding the <select> on every flow event janks under heavy traffic.
+  if(!methodsDirty)return;
+  methodsDirty=false;
   const order=['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS','CONNECT','TRACE'];
-  const present=[...new Set(state.flows.map(f=>f.method).filter(Boolean))]
+  const present=[...seenMethods]
     .sort((a,b)=>{const ia=order.indexOf(a),ib=order.indexOf(b);return (ia<0?99:ia)-(ib<0?99:ib)||a.localeCompare(b);});
   const sel=$('#fMethod');if(!sel)return;const cur=sel.value;
   sel.innerHTML='<option value="">method</option>'+present.map(m=>`<option ${m===cur?'selected':''}>${esc(m)}</option>`).join('');
 }
+const seenMethods=new Set();
+let methodsDirty=true; // build the method filter once initially
+// id -> flow object (the same reference held in state.flows). Lets live flow events
+// (new/update, which fire per captured request) do O(1) lookup+refresh instead of
+// O(N) findIndex over the whole loaded list — essential once you've scrolled deep.
+const flowMap=new Map();
 let reloadTimer=null;
 export function scheduleReload(){clearTimeout(reloadTimer);reloadTimer=setTimeout(loadFlows,150);}
 export async function selectFlow(id){
@@ -513,11 +563,18 @@ export async function selectFlow(id){
 function wsOpcode(o){return {0:'cont',1:'text',2:'bin',8:'close',9:'ping',10:'pong'}[o]||('0x'+o.toString(16));}
 function wsFrameRow(dir,opcode,length,text){
   const arrow=dir==='send'?'<span style="color:var(--blue)">▲ send</span>':'<span style="color:var(--accent)">▼ recv</span>';
-  return `<div style="display:flex;gap:10px;padding:3px 0;border-bottom:1px solid var(--line)">
+  const replayable=opcode===1; // text frames only — binary has no editable text to load
+  return `<div class="ws-frame${replayable?' ws-frame-replay':''}"${replayable?` data-replay="${escAttr(text)}" title="Click to load this frame into the replay box"`:''} style="display:flex;gap:10px;padding:3px 0;border-bottom:1px solid var(--line)">
     <span style="width:60px;flex:none">${arrow}</span>
     <span style="width:46px;flex:none;color:var(--fg3)">${wsOpcode(opcode)}</span>
     <span style="width:58px;flex:none;color:var(--fg2);text-align:right">${length} B</span>
-    <span style="color:var(--fg);overflow-wrap:anywhere">${esc(text)}</span></div>`;
+    <span style="color:var(--fg);overflow-wrap:anywhere;flex:1;min-width:0">${esc(text)}</span>${replayable?'<span class="hint" style="flex:none;align-self:center;white-space:nowrap">↩ load</span>':''}</div>`;
+}
+// wireWsFrames makes text frames click-to-replay: clicking loads that frame's text
+// into the #wsMsg box (the most-expected WS-replay affordance that was missing).
+function wireWsFrames(root){
+  if(!root)return;
+  root.querySelectorAll('.ws-frame-replay').forEach(el=>el.onclick=()=>{const m=$('#wsMsg');if(m){m.value=el.dataset.replay||'';m.focus();}});
 }
 function flowWsURL(d){const s=d.scheme==='https'?'wss':'ws';const def=(d.scheme==='https'&&d.port===443)||(d.scheme==='http'&&d.port===80);return `${s}://${d.host}${def?'':':'+d.port}${d.path||'/'}`;}
 export async function renderWSFrames(id){
@@ -531,6 +588,7 @@ export async function renderWSFrames(id){
     const list=frames.length?frames.map(f=>wsFrameRow(f.dir,f.opcode,f.length,f.preview)).join('')
       :'<span style="color:var(--fg3)">No frames captured yet — frames stream in live as the socket exchanges messages.</span>';
     $('#resView').innerHTML=box+list;
+    wireWsFrames($('#resView'));
     const sb=document.getElementById('wsSendBtn');if(sb)sb.onclick=()=>wsReplay(url);
     const inp=document.getElementById('wsMsg');if(inp)inp.onkeydown=e=>{if(e.key==='Enter')wsReplay(url);};
   }catch(e){$('#resView').textContent='(error: '+e.message+')';}
@@ -540,9 +598,24 @@ async function wsReplay(url){
   const out=$('#wsReplayOut');if(out)out.innerHTML='<span style="color:var(--fg3)">opening socket…</span>';
   try{
     const r=await api('/api/ws/send',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({url,message:msg})});
-    const head=`<div style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3);margin:4px 0 4px">REPLAY · HTTP ${r.status} · ${(r.frames||[]).length} frame(s)</div>`;
-    if(out)out.innerHTML=head+(r.frames||[]).map(f=>wsFrameRow(f.dir,f.opcode,f.len,f.text)).join('');
+    const frames=r.frames||[];
+    const head=`<div style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3);margin:4px 0 4px">${r.status!==101?`Handshake HTTP ${r.status} · `:''}Sent · ${frames.length} frame${frames.length===1?'':'s'} received</div>`;
+    if(out){out.innerHTML=head+frames.map(f=>wsFrameRow(f.dir,f.opcode,f.len,f.text)).join('');wireWsFrames(out);}
   }catch(e){if(out)out.innerHTML='<span style="color:var(--red)">'+esc(e.message)+'</span>';}
+}
+// markFindInHtml wraps occurrences of the find query in <mark>, but only inside
+// *text runs* of an already-escaped/highlighted HTML string — never inside a tag
+// or attribute. Without this, searching for a common substring like "span" or
+// "class" would insert <mark> inside the highlighter's <span class="hl-…"> tags
+// and corrupt the markup. The query is escaped the same way the text was, so a
+// search for "<html>" matches the visible "&lt;html&gt;".
+function markFindInHtml(html,fq){
+  const q=esc(fq).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  if(!q)return {html,count:0};
+  const re=new RegExp(q,'gi');
+  let count=0;
+  const out=html.replace(/(<[^>]*>)|([^<]+)/g,(m,tag,txt)=>tag!==undefined?m:txt.replace(re,s=>{count++;return '<mark class="find-hit">'+s+'</mark>';}));
+  return {html:out,count};
 }
 export async function renderSide(side){
   const el=side==='req'?$('#reqView'):$('#resView');
@@ -560,10 +633,11 @@ export async function renderSide(side){
       }
       let html=highlightHTTP(state.view[side]==='pretty'?prettify(raw):raw,state.view[side]==='pretty',mime);
       const fq=($('#inspectFindIn')||{}).value;
+      const stat=$('#inspectFindStat');
       if(side==='res'&&fq&&fq.length>1){
-        const re=new RegExp(fq.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi');
-        html=html.replace(re,m=>'<mark class="find-hit">'+m+'</mark>');
-      }
+        const r=markFindInHtml(html,fq); html=r.html;
+        if(stat)stat.textContent=r.count?r.count+' match'+(r.count===1?'':'es'):'no matches';
+      } else if(stat){ stat.textContent=''; }
       el.innerHTML=html;
     }catch(e){el.textContent='(error: '+e.message+')';}
   };
@@ -571,6 +645,18 @@ export async function renderSide(side){
   // Binary body (image/font/media/archive/…): show only the headers — the bytes
   // aren't readable as text. Built from the detail DTO, so the body isn't fetched.
   const mime=bodyMime(state.detail,side);
+  // "Render" only makes sense for HTML; for JSON/images/etc. it used to silently
+  // fall through to an ugly raw view. Hide the button and fall back to Pretty.
+  if(side==='res'){
+    const isHtml=!!mime&&/html/i.test(mime);
+    const renderBtn=document.querySelector('#inspect .seg[data-side="res"] button[data-view="render"]');
+    if(renderBtn)renderBtn.style.display=isHtml?'':'none';
+    if(!isHtml&&state.view.res==='render'){
+      state.view.res='pretty';
+      const seg=document.querySelector('#inspect .seg[data-side="res"]');
+      if(seg)seg.querySelectorAll('button').forEach(b=>{b.classList.toggle('on',b.dataset.view==='pretty');});
+    }
+  }
   if(isBinaryMime(mime)){
     const dl=flowBodyDownloadName(state.selId,side,mime), href=flowBodyDownloadHref(state.selId,side);
     el.innerHTML=highlightHTTP(headerBlockText(state.detail,side))+
@@ -621,33 +707,29 @@ renderFlowHead();
 {const m=$('#colPicker');if(m)m.onclick=e=>e.stopPropagation();}
 document.addEventListener('click',()=>{const menu=$('#colPicker'),btn=$('#colPickerBtn');if(menu&&menu.style.display==='block'){menu.style.display='none';if(btn)btn.setAttribute('aria-expanded','false');}});
 
-$('#fScheme').onchange=e=>setFilter('scheme',e.target.value);
 $('#fMethod').onchange=e=>setFilter('method',e.target.value);
 $('#fStatus').onchange=e=>setFilter('status',e.target.value);
 $('#fSearch').oninput=e=>{state.filters.search=e.target.value;renderChips();scheduleReload();};
 if($('#fSearchScope'))$('#fSearchScope').onchange=e=>{state.filters.searchScope=e.target.value||'path';if(state.filters.search)loadFlows();};
 if($('#notesFilter'))$('#notesFilter').onclick=()=>{state.notesOnly=!state.notesOnly;$('#notesFilter').classList.toggle('accent',state.notesOnly);loadFlows();};
 // Inspector header actions — operate on the currently-selected flow.
-function inspectorFlow(){return state.detail||state.flows.find(x=>x.id===state.selId)||null;}
+function inspectorFlow(){return state.detail||flowMap.get(state.selId)||null;}
 {const b=$('#insRepeater');if(b)b.onclick=()=>{const f=inspectorFlow();if(f)sendToRepeater(f);else toast('select a flow first');};}
 {const b=$('#insIntruder');if(b)b.onclick=()=>{const f=inspectorFlow();if(f)sendToIntruder(f);else toast('select a flow first');};}
 {const b=$('#insCurl');if(b)b.onclick=()=>{const f=inspectorFlow();if(f)copyCurl(f);else toast('select a flow first');};}
 $('#scopeToggle').onclick=()=>{state.inScopeOnly=!state.inScopeOnly;$('#scopeToggle').classList.toggle('accent',state.inScopeOnly);$('#scopeToggle').textContent=(state.inScopeOnly?'◉':'◎')+' in scope';loadFlows();};
 function syncSourceFilters(){
   $('#manualFilter')?.classList.toggle('accent',state.showManual);
-  $('#aiSourceFilter')?.classList.toggle('accent',state.showAI);
 }
 export { syncSourceFilters };
 function toggleSourceFilter(which){
   const nextManual=which==='manual'?!state.showManual:state.showManual;
-  const nextAI=which==='ai'?!state.showAI:state.showAI;
-  if(!nextManual&&!nextAI){toast('enable Manual or AI (at least one source)');return;}
-  if(which==='manual')state.showManual=nextManual;else state.showAI=nextAI;
+  if(!nextManual){toast('Manual flows are always shown — filter AI/other sources via the tag bar');return;}
+  if(which==='manual')state.showManual=nextManual;
   syncSourceFilters();
   loadFlows();
 }
 $('#manualFilter')&&($('#manualFilter').onclick=()=>toggleSourceFilter('manual'));
-$('#aiSourceFilter')&&($('#aiSourceFilter').onclick=()=>toggleSourceFilter('ai'));
 syncSourceFilters();
 export async function saveNote(){
   if(!state.selId)return;
@@ -656,42 +738,51 @@ export async function saveNote(){
   try{
     await api('/api/flows/'+state.selId+'/note',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({note})});
     if(state.detail)state.detail.note=note;
-    const fl=state.flows.find(x=>x.id===state.selId);
+    const fl=flowMap.get(state.selId);
     if(fl){fl.note=note;patchFlowRow(fl);}
     const s=$('#noteSaved');s.style.opacity='1';setTimeout(()=>{s.style.opacity='0';},1200);
   }catch(e){toast('note: '+e.message);}
 }
 $('#noteInput').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('#noteInput').blur();}});
 $('#noteInput').addEventListener('blur',saveNote);
-/* ---- saved views ---- */
+/* ---- saved views (one dropdown: apply / save / delete) ---- */
 export async function loadViews(){try{const d=await api('/api/views');state.views=d.views||[];renderViews();}catch(e){}}
 export function renderViews(){
-  const sel=$('#viewsSelect');
-  if(!sel)return;
-  const hasViews=state.views.length>0;
-  sel.style.display=hasViews?'':'none';
-  const cur=sel.value;
-  sel.innerHTML='<option value="">views…</option>'+state.views.map(v=>`<option value="${v.id}">${esc(v.name)}</option>`).join('');
-  if(state.views.find(v=>String(v.id)===cur))sel.value=cur;
-  const del=$('#delViewBtn');
-  if(del)del.style.display=(hasViews&&sel.value)?'inline-block':'none';
+  const btn=$('#viewsBtn'); if(!btn)return;
+  const n=state.views.length;
+  const txt=n?('Views ▾ · '+n):'Views ▾';
+  btn.textContent=txt;
+  btn.title=n?(n+' saved view'+(n===1?'':'s')+' — click to apply, save, or delete'):'No saved views yet — click to save the current filters as a view';
 }
-$('#viewsSelect').onchange=()=>{
-  const id=$('#viewsSelect').value;$('#delViewBtn').style.display=id?'inline-block':'none';
-  if(!id)return;const v=state.views.find(x=>String(x.id)===id);if(!v)return;
+function applyView(v){
   let f={};try{f=JSON.parse(v.data||'{}');}catch(e){}
   state.filters={scheme:f.scheme||'',method:f.method||'',status:f.status||'',search:f.search||'',host:f.host||'',exclude:Array.isArray(f.exclude)?f.exclude:[]};
   state.inScopeOnly=!!f.inScope;
   syncControls();$('#scopeToggle').classList.toggle('accent',state.inScopeOnly);$('#scopeToggle').textContent=(state.inScopeOnly?'◉':'◎')+' in scope';
   renderChips();loadFlows();
-};
-$('#saveViewBtn').onclick=async()=>{
+  toast('applied view: '+v.name);
+}
+async function saveCurrentView(){
   const name=await uiPrompt({title:'Save current filters as a view',placeholder:'view name'});if(!name)return;
   const data={...state.filters,inScope:state.inScopeOnly};
   try{await api('/api/views',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name,data})});toast('view saved');loadViews();}catch(e){toast(e.message);}
-};
-$('#delViewBtn').onclick=async()=>{const id=$('#viewsSelect').value;if(!id)return;
-  try{await api('/api/views/'+id,{method:'DELETE'});$('#viewsSelect').value='';$('#delViewBtn').style.display='none';loadViews();toast('view deleted');}catch(e){toast(e.message);}};
+}
+async function deleteView(id,name){
+  if(!await uiConfirm('Delete view','Delete saved view <b>'+esc(name)+'</b>?','Delete','btn danger','var(--red)'))return;
+  try{await api('/api/views/'+id,{method:'DELETE'});loadViews();toast('view deleted');}catch(e){toast(e.message);}
+}
+function openViewsMenu(){
+  const btn=$('#viewsBtn'); if(!btn)return;
+  const r=btn.getBoundingClientRect();
+  const sections=[];
+  if(state.views.length){
+    sections.push({head:'APPLY VIEW',items:state.views.map(v=>({label:v.name,act:()=>applyView(v)}))});
+    sections.push({head:'DELETE VIEW',items:state.views.map(v=>({label:v.name,danger:true,act:()=>deleteView(v.id,v.name)}))});
+  }
+  sections.push({items:[{label:'＋ Save current filters as a view…',act:saveCurrentView}]});
+  openCtxMenu(r.left, r.bottom+2, sections);
+}
+$('#viewsBtn')&&($('#viewsBtn').onclick=openViewsMenu);
 /* ---- target scope ---- */
 export async function loadScope(){try{const d=await api('/api/scope');state.scope=d.rules||[];renderScope();}catch(e){}}
 export async function addHostToScope(host){
@@ -736,7 +827,7 @@ $('#addScopeBtn').onclick=async()=>{
 };
 /* ---- filters: chips + apply/clear, kept in sync with the toolbar controls ---- */
 export function syncControls(){
-  $('#fScheme').value=state.filters.scheme;
+  const fs=$('#fScheme'); if(fs) fs.value=state.filters.scheme;
   $('#fMethod').value=state.filters.method;
   $('#fStatus').value=state.filters.status;
   $('#fSearch').value=state.filters.search;
@@ -807,8 +898,6 @@ export function renderChips(){
   box.querySelectorAll('[data-clear]').forEach(x=>x.onclick=()=>clearFilter(x.dataset.clear));
   box.querySelectorAll('[data-ex]').forEach(x=>x.onclick=()=>removeExclude(Number(x.dataset.ex)));
   const cc=$('#chipsClear');if(cc)cc.onclick=clearAllFilters;
-  // The "save current filters as a view" (＋) only makes sense when something is filtered.
-  const sv=$('#saveViewBtn');if(sv)sv.style.display=hasFilters?'':'none';
 }
 /* ---- right-click context menu ---- */
 export const ctx=$('#ctxmenu');
@@ -948,7 +1037,7 @@ export function showCtx(x,y,f,field){
 // (only when text is highlighted) for copy/decode/search/scope, plus the global
 // flow actions.
 export function showInspectorCtx(x,y,side){
-  const f=state.flows.find(z=>z.id===state.selId)||state.detail;
+  const f=flowMap.get(state.selId)||state.detail;
   if(!f)return;
   const sel=selectionWithin($(side==='req'?'#reqView':'#resView'));
   const sections=[];
@@ -1082,7 +1171,7 @@ if($('#compareClose'))$('#compareClose').onclick=()=>closeModal($('#compareModal
 $('#selClear').onclick=()=>{state.selected.clear();state.lastSelIdx=-1;renderRows();updateSelBar();};
 $('#selAsk').onclick=()=>{const ids=[...state.selected];if(ids.length)openAi(ids);};
 $('#selScope').onclick=async()=>{
-  const hosts=[...new Set([...state.selected].map(id=>{const f=state.flows.find(x=>x.id===id);return f&&f.host;}).filter(Boolean))];
+  const hosts=[...new Set([...state.selected].map(id=>{const f=flowMap.get(id);return f&&f.host;}).filter(Boolean))];
   if(!hosts.length)return;
   let added=0;
   for(const host of hosts){try{await api('/api/scope',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'include',host,enabled:true})});added++;}catch(e){}}

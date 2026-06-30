@@ -12,6 +12,9 @@ import (
 	"time"
 
 	"github.com/Veyal/interceptor/internal/activescan"
+	"github.com/Veyal/interceptor/internal/activescan/breaker"
+	"github.com/Veyal/interceptor/internal/activescan/csrf"
+	"github.com/Veyal/interceptor/internal/activescript"
 	"github.com/Veyal/interceptor/internal/sender"
 	"github.com/Veyal/interceptor/internal/store"
 )
@@ -39,6 +42,7 @@ type asState struct {
 	requests int
 	findings []activescan.Finding
 	logs     []asProbeLog // every probe this run (with or without a finding)
+	skipped  []breaker.Skipped
 }
 
 func (h *Hub) asWriteState(w http.ResponseWriter) {
@@ -49,6 +53,7 @@ func (h *Hub) asWriteState(w http.ResponseWriter) {
 		"targets": h.as.targets, "scanned": h.as.scanned, "requests": h.as.requests,
 		"findings": append([]activescan.Finding{}, h.as.findings...),
 		"logs":     append([]asProbeLog{}, h.as.logs...),
+		"skipped":  append([]breaker.Skipped{}, h.as.skipped...),
 	})
 }
 
@@ -90,6 +95,7 @@ func (h *Hub) asStart(w http.ResponseWriter, r *http.Request) {
 		InScope     bool  `json:"inScope"`
 		Arm         bool  `json:"arm"` // arm-and-run (the AI/API consent path)
 		MaxRequests int   `json:"maxRequests"`
+		CSRFAware   *bool `json:"csrfAware"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil && err != io.EOF {
 		httpErr(w, http.StatusBadRequest, "bad json")
@@ -126,7 +132,7 @@ func (h *Hub) asStart(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	h.as.running, h.as.cancel = true, cancel
-	h.as.targets, h.as.scanned, h.as.requests, h.as.findings, h.as.logs = 0, 0, 0, nil, nil
+	h.as.targets, h.as.scanned, h.as.requests, h.as.findings, h.as.logs, h.as.skipped = 0, 0, 0, nil, nil, nil
 	h.as.mu.Unlock()
 
 	// release rolls the claim back if we bail before launching the runner.
@@ -161,28 +167,47 @@ func (h *Hub) asStart(w http.ResponseWriter, r *http.Request) {
 	h.as.mu.Unlock()
 	h.broadcast(map[string]any{"type": "activescan.update"})
 
-	go h.asRun(ctx, targets, in.MaxRequests, aiSourceFlag(r))
+	csrfAware := true
+	if in.CSRFAware != nil {
+		csrfAware = *in.CSRFAware
+	}
+
+	go h.asRun(ctx, targets, in.MaxRequests, aiSourceFlag(r), csrfAware)
 	h.asWriteState(w)
 }
 
 // asRun executes the scan across targets within a shared request budget.
 // extraFlags is OR'd onto each probe (store.FlagAI when the run was kicked off
 // by the AI over MCP) so the traffic can be recognized in History.
-func (h *Hub) asRun(ctx context.Context, targets []activescan.Target, budget int, extraFlags int64) {
+func (h *Hub) asRun(ctx context.Context, targets []activescan.Target, budget int, extraFlags int64, csrfAware bool) {
 	if budget <= 0 {
 		budget = 2000
 	}
-	send := h.activeSender(ctx, extraFlags)
+	cb := breaker.New()
+	send := h.activeSender(ctx, extraFlags, csrfAware, cb)
+	disabled := h.checksDisabledSet() // honour active-module toggles from the Checks manager
+	// User-authored (Starlark) active checks run alongside the built-in probes.
+	var customChecks []activescan.Check
+	if h.ActiveChecksDir != "" {
+		if acs, _ := activescript.LoadDir(h.ActiveChecksDir); len(acs) > 0 {
+			customChecks = activescript.ToActiveChecks(acs)
+		}
+	}
 	for _, t := range targets {
 		if ctx.Err() != nil || budget <= 0 {
 			break
 		}
-		fs, n := activescan.Run(ctx, t, send, activescan.Options{MaxRequests: budget, Concurrency: 6})
+		key := breaker.Key(t.Method, hostFromTargetURL(t.URL), pathFromTargetURL(t.URL))
+		if skip, _ := cb.ShouldSkip(key); skip {
+			continue
+		}
+		fs, n := activescan.Run(ctx, t, send, activescan.Options{MaxRequests: budget, Concurrency: 6, Disabled: disabled, Custom: customChecks})
 		budget -= n
 		h.as.mu.Lock()
 		h.as.scanned++
 		h.as.requests += n
 		h.as.findings = append(h.as.findings, fs...)
+		h.as.skipped = cb.SkippedList()
 		h.as.mu.Unlock()
 		if len(fs) > 0 {
 			h.st.SaveIssues(asIssues(fs))
@@ -271,17 +296,46 @@ func probeLogFromTarget(t activescan.Target) asProbeLog {
 	return e
 }
 
-func (h *Hub) activeSender(ctx context.Context, extraFlags int64) activescan.SendFunc {
+func (h *Hub) activeSender(ctx context.Context, extraFlags int64, csrfAware bool, cb *breaker.Tracker) activescan.SendFunc {
+	csrfCache := map[string]csrf.Headers{}
 	return func(t activescan.Target) activescan.Response {
 		entry := probeLogFromTarget(t)
+		host := hostFromTargetURL(t.URL)
+		path := pathFromTargetURL(t.URL)
+		key := breaker.Key(t.Method, host, path)
+		if skip, reason := cb.ShouldSkip(key); skip {
+			entry.Error = "skipped: " + reason
+			h.asAppendLog(entry)
+			return activescan.Response{}
+		}
+
+		hdrs := map[string][]string(t.Headers)
+		if csrfAware && mutatingMethod(t.Method) && host != "" {
+			ch, ok := csrfCache[host]
+			if !ok {
+				ch = h.csrfHeadersForHost(host)
+				csrfCache[host] = ch
+			}
+			if !ch.Empty() {
+				hdrs = ch.Apply(hdrs)
+			}
+		}
+
 		flow, err := h.snd.Send(sender.Request{
 			Method:  t.Method,
 			URL:     t.URL,
-			Headers: map[string][]string(t.Headers),
+			Headers: hdrs,
 			Body:    []byte(t.Body),
 			Flags:   store.FlagActiveScan | extraFlags,
 			Context: ctx,
 		})
+		transportErr := err != nil
+		status := 0
+		if flow != nil {
+			status = flow.Status
+		}
+		cb.Record(key, t.Method, host, path, status, transportErr)
+
 		if err != nil || flow == nil {
 			if err != nil {
 				entry.Error = err.Error()
@@ -307,6 +361,18 @@ func (h *Hub) activeSender(ctx context.Context, extraFlags int64) activescan.Sen
 	}
 }
 
+func pathFromTargetURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	p := u.Path
+	if p == "" {
+		return "/"
+	}
+	return p
+}
+
 func (h *Hub) activescanHistory(w http.ResponseWriter, r *http.Request) {
 	flows, err := h.st.QueryFlowsListFilter(store.FlowFilter{
 		RequireFlags: store.FlagActiveScan,
@@ -326,12 +392,16 @@ func (h *Hub) activescanHistory(w http.ResponseWriter, r *http.Request) {
 func asIssues(fs []activescan.Finding) []store.Issue {
 	out := make([]store.Issue, 0, len(fs))
 	for _, f := range fs {
+		detail := f.Detail
+		if detail == "" {
+			detail = "Confirmed by active probing of the " + f.Point.Kind + " parameter `" + f.Point.Name + "`. The confirming request/response is flow #" + strconv.FormatInt(f.FlowID, 10) + "."
+		}
 		out = append(out, store.Issue{
 			FlowID:   f.FlowID,
 			Severity: f.Severity,
 			Title:    "[active] " + f.Title,
 			Target:   f.Point.Kind + " param: " + f.Point.Name,
-			Detail:   "Confirmed by active probing of the " + f.Point.Kind + " parameter `" + f.Point.Name + "`. The confirming request/response is flow #" + strconv.FormatInt(f.FlowID, 10) + ".",
+			Detail:   detail,
 			Evidence: f.Evidence,
 			Fix:      f.Fix,
 		})

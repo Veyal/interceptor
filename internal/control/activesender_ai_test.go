@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Veyal/interceptor/internal/activescan"
+	"github.com/Veyal/interceptor/internal/activescan/breaker"
 	"github.com/Veyal/interceptor/internal/store"
 )
 
@@ -20,7 +21,7 @@ func TestActiveSenderTagsAIFlag(t *testing.T) {
 	defer target.Close()
 
 	h, s, _ := newHub(t)
-	send := h.activeSender(context.Background(), store.FlagAI)
+	send := h.activeSender(context.Background(), store.FlagAI, false, breaker.New())
 	send(activescan.Target{Method: http.MethodGet, URL: target.URL + "/probe"})
 
 	flows, err := s.QueryFlowsFilter(store.FlowFilter{RequireFlags: store.FlagActiveScan, Limit: 10})

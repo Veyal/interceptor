@@ -6,6 +6,7 @@ import { selectFlow, refreshAuthzIds } from './proxy.js';
 
 let authzFlowId = null;
 let authzViewMode = 'list'; // 'list' | 'matrix' — toggled in bulk results
+let authzMode = 'flow';     // 'flow' | 'scope' | 'crosshost' — the segmented picker at the top
 // authzTarget resolves the flow to act on AT CALL TIME — the live History selection
 // wins (so changing selection while the modal is open isn't ignored, which would
 // silently test the wrong endpoint for IDOR), falling back to the flow the modal
@@ -27,7 +28,7 @@ function authzScopeRuleLine(r){
 }
 async function renderAuthzScopePanel(){
   const panel=$('#authzScopePanel');if(!panel)return;
-  const scopeMode=$('#authzTargetScope')?.checked;
+  const scopeMode=authzMode==='scope';
   panel.style.display=scopeMode?'':'none';
   if(!scopeMode)return;
   try{const d=await api('/api/scope');state.scope=d.rules||[];}catch(e){}
@@ -77,10 +78,19 @@ export function openAuthz(flowId){
   openModal($('#authzModal'));
   $('#authzFlow').textContent=authzFlowId?('#'+authzFlowId):'(none — select in History)';
   $('#authzResults').innerHTML='<div class="hint">Define identities, then <b>Run</b>. Use <b>Check sessions</b> first if cookies may be stale.</div>';
-  if($('#authzTargetFlow'))$('#authzTargetFlow').checked=true;
+  setAuthzMode('flow');
   loadAuthzIdentities();
-  renderAuthzScopePanel();
   loadFlowAuthHint(authzFlowId);
+}
+// setAuthzMode drives the 3-way picker (Selected flow | All in-scope | Cross-host
+// JWT): each mode shows only the controls it needs and retargets the Run button.
+function setAuthzMode(m){
+  authzMode=m;
+  const seg=$('#authzMode');
+  if(seg)seg.querySelectorAll('button').forEach(b=>{const on=b.dataset.m===m;b.classList.toggle('on',on);b.setAttribute('aria-pressed',on?'true':'false');});
+  const mx=$('#authzMax'); if(mx)mx.style.display=m==='scope'?'':'none';
+  const run=$('#authzRun'); if(run)run.textContent=m==='crosshost'?'Run cross-host ▸':'Run ▸';
+  renderAuthzScopePanel();
 }
 
 async function loadAuthzIdentities(){
@@ -155,7 +165,7 @@ async function checkSessions(){
 }
 
 function runBody(){
-  const bulk=$('#authzTargetScope')?.checked;
+  const bulk=authzMode==='scope';
   const fid=authzTarget(); syncAuthzLabel();
   if(!bulk&&!fid){toast('select a flow or choose all in-scope');return null;}
   const body={maxFlows:parseInt($('#authzMax')?.value,10)||0};
@@ -220,7 +230,7 @@ function renderAuthzResults(d){
   const runs=d.runs||[];
   const box=$('#authzResults');
   if(!runs.length){box.innerHTML='<div class="hint">no results</div>';return;}
-  const bulk=runs.length>1||$('#authzTargetScope')?.checked;
+  const bulk=runs.length>1||authzMode==='scope';
   if(!bulk){
     const res=runs[0].results||[];
     box.innerHTML='<div class="authz-row authz-head"><span>identity</span><span>status</span><span>length</span><span>verdict</span></div>'
@@ -272,14 +282,14 @@ function renderCrossHostResults(d){
 }
 
 $('#authzAdd')&&($('#authzAdd').onclick=()=>renderIdentities([...collectIds(),{name:'',headers:''}]));
-$('#authzCrossHost')&&($('#authzCrossHost').onclick=crossHostReplay);
 $('#authzFromFlow')&&($('#authzFromFlow').onclick=fillFromFlow);
 $('#authzCheck')&&($('#authzCheck').onclick=checkSessions);
 $('#authzSave')&&($('#authzSave').onclick=async()=>{try{await saveIds();toast('identities saved');refreshAuthzIds();}catch(e){toast(e.message);}});
 $('#authzClose')&&($('#authzClose').onclick=()=>closeModal($('#authzModal')));
-$('#authzTargetFlow')&&($('#authzTargetFlow').onchange=renderAuthzScopePanel);
-$('#authzTargetScope')&&($('#authzTargetScope').onchange=renderAuthzScopePanel);
+$('#authzMode')&&($('#authzMode').querySelectorAll('button').forEach(b=>b.onclick=()=>setAuthzMode(b.dataset.m)));
 $('#authzRun')&&($('#authzRun').onclick=async()=>{
+  // Cross-host JWT replay is a distinct action — dispatch it instead of the role-swap run.
+  if(authzMode==='crosshost'){crossHostReplay();return;}
   const body=runBody();if(!body)return;
   if(collectIds().length<1){toast('add at least one identity');return;}
   $('#authzResults').innerHTML='<div class="hint">replaying…</div>';

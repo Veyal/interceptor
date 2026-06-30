@@ -5,7 +5,9 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/Veyal/interceptor/internal/activescan"
 	"github.com/Veyal/interceptor/internal/checkscript"
+	"github.com/Veyal/interceptor/internal/scanner"
 	"github.com/Veyal/interceptor/internal/store"
 )
 
@@ -26,7 +28,28 @@ func (h *Hub) listChecks(w http.ResponseWriter, r *http.Request) {
 			checks = got
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"checks": checks, "dir": h.ChecksDir, "disabled": h.checksDisabledList()})
+	// Built-in passive checks (toggleable, not deletable) + active probes
+	// (read-only) so the Checks manager can show every module in one place.
+	writeJSON(w, http.StatusOK, map[string]any{
+		"checks":   checks,
+		"builtin":  scanner.BuiltinChecks,
+		"active":   activeCheckList(),
+		"dir":      h.ChecksDir,
+		"disabled": h.checksDisabledList(),
+	})
+}
+
+// activeCheckList exposes the built-in active-scan probes for the Checks manager
+// (toggleable like passive checks, but only fired when you arm & run an active
+// scan — they send real attack traffic, which is why the run stays consent-gated).
+func activeCheckList() []map[string]string {
+	out := make([]map[string]string, 0, len(activescan.Checks))
+	for _, c := range activescan.Checks {
+		out = append(out, map[string]string{
+			"id": c.ID, "class": c.Class, "severity": c.Severity, "title": c.Title, "fix": c.Fix,
+		})
+	}
+	return out
 }
 
 func (h *Hub) checksDisabledList() []string {

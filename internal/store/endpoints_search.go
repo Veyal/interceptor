@@ -87,7 +87,14 @@ func (s *Store) queryEndpointsAggregate(f EndpointFilter, term, scope string) ([
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
-	q += " GROUP BY host, method, path ORDER BY host, path, method"
+	q += " GROUP BY host, method, path"
+	if f.HideNoiseOnly {
+		// Hide ferox/discovery dead paths: every captured status is 403 or 404.
+		// Endpoints that ever returned anything else (2xx, 401, 5xx, …) stay visible.
+		q += ` HAVING MAX(CASE WHEN status NOT IN (403, 404) AND status > 0 THEN status ELSE 0 END) > 0
+		              OR MAX(COALESCE(status, 0)) = 0`
+	}
+	q += " ORDER BY host, path, method"
 
 	rows, err := s.db.Query(q, args...)
 	if err != nil {

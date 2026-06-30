@@ -72,8 +72,25 @@ export function openAi(ids) {
   resetAiChat();
   setStatus('');
   updateActionBar();
+  syncAgentToggle();
   openModal($('#aiModal'));
   const qi = $('#aiQuestion'); if (qi) { qi.value = ''; setTimeout(() => qi.focus(), 30); }
+}
+
+// Agent mode (let the AI send requests) only works on the Anthropic provider —
+// disable the toggle under OpenRouter instead of letting it silently no-op mid-run.
+export function syncAgentToggle() {
+  const prov = ($('#setAiProvider') || {}).value || 'anthropic';
+  const tog = $('#aiAgentToggle');
+  const hint = document.querySelector('.ai-agent-row .hint');
+  if (!tog) return;
+  const supported = prov !== 'openrouter';
+  if (!supported && tog.checked) tog.checked = false;
+  tog.disabled = !supported;
+  tog.title = supported ? '' : 'Requires the Anthropic provider (Settings → AI assist)';
+  if (hint) hint.textContent = supported
+    ? 'When on, the model may probe URLs via Repeater (up to 5 steps per question). Anthropic provider only.'
+    : 'Agent mode needs the Anthropic provider — switch in Settings → AI assist.';
 }
 
 export async function runAi(kind) {

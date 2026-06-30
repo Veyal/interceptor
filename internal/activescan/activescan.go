@@ -51,17 +51,24 @@ type SendFunc func(Target) Response
 // Prober sends one payload into the point under test and returns the response.
 type Prober func(payload string) Response
 
-// Hit is a confirmed detection from a check.
+// Hit is a confirmed detection from a check. The override fields (Title/Severity/
+// Detail/Fix) are empty for the built-in checks (which carry those on the Check
+// itself) but populated by user-authored checks so each finding is self-describing.
 type Hit struct {
 	Evidence string
 	FlowID   int64
+	Title    string
+	Severity string
+	Detail   string
+	Fix      string
 }
 
 // Check is one active vulnerability check. Run is given the point, the unmutated
 // baseline response, and a probe to fire payloads; it returns a Hit or nil.
 type Check struct {
+	ID                         string
 	Class, Severity, Title, Fix string
-	Run                         func(p Point, baseline Response, probe Prober) *Hit
+	Run                        func(p Point, baseline Response, probe Prober) *Hit
 }
 
 // Finding is a confirmed active-scan result (shaped like a scanner issue).
@@ -69,6 +76,7 @@ type Finding struct {
 	Class    string `json:"class"`
 	Severity string `json:"severity"`
 	Title    string `json:"title"`
+	Detail   string `json:"detail,omitempty"`
 	Fix      string `json:"fix"`
 	Point    Point  `json:"point"`
 	Evidence string `json:"evidence"`
@@ -77,8 +85,10 @@ type Finding struct {
 
 // Options bound a run.
 type Options struct {
-	MaxRequests int // hard cap on probes (default 800)
-	Concurrency int // parallel point×check tasks (default 6)
+	MaxRequests int            // hard cap on probes (default 800)
+	Concurrency int            // parallel point×check tasks (default 6)
+	Disabled    map[string]bool
+	Custom      []Check // user-authored (Starlark) active checks, in addition to Checks
 }
 
 // Points enumerates query, form-body, and top-level JSON-body injection points.
@@ -200,8 +210,15 @@ func Run(ctx context.Context, t Target, send SendFunc, opts Options) ([]Finding,
 
 	sem := make(chan struct{}, opts.Concurrency)
 	var wg sync.WaitGroup
+	// Built-in probes plus any user-authored (Starlark) active checks.
+	checks := make([]Check, 0, len(Checks)+len(opts.Custom))
+	checks = append(checks, Checks...)
+	checks = append(checks, opts.Custom...)
 	for _, p := range points {
-		for _, c := range Checks {
+		for _, c := range checks {
+			if opts.Disabled != nil && opts.Disabled[c.ID] {
+				continue // user toggled this module off in the Checks manager
+			}
 			if ctx.Err() != nil {
 				break
 			}
@@ -217,9 +234,19 @@ func Run(ctx context.Context, t Target, send SendFunc, opts Options) ([]Finding,
 					return send(t.With(p, payload))
 				}
 				if hit := c.Run(p, baseline, probe); hit != nil {
+					sev, title, fix := c.Severity, c.Title, c.Fix
+					if hit.Severity != "" {
+						sev = hit.Severity
+					}
+					if hit.Title != "" {
+						title = hit.Title
+					}
+					if hit.Fix != "" {
+						fix = hit.Fix
+					}
 					mu.Lock()
 					findings = append(findings, Finding{
-						Class: c.Class, Severity: c.Severity, Title: c.Title, Fix: c.Fix,
+						Class: c.Class, Severity: sev, Title: title, Detail: hit.Detail, Fix: fix,
 						Point: p, Evidence: hit.Evidence, FlowID: hit.FlowID,
 					})
 					mu.Unlock()
