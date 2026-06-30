@@ -18,11 +18,19 @@ const MAP_TABLE_VIRTUAL_MIN = 400;
 const MAP_ROW_H = 28;
 const MAP_VIEW_KEY = 'mapView';
 const MAP_HIDE_NOISE_KEY = 'mapHideNoise';
+const MAP_COLLAPSE_IDENTICAL_KEY = 'mapCollapseIdentical';
 
 function restoreMapHideNoise(){
   try{
     const v = localStorage.getItem(MAP_HIDE_NOISE_KEY);
     if(v === '0') return false;
+  }catch(e){}
+  return true;
+}
+
+function restoreMapCollapseIdentical(){
+  try{
+    if(localStorage.getItem(MAP_COLLAPSE_IDENTICAL_KEY) === '0') return false;
   }catch(e){}
   return true;
 }
@@ -38,8 +46,8 @@ function restoreMapView(){
 
 export const mapState = {
   eps: [], total: 0, truncated: false, domain: null, method: '', search: '', searchScope: 'path', searchNote: '', tag: '',
-  statusClass: 0, hideNoise: restoreMapHideNoise(), expandAll: false,
-  view: restoreMapView(), collapsed: new Set(), zoom: { k: 1, x: 12, y: 12 }, _needFit: true,
+  statusClass: 0, hideNoise: restoreMapHideNoise(), collapseIdentical: restoreMapCollapseIdentical(), expandAll: false,
+  view: restoreMapView(), collapsed: new Set(), expandedClusters: new Set(), zoom: { k: 1, x: 12, y: 12 }, _needFit: true,
   sort: { key: 'path', dir: 1 }, _treeHosts: null, _dataVersion: 0,
 };
 
@@ -142,36 +150,104 @@ export function epMatchesSearch(e, q){
     || (e.method||'').toLowerCase().includes(q);
 }
 
+let _mfKey = '', _mfCache = null;
 export function mapFiltered(){
-  const q = mapState.search.toLowerCase();
-  const serverFiltered = mapUsesServerSearch();
-  return mapState.eps.filter(e => {
+  const key = mapState._dataVersion + '|' + (mapState.domain || '') + '|' + mapState.method + '|' + mapState.statusClass + '|' + mapState.eps.length;
+  if(key === _mfKey && _mfCache) return _mfCache;
+  // Client-side search is a marking pass only (dims non-matches) — not a filter —
+  // so buildMapTree's memo stays valid while typing.
+  const out = mapState.eps.filter(e => {
     if(mapState.domain && e.host !== mapState.domain) return false;
     if(mapState.method && e.method !== mapState.method) return false;
     if(mapState.statusClass && Math.floor((e.lastStatus || 0) / 100) !== mapState.statusClass) return false;
-    if(!serverFiltered && q && !epMatchesSearch(e, q)) return false;
     return true;
+  });
+  _mfKey = key; _mfCache = out;
+  return out;
+}
+
+// Per-host clustering: soft-404 endpoints group together; remaining endpoints
+// with the same latest resBodyHash collapse into one "+N identical" row.
+function mapClusterKey(host, kind, id){ return host + '|' + kind + '|' + id; }
+
+function mapMakeCluster(members, kind, host, hidden, out, hash){
+  members.sort((a, b) => (b.hits || 0) - (a.hits || 0) || (a.path || '').localeCompare(b.path || ''));
+  const rep = { ...members[0] };
+  const id = kind === 'soft404' ? 'soft404' : hash;
+  rep._cluster = { kind, key: mapClusterKey(host, kind, id), count: members.length, members };
+  out.push(rep);
+  for(let i = 1; i < members.length; i++){
+    hidden.add(members[i].host + '|' + members[i].method + '|' + members[i].path);
+  }
+}
+
+function mapAssignClusters(eps){
+  if(!mapState.collapseIdentical) return eps.map(e => ({ ...e }));
+  const byHost = new Map();
+  eps.forEach(e => {
+    if(!byHost.has(e.host)) byHost.set(e.host, []);
+    byHost.get(e.host).push(e);
+  });
+  const hidden = new Set();
+  const out = [];
+  for(const [, list] of byHost){
+    const soft = list.filter(e => e.soft404);
+    if(soft.length > 1) mapMakeCluster(soft, 'soft404', soft[0].host, hidden, out, '');
+    else soft.forEach(e => out.push({ ...e }));
+    const rest = list.filter(e => !e.soft404);
+    const singletons = [];
+    const byHash = new Map();
+    rest.forEach(e => {
+      const h = e.resBodyHash || '';
+      if(!h){ singletons.push(e); return; }
+      if(!byHash.has(h)) byHash.set(h, []);
+      byHash.get(h).push(e);
+    });
+    singletons.forEach(e => out.push({ ...e }));
+    for(const [hash, members] of byHash){
+      if(members.length > 1) mapMakeCluster(members, 'identical', members[0].host, hidden, out, hash);
+      else out.push({ ...members[0] });
+    }
+  }
+  return out.filter(e => {
+    const k = e.host + '|' + e.method + '|' + e.path;
+    return e._cluster || !hidden.has(k);
   });
 }
 
-export function mapCount(node){ let n = node.eps.length; node.kids.forEach(k => n += mapCount(k)); return n; }
+export function mapVisibleEps(eps){
+  const clustered = mapAssignClusters(eps);
+  const out = [];
+  for(const e of clustered){
+    out.push(e);
+    if(e._cluster && mapState.expandedClusters.has(e._cluster.key)){
+      e._cluster.members.slice(1).forEach(m => out.push({ ...m, _clusterChild: true }));
+    }
+  }
+  return out;
+}
 
-// Memoized: the tree depends only on the data version + active filters, so the
-// 2–3 calls per render (mapExpandForSearch + renderMapTree + hydration) and the
-// per-keystroke search re-renders reuse one build instead of rebuilding an
-// O(N×depth) tree for thousands of endpoints every time.
+export function mapCount(node){
+  if(node._count != null) return node._count;
+  let n = node.eps.length;
+  node.kids.forEach(k => { n += mapCount(k); });
+  node._count = n;
+  return n;
+}
+
+// Memoized: tree structure depends on filters + clustering, not the search term.
 let _btKey = '', _btCache = null;
 export function buildMapTree(eps){
-  const key = mapState._dataVersion + '|' + mapState.domain + '|' + mapState.method + '|' + mapState.statusClass + '|' + (mapState.search || '') + '|' + eps.length;
+  const key = mapState._dataVersion + '|' + mapState.domain + '|' + mapState.method + '|' + mapState.statusClass + '|' + mapState.collapseIdentical + '|' + eps.length;
   if(key === _btKey && _btCache) return _btCache;
   const hosts = new Map();
   eps.forEach(e => {
-    if(!hosts.has(e.host)) hosts.set(e.host, { name: e.host, key: '/'+e.host, kids: new Map(), eps: [] });
+    if(!hosts.has(e.host)) hosts.set(e.host, { name: e.host, key: '/'+e.host, kids: new Map(), eps: [], _count: null });
     let node = hosts.get(e.host);
     let pathKey = '/'+e.host;
     (e.path || '/').split('?')[0].split('/').filter(Boolean).forEach(seg => {
       pathKey += '/'+seg;
-      if(!node.kids.has(seg)) node.kids.set(seg, { name: seg, key: pathKey, kids: new Map(), eps: [] });
+      if(!node.kids.has(seg)) node.kids.set(seg, { name: seg, key: pathKey, kids: new Map(), eps: [], _count: null });
       node = node.kids.get(seg);
     });
     node.eps.push(e);
@@ -189,13 +265,49 @@ export function findMapTreeNode(key){
   return node;
 }
 
+function epOrClusterMatchesSearch(e, q){
+  if(epMatchesSearch(e, q)) return true;
+  if(e._cluster) return e._cluster.members.some(m => epMatchesSearch(m, q));
+  return false;
+}
+
+function mapExpandClustersForSearch(eps){
+  const q = mapState.search;
+  if(!q || !mapState.collapseIdentical) return;
+  for(const e of mapAssignClusters(eps)){
+    if(e._cluster && epOrClusterMatchesSearch(e, q)) mapState.expandedClusters.add(e._cluster.key);
+  }
+}
+
+function wireMapEpRows(root){
+  root.querySelectorAll('.map-ep[data-flow]').forEach(el => keyClick(el, () => flowPopup(Number(el.dataset.flow))));
+  root.querySelectorAll('.map-cluster-badge').forEach(btn => {
+    btn.onclick = ev => {
+      ev.stopPropagation();
+      const k = btn.dataset.cluster;
+      if(mapState.expandedClusters.has(k)) mapState.expandedClusters.delete(k);
+      else mapState.expandedClusters.add(k);
+      renderMap();
+    };
+  });
+}
+
 export function mapEpRow(e, dim){
   const sts = (e.statuses || []).map(s => `<span style="color:${statusColor(s)}">${s}</span>`).join(' ');
   const path = e.path || '/';
-  const hit = mapState.search && epMatchesSearch(e, mapState.search);
-  return `<div class="map-ep${dim && !hit ? ' map-dim' : ''}${hit ? ' map-hit' : ''}"${e.lastFlowId ? ` data-flow="${e.lastFlowId}"` : ''} title="${escAttr(e.method+' '+(e.scheme||'http')+'://'+e.host+path)}">
+  const q = mapState.search;
+  const hit = q && epOrClusterMatchesSearch(e, q);
+  let clusterBadge = '';
+  if(e._cluster && !e._clusterChild){
+    const label = e._cluster.kind === 'soft404' ? 'soft-404' : 'identical';
+    const extra = e._cluster.count - 1;
+    const expanded = mapState.expandedClusters.has(e._cluster.key);
+    clusterBadge = `<button type="button" class="map-cluster-badge" data-cluster="${escAttr(e._cluster.key)}" title="${extra} endpoint${extra === 1 ? '' : 's'} with ${label === 'soft-404' ? 'a soft-404 (200 OK but not-found content)' : 'the same response body'} — click to ${expanded ? 'collapse' : 'expand'}">${label === 'soft-404' ? 'soft-404' : '⚡'} +${extra}</button>`;
+  }
+  const childCls = e._clusterChild ? ' map-cluster-child' : '';
+  return `<div class="map-ep${dim && !hit ? ' map-dim' : ''}${hit ? ' map-hit' : ''}${childCls}${e.soft404 && !e._cluster ? ' map-soft404' : ''}"${e.lastFlowId ? ` data-flow="${e.lastFlowId}"` : ''} title="${escAttr(e.method+' '+(e.scheme||'http')+'://'+e.host+path)}">
     <span class="map-m" style="color:${methodColor(e.method)}">${esc(e.method)}</span>
-    <span class="map-p">${esc(path)}</span><span class="map-sts">${sts}</span>
+    <span class="map-p">${esc(path)}</span>${clusterBadge}<span class="map-sts">${sts}</span>
     <span class="map-hits">${e.hits > 1 ? e.hits+'×' : ''}</span></div>`;
 }
 
@@ -225,7 +337,7 @@ function hydrateMapTreeNode(body){
   const open = mapState.expandAll || !!mapState.search;
   body.innerHTML = mapRenderNode(node, open, !!mapState.search, mapTreeLazyEnabled(mapFiltered()));
   body.removeAttribute('data-lazy-key');
-  body.querySelectorAll('.map-ep[data-flow]').forEach(el => keyClick(el, () => flowPopup(Number(el.dataset.flow))));
+  wireMapEpRows(body);
 }
 
 function mapHintText(){
@@ -334,7 +446,8 @@ function mapPerfNote(eps){
 
 export function renderMap(){
   if(mapState.view === 'params') return;
-  const eps = mapFiltered();
+  const filtered = mapFiltered();
+  const eps = mapVisibleEps(filtered);
   const hostN = new Set(eps.map(e => e.host)).size;
   const filtered = !!(mapState.search || mapState.method || mapState.statusClass || mapState.domain);
   let countText = eps.length
@@ -387,7 +500,7 @@ export function renderMapTree(eps){
     }
     return `<details class="map-host" open><summary>🌐 ${esc(h.name)}<span class="map-c">${mapCount(h)}</span></summary><div class="map-body">${mapRenderNode(h, open, dim, false)}</div></details>`;
   }).join('');
-  box.querySelectorAll('.map-ep[data-flow]').forEach(el => keyClick(el, () => flowPopup(Number(el.dataset.flow))));
+  wireMapEpRows(box);
 }
 
 function mapSortEps(eps){
@@ -402,11 +515,18 @@ function mapSortEps(eps){
 function mapTableRow(e, showHost){
   const path = e.path || '/';
   const sts = (e.statuses || []).map(s => `<span style="color:${statusColor(s)}">${s}</span>`).join(' ');
-  const hit = mapState.search && epMatchesSearch(e, mapState.search);
-  return `<tr data-flow="${e.lastFlowId || ''}" class="${hit ? 'map-hit-row' : ''}">
+  const q = mapState.search;
+  const hit = q && epOrClusterMatchesSearch(e, q);
+  let clusterCell = '';
+  if(e._cluster && !e._clusterChild){
+    const extra = e._cluster.count - 1;
+    const label = e._cluster.kind === 'soft404' ? 'soft-404' : 'identical';
+    clusterCell = ` <span class="map-cluster-badge-static" title="${extra} with ${label}">${label === 'soft-404' ? 'soft-404' : '⚡'} +${extra}</span>`;
+  }
+  return `<tr data-flow="${e.lastFlowId || ''}" class="${hit ? 'map-hit-row' : ''}${e._clusterChild ? ' map-cluster-child' : ''}">
     ${showHost ? `<td style="font-family:var(--mono);font-size:11px">${esc(e.host)}</td>` : ''}
     <td class="map-tbl-m" style="color:${methodColor(e.method)}">${esc(e.method)}</td>
-    <td class="map-tbl-p" title="${escAttr(path)}">${esc(path)}</td>
+    <td class="map-tbl-p" title="${escAttr(path)}">${esc(path)}${clusterCell}</td>
     <td class="map-tbl-sts">${sts || '—'}</td>
     <td style="text-align:right;color:var(--fg3)">${e.hits > 1 ? e.hits+'×' : ''}</td>
     <td class="map-tbl-act">${e.lastFlowId ? `<button class="btn" data-rep="${e.lastFlowId}" title="Send to Repeater">→ Rep</button>` : ''}</td>
@@ -488,7 +608,11 @@ function mapApplySearch(){
     return;
   }
   mapState.searchNote = '';
-  if(mapState.search) mapExpandForSearch(mapFiltered());
+  const filtered = mapFiltered();
+  if(mapState.search){
+    mapExpandForSearch(filtered);
+    mapExpandClustersForSearch(filtered);
+  }
   mapState._needFit = true;
   renderMap();
 }
@@ -529,22 +653,47 @@ function syncMapHideNoise(){
   b.setAttribute('aria-pressed',mapState.hideNoise?'true':'false');
   b.textContent=mapState.hideNoise?'Hiding 403/404-only':'Showing all statuses';
 }
+function syncMapCollapseIdentical(){
+  const b=$('#mapCollapseIdentical'); if(!b) return;
+  b.classList.toggle('on',!!mapState.collapseIdentical);
+  b.setAttribute('aria-pressed',mapState.collapseIdentical?'true':'false');
+  b.textContent=mapState.collapseIdentical?'Collapsing identical':'Showing every path';
+}
 syncMapHideNoise();
+syncMapCollapseIdentical();
 $('#mapHideNoise')&&($('#mapHideNoise').onclick=()=>{
   mapState.hideNoise=!mapState.hideNoise;
   try{localStorage.setItem(MAP_HIDE_NOISE_KEY,mapState.hideNoise?'1':'0');}catch(e){}
   syncMapHideNoise();
   loadEndpoints();
 });
+$('#mapCollapseIdentical')&&($('#mapCollapseIdentical').onclick=()=>{
+  mapState.collapseIdentical=!mapState.collapseIdentical;
+  mapState.expandedClusters.clear();
+  try{localStorage.setItem(MAP_COLLAPSE_IDENTICAL_KEY,mapState.collapseIdentical?'1':'0');}catch(e){}
+  syncMapCollapseIdentical();
+  mapState._needFit = true;
+  renderMap();
+});
 // Tag is a server-side filter (changes which endpoints come back) — re-fetch.
 $('#mapTag') && ($('#mapTag').onchange = e => { mapState.tag = e.target.value; mapState.domain = null; mapState._needFit = true; loadEndpoints(); });
 
 /* ---- map: node-link graph ---- */
 export function gTrunc(s, n){ return s.length > n ? s.slice(0, n - 1) + '…' : s; }
-export function gCount(n){ if(n.type === 'ep') return 1; let c = 0; n.children.forEach(k => c += gCount(k)); return c; }
+export function gCount(n){
+  if(n._gCount != null) return n._gCount;
+  if(n.type === 'ep'){ n._gCount = 1; return 1; }
+  let c = 0;
+  n.children.forEach(k => { c += gCount(k); });
+  n._gCount = c;
+  return c;
+}
 
+let _gtKey = '', _gtCache = null;
 export function buildGraphTree(eps){
-  const root = { key: '', type: 'root', children: [], cm: new Map() };
+  const key = mapState._dataVersion + '|' + mapState.domain + '|' + mapState.method + '|' + mapState.statusClass + '|' + mapState.collapseIdentical + '|' + eps.length;
+  if(key === _gtKey && _gtCache) return _gtCache;
+  const root = { key: '', type: 'root', children: [], cm: new Map(), _gCount: null };
   const child = (p, k, label, type) => {
     let c = p.cm.get(k);
     if(!c){ c = { key: p.key+'/'+k, label, type, children: [], cm: new Map(), ep: null }; p.cm.set(k, c); p.children.push(c); }
@@ -556,6 +705,7 @@ export function buildGraphTree(eps){
     (e.path || '/').split('?')[0].split('/').filter(Boolean).forEach(seg => { node = child(node, seg, '/'+seg, 'folder'); });
     child(node, 'ep|'+e.method, e.method, 'ep').ep = e;
   });
+  _gtKey = key; _gtCache = root;
   return root;
 }
 

@@ -6,6 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-06-30
+
+**Map that scales:** large attack surfaces no longer freeze while you search, and ferox/discovery trash collapses into readable clusters instead of a wall of duplicate rows.
+
+### Added
+- **Map response clustering.** Endpoints on the same host that share the latest response body (`res_body_hash`, byte-exact) collapse into one row with a **+N identical** badge; click to expand. HTTP **200 soft-404** pages (body matches a "not found" content signature) cluster separately as **soft-404**. Toggle **Collapsing identical** on the Map toolbar (on by default, persisted like **Hiding 403/404-only**). Nothing is auto-deleted — cluster/collapse only.
+
+### Fixed
+- **Map search lag on large projects.** Tree rebuild memo no longer keys on the search term; search dims non-matches instead of filtering them out of the tree, so typing stays responsive on 1000+ endpoints. `mapFiltered`, `mapCount`, and `buildGraphTree` are memoized per filter pass.
+- **Map `lastStatus` / scheme / body hash pinned to latest flow.** Endpoint aggregation now reads `status`, `scheme`, `res_body_hash`, and `res_len` from the row with `MAX(flows.id)` instead of an arbitrary group member.
+
 ## [0.15.0] - 2026-06-30
 
 **Stop what is running:** `interceptor stop` gracefully shuts down every Interceptor instance on the machine (SQLite flush, proxy drain, ports 8080/9966/…), with a 6s grace window before force-kill.

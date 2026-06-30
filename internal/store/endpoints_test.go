@@ -184,3 +184,107 @@ func TestEndpointsHideNoiseOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestEndpointsResBodyHashClustering(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	sharedHash := writeTestBody(t, s, `<html>same SPA shell</html>`)
+	otherHash := writeTestBody(t, s, `{"ok":true}`)
+
+	s.InsertFlow(&Flow{TS: time.UnixMilli(1), Method: "GET", Host: "app.test", Path: "/a", Status: 200, ResBodyHash: sharedHash, ResLen: 28})
+	s.InsertFlow(&Flow{TS: time.UnixMilli(2), Method: "GET", Host: "app.test", Path: "/b", Status: 200, ResBodyHash: sharedHash, ResLen: 28})
+	s.InsertFlow(&Flow{TS: time.UnixMilli(3), Method: "GET", Host: "app.test", Path: "/c", Status: 200, ResBodyHash: otherHash, ResLen: 12})
+
+	eps, _, err := s.Endpoints(EndpointFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(eps) != 3 {
+		t.Fatalf("got %d endpoints, want 3", len(eps))
+	}
+	byPath := map[string]Endpoint{}
+	for _, e := range eps {
+		byPath[e.Path] = e
+	}
+	if byPath["/a"].ResBodyHash != sharedHash || byPath["/b"].ResBodyHash != sharedHash {
+		t.Fatalf("/a and /b should share hash %q, got %q and %q", sharedHash, byPath["/a"].ResBodyHash, byPath["/b"].ResBodyHash)
+	}
+	if byPath["/c"].ResBodyHash != otherHash {
+		t.Fatalf("/c hash = %q, want %q", byPath["/c"].ResBodyHash, otherHash)
+	}
+}
+
+func TestEndpointsLastStatusFromLatestFlow(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	body200 := writeTestBody(t, s, "ok")
+	body404 := writeTestBody(t, s, "gone")
+
+	s.InsertFlow(&Flow{TS: time.UnixMilli(1), Method: "GET", Host: "app.test", Path: "/x", Status: 200, Scheme: "http", ResBodyHash: body200})
+	s.InsertFlow(&Flow{TS: time.UnixMilli(2), Method: "GET", Host: "app.test", Path: "/x", Status: 404, Scheme: "https", ResBodyHash: body404})
+
+	eps, _, err := s.Endpoints(EndpointFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var x *Endpoint
+	for i := range eps {
+		if eps[i].Path == "/x" {
+			x = &eps[i]
+		}
+	}
+	if x == nil {
+		t.Fatal("missing /x endpoint")
+	}
+	if x.LastStatus != 404 {
+		t.Fatalf("lastStatus = %d, want 404 from latest flow", x.LastStatus)
+	}
+	if x.Scheme != "https" {
+		t.Fatalf("scheme = %q, want https from latest flow", x.Scheme)
+	}
+	if x.ResBodyHash != body404 {
+		t.Fatalf("resBodyHash = %q, want latest flow body %q", x.ResBodyHash, body404)
+	}
+}
+
+func TestEndpointsSoft404(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	softHash := writeTestBody(t, s, `<html><body>Page not found</body></html>`)
+	realHash := writeTestBody(t, s, `{"users":[{"id":1}]}`)
+	honest404 := writeTestBody(t, s, `Not Found`)
+
+	s.InsertFlow(&Flow{TS: time.UnixMilli(1), Method: "GET", Host: "app.test", Path: "/soft", Status: 200, ResBodyHash: softHash})
+	s.InsertFlow(&Flow{TS: time.UnixMilli(2), Method: "GET", Host: "app.test", Path: "/real", Status: 200, ResBodyHash: realHash})
+	s.InsertFlow(&Flow{TS: time.UnixMilli(3), Method: "GET", Host: "app.test", Path: "/honest", Status: 404, ResBodyHash: honest404})
+
+	eps, _, err := s.Endpoints(EndpointFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byPath := map[string]Endpoint{}
+	for _, e := range eps {
+		byPath[e.Path] = e
+	}
+	if !byPath["/soft"].Soft404 {
+		t.Fatal("/soft with 200 + 'Page not found' should be soft404")
+	}
+	if byPath["/real"].Soft404 {
+		t.Fatal("/real with genuine content should not be soft404")
+	}
+	if byPath["/honest"].Soft404 {
+		t.Fatal("honest 404 status should not be flagged soft404")
+	}
+}
