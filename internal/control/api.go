@@ -110,7 +110,7 @@ var apiRoutes = []apiRoute{
 	{"PUT", "/api/scope/{id}", "Update a scope rule"},
 	{"DELETE", "/api/scope/{id}", "Delete a scope rule"},
 	{"GET", "/api/settings", "Get proxy/intercept settings"},
-	{"PUT", "/api/settings", "Update settings (rebinds the proxy listener)"},
+	{"PUT", "/api/settings", "Update settings (rebinds proxy/control listeners)"},
 	{"GET", "/api/sysproxy", "System-proxy status (supported/enabled)"},
 	{"POST", "/api/sysproxy", "Enable/disable the OS system proxy (macOS)"},
 	{"GET", "/api/android/status", "ADB availability, connected devices, and device proxy state"},

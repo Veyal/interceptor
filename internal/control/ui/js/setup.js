@@ -34,7 +34,7 @@ function renderStep() {
         <code class="evidence" style="flex:1;margin:0;font-size:13px">${addr}</code>
         <button class="btn" id="setupCopyAddr">⧉ Copy</button>
       </div>
-      <p class="hint" style="margin:0">HTTP works immediately. For <b>HTTPS</b>, the next step trusts the interception CA. The control UI (this window) is at <code>127.0.0.1:9966</code>.</p>`;
+      <p class="hint" style="margin:0">HTTP works immediately. For <b>HTTPS</b>, the next step trusts the interception CA. The control UI (this window) is at <code>${esc(state.controlAddr||'127.0.0.1:9966')}</code>.</p>`;
     $('#setupCopyAddr').onclick = () => copyText(state.proxyAddr || '127.0.0.1:8080', 'proxy address copied');
   } else if (step === 1) {
     const os = osHint();

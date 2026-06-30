@@ -51,7 +51,10 @@ type Hub struct {
 	st     *store.Store
 	eng    *intercept.Engine
 	ca     *tlsca.CA
-	rebind Rebinder
+	rebind     Rebinder // proxy listener
+	ctrlRebind Rebinder // control UI/API listener
+	// SyncSelfPorts updates proxy SelfPorts and hub SelfAddr after a listener rebind.
+	SyncSelfPorts func()
 	snd    *sender.Sender
 	intr   *intruder.Engine
 	sc     *scope.Engine
@@ -149,6 +152,9 @@ func New(st *store.Store, eng *intercept.Engine, ca *tlsca.CA, rebind Rebinder, 
 	h.snd.SetOnPersist(h.FlowCaptured)
 	return h
 }
+
+// SetControlRebinder attaches the control-plane listener manager (set by cmd).
+func (h *Hub) SetControlRebinder(r Rebinder) { h.ctrlRebind = r }
 
 // Handler returns the control-plane HTTP handler, wrapped in the loopback/CSRF
 // security guard (see securityGuard).
@@ -380,6 +386,7 @@ type interceptJSON struct {
 
 type settingsJSON struct {
 	ProxyAddr                string `json:"proxyAddr"`
+	ControlAddr              string `json:"controlAddr"`
 	InterceptEnabled         bool   `json:"interceptEnabled"`
 	UpstreamProxy            string `json:"upstreamProxy"`
 	AiProvider               string `json:"aiProvider"`
@@ -1273,6 +1280,19 @@ func (h *Hub) currentProxyAddr() string {
 	return "127.0.0.1:8080"
 }
 
+func (h *Hub) currentControlAddr() string {
+	if h.ctrlRebind != nil {
+		return h.ctrlRebind.Addr()
+	}
+	if h.SelfAddr != "" {
+		return h.SelfAddr
+	}
+	if v, ok, _ := h.st.GetSetting("control.addr"); ok && v != "" {
+		return v
+	}
+	return "127.0.0.1:9966"
+}
+
 func (h *Hub) getSettings(w http.ResponseWriter, r *http.Request) {
 	up, _, _ := h.st.GetSetting("upstream.proxy")
 	aiProvider, _, _ := h.st.GetSetting("ai.provider")
@@ -1292,6 +1312,7 @@ func (h *Hub) getSettings(w http.ResponseWriter, r *http.Request) {
 	aiDisabled, _, _ := h.st.GetSetting("ai.disabled")
 	writeJSON(w, http.StatusOK, settingsJSON{
 		ProxyAddr:                h.currentProxyAddr(),
+		ControlAddr:              h.currentControlAddr(),
 		InterceptEnabled:         h.eng != nil && h.eng.Enabled(),
 		UpstreamProxy:            up,
 		AiProvider:               aiProvider,
@@ -1307,6 +1328,7 @@ func (h *Hub) getSettings(w http.ResponseWriter, r *http.Request) {
 func (h *Hub) putSettings(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		ProxyAddr                string  `json:"proxyAddr"`
+		ControlAddr              string  `json:"controlAddr"`
 		UpstreamProxy            *string `json:"upstreamProxy"` // pointer so "" can clear it
 		AiProvider               *string `json:"aiProvider"`
 		AiApiKey                 *string `json:"aiApiKey"`
@@ -1412,6 +1434,27 @@ func (h *Hub) putSettings(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		_ = h.st.SetSetting("proxy.addr", in.ProxyAddr)
+		if h.SyncSelfPorts != nil {
+			h.SyncSelfPorts()
+		}
+		h.broadcast(map[string]any{"type": "settings.update"})
+	}
+	if in.ControlAddr != "" && in.ControlAddr != h.currentControlAddr() {
+		if !isLoopbackHost(in.ControlAddr) && os.Getenv("INTERCEPTOR_ALLOW_EXTERNAL_BIND") == "" {
+			httpErr(w, http.StatusBadRequest, "control bind address must be loopback (127.0.0.1/localhost/::1); set INTERCEPTOR_ALLOW_EXTERNAL_BIND=1 to allow external binds")
+			return
+		}
+		if h.ctrlRebind != nil {
+			if err := h.ctrlRebind.Rebind(in.ControlAddr); err != nil {
+				httpErr(w, http.StatusBadRequest, "control rebind failed: "+err.Error())
+				return
+			}
+		}
+		h.SelfAddr = in.ControlAddr
+		_ = h.st.SetSetting("control.addr", in.ControlAddr)
+		if h.SyncSelfPorts != nil {
+			h.SyncSelfPorts()
+		}
 		h.broadcast(map[string]any{"type": "settings.update"})
 	}
 	if in.UpstreamProxy != nil {

@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -32,25 +33,6 @@ import (
 )
 
 const defaultControlAddr = "127.0.0.1:9966"
-
-// resolveControlAddr picks the control-plane listen address: the
-// INTERCEPTOR_CONTROL_ADDR env (e.g. "127.0.0.1:9967" to run a second instance),
-// falling back to defaultControlAddr. A non-loopback bind requires
-// INTERCEPTOR_ALLOW_EXTERNAL_BIND=1 (same gate as the proxy); otherwise we fall
-// back to the loopback default so the control plane (API + captured traffic) is
-// never exposed on a LAN interface without explicit opt-in. The request-time
-// loopback Host/Origin guard in internal/control still applies regardless of bind.
-func resolveControlAddr() string {
-	addr := os.Getenv("INTERCEPTOR_CONTROL_ADDR")
-	if addr == "" {
-		addr = defaultControlAddr
-	}
-	if !isLoopbackBind(addr) && os.Getenv("INTERCEPTOR_ALLOW_EXTERNAL_BIND") == "" {
-		log.Printf("control addr %q is non-loopback; ignoring (set INTERCEPTOR_ALLOW_EXTERNAL_BIND=1 to allow)", addr)
-		return defaultControlAddr
-	}
-	return addr
-}
 
 // isLoopbackBind reports whether an address (host or host:port) names the
 // loopback interface: 127.0.0.0/8, ::1, "localhost", or empty (all-interfaces
@@ -101,7 +83,7 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "mcp" {
 		base := os.Getenv("INTERCEPTOR_CONTROL_URL")
 		if base == "" {
-			base = "http://" + resolveControlAddr()
+			base = "http://" + resolveControlAddr(nil, "")
 		}
 		if err := mcp.New(base).Serve(os.Stdin, os.Stdout); err != nil {
 			log.Fatal(err)
@@ -120,15 +102,13 @@ func run() error {
 	}
 	globalDir := filepath.Join(home, ".interceptor")
 
-	// Control-plane listen address: env-configurable (INTERCEPTOR_CONTROL_ADDR) so
-	// you can run a second instance / custom port; loopback by default.
-	controlAddr := resolveControlAddr()
-
 	// --project <name|path> (or INTERCEPTOR_PROJECT) skips the startup prompt.
 	fs := flag.NewFlagSet("interceptor", flag.ContinueOnError)
 	projectFlag := fs.String("project", "", "project name or directory (skips the startup picker)")
 	openFlag := fs.Bool("open", false, "open the UI in your browser on start (default: don't)")
-	if err := fs.Parse(os.Args[1:]); err != nil {
+	controlPortFlag := fs.Int("control-port", 0, "control UI/API TCP port on loopback (default 9966)")
+	controlAddrFlag := fs.String("control-addr", "", "control UI/API listen address host:port (overrides --control-port)")
+	if err := fs.Parse(normalizeCLIArgs(os.Args[1:])); err != nil {
 		return err
 	}
 	projectArg := *projectFlag
@@ -155,6 +135,17 @@ func run() error {
 		writeLastProject(globalDir, projectName)
 	}
 
+	// Control-plane listen address: CLI → env → persisted setting → default.
+	controlCLI := strings.TrimSpace(*controlAddrFlag)
+	if controlCLI == "" && *controlPortFlag != 0 {
+		var err error
+		controlCLI, err = controlAddrFromPort(*controlPortFlag)
+		if err != nil {
+			return err
+		}
+	}
+	controlAddr := resolveControlAddr(st, controlCLI)
+
 	// The CA is global (lives outside any project) so trusting it once covers
 	// every project — switching projects never means re-installing a cert.
 	ca, err := tlsca.LoadOrCreate(filepath.Join(globalDir, "ca"))
@@ -179,7 +170,9 @@ func run() error {
 	// first, then the hub, then the proxy handler, then attach it to the manager.
 	sc := scope.New() // one shared target-scope matcher: control owns CRUD, the proxy gate reads it
 	pm := &proxyManager{}
+	cm := &controlManager{}
 	hub := control.New(st, eng, ca, pm, sc)
+	hub.SetControlRebinder(cm)
 	// User-authored Starlark scanner checks are global (shared across projects).
 	checksDir := filepath.Join(globalDir, "checks")
 	activeChecksDir := filepath.Join(globalDir, "active-checks")
@@ -188,7 +181,6 @@ func run() error {
 	_ = os.MkdirAll(activeChecksDir, 0o755)
 	hub.ChecksDir = checksDir
 	hub.ActiveChecksDir = activeChecksDir
-	hub.SelfAddr = controlAddr // so the active scanner never targets our own API
 	hub.ProjectName = projectName
 	hub.ProjectDir = dir
 	hub.GlobalDir = globalDir
@@ -220,6 +212,11 @@ func run() error {
 		prx.SetSuppressBrowserTelemetry(true)
 	}
 	pm.handler = prx
+	cm.handler = hub.Handler()
+	hub.SyncSelfPorts = func() {
+		prx.SelfPorts = selfPorts(cm.Addr(), pm.Addr())
+		hub.SelfAddr = cm.Addr()
+	}
 
 	proxyAddr := "127.0.0.1:8080"
 	if v := os.Getenv("INTERCEPTOR_PROXY_ADDR"); v != "" {
@@ -234,18 +231,12 @@ func run() error {
 		return fmt.Errorf("proxy listen on %s: %w", proxyAddr, err)
 	}
 
-	ctrlLn, err := listenRetry(controlAddr)
-	if err != nil {
+	if err := cm.Start(controlAddr); err != nil {
 		return fmt.Errorf("control listen on %s: %w", controlAddr, err)
 	}
-	ctrlSrv := &http.Server{Handler: hub.Handler()}
-	go func() {
-		if err := ctrlSrv.Serve(ctrlLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("control serve: %v", err)
-		}
-	}()
+	hub.SelfAddr = cm.Addr()
 
-	uiURL := "http://" + controlAddr
+	uiURL := "http://" + cm.Addr()
 	log.Printf("Interceptor v%s · project %q: proxy on %s · UI on %s · data %s", version.String(), projectName, pm.Addr(), uiURL, dir)
 	// Quiet, daemon-style start by default: only open the browser when the operator
 	// opts in (--open / INTERCEPTOR_OPEN_BROWSER), so restarts and headless runs
@@ -278,9 +269,75 @@ func run() error {
 	log.Println("shutting down…")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = ctrlSrv.Shutdown(ctx)
+	cm.Shutdown(ctx)
 	pm.Shutdown(ctx)
 	return nil
+}
+
+// controlManager owns the control-plane listener and supports runtime rebinding.
+// It implements control.Rebinder.
+type controlManager struct {
+	handler http.Handler
+
+	mu   sync.Mutex
+	addr string
+	srv  *http.Server
+}
+
+func (m *controlManager) serve(ln net.Listener) *http.Server {
+	srv := &http.Server{Handler: m.handler}
+	go func() {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("control serve: %v", err)
+		}
+	}()
+	return srv
+}
+
+func (m *controlManager) Start(addr string) error {
+	ln, err := listenRetry(addr)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.addr, m.srv = addr, m.serve(ln)
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *controlManager) Rebind(addr string) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	newSrv := m.serve(ln)
+	m.mu.Lock()
+	old := m.srv
+	m.addr, m.srv = addr, newSrv
+	m.mu.Unlock()
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = old.Shutdown(ctx)
+	}()
+	log.Printf("control UI rebound to %s", addr)
+	return nil
+}
+
+func (m *controlManager) Addr() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.addr
+}
+
+func (m *controlManager) Shutdown(ctx context.Context) {
+	m.mu.Lock()
+	srv := m.srv
+	m.mu.Unlock()
+	if srv != nil {
+		_ = srv.Shutdown(ctx)
+	}
 }
 
 // proxyManager owns the proxy listener and supports runtime rebinding: it opens

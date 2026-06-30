@@ -22,7 +22,7 @@
   <span class="tag">INTERCEPTING PROXY</span>
   <div class="spacer"></div>
   <div class="row" style="gap:6px" title="Proxy listener — the dot pulses when traffic is captured"><div class="dot" id="capDot"></div><span class="kv">proxy <b id="proxyAddr">…</b></span><span class="kv" id="capStat" style="color:var(--fg3)">· waiting for traffic</span><span class="kv" id="icptStat" aria-live="polite" style="display:none;color:var(--amber);font-weight:600"></span></div>
-  <span class="kv">control <b>127.0.0.1:9966</b></span>
+  <span class="kv">control <b id="controlAddr">…</b></span>
   <button id="cmdkBtn" class="btn" title="Command palette (Ctrl+K)" aria-label="Command palette" style="padding:4px 10px">⌘K</button>
   <button id="helpBtn" class="btn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" style="padding:4px 10px">?</button>
   <button id="themeToggle" title="Toggle light / dark theme" aria-label="Toggle theme">☾</button>
@@ -461,6 +461,12 @@ Content-Type: application/json
             <div class="field"><label>Bind address &amp; port</label><input id="setAddr" placeholder="127.0.0.1:8080"></div>
             <div class="row" style="gap:8px"><button class="btn accent" id="saveAddrBtn">Apply &amp; rebind</button>
               <span class="hint">Loopback only by default; bind <b>0.0.0.0:8080</b> for LAN/device capture (needs <b>INTERCEPTOR_ALLOW_EXTERNAL_BIND=1</b>).</span></div>
+          </div>
+          <div class="section">
+            <h3>CONTROL UI (this window)</h3>
+            <p class="hint" style="margin-bottom:10px">Where the web UI and REST API listen. Change the port to run a second instance, or bind <b>0.0.0.0</b> so remote OOB callbacks can reach <code>/oob</code> (needs <b>INTERCEPTOR_ALLOW_EXTERNAL_BIND=1</b>). After rebinding, bookmark the new URL — this tab may stop updating if the port changed.</p>
+            <div class="field"><label>Bind address &amp; port</label><input id="setControlAddr" placeholder="127.0.0.1:9966"></div>
+            <div class="row" style="gap:8px"><button class="btn accent" id="saveControlAddrBtn">Apply &amp; rebind</button></div>
             <div class="field" style="margin-top:16px"><label>Upstream proxy (chain through another proxy; blank = direct)</label><input id="setUpstream" placeholder="http://corp-proxy:8080"></div>
             <div class="row"><button class="btn" id="saveUpstreamBtn">Save upstream</button></div>
           </div>

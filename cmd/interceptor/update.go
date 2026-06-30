@@ -42,8 +42,9 @@ Usage:
 Common flags / env:
   --project <name|path>    open a specific project (or INTERCEPTOR_PROJECT)
   --open                   open the UI in your browser on start (or INTERCEPTOR_OPEN_BROWSER)
-  INTERCEPTOR_CONTROL_ADDR control-plane listen addr (default 127.0.0.1:9966;
-                           set e.g. 127.0.0.1:9967 to run a second instance)
+  --control-port <port>    control UI/API port on 127.0.0.1 (e.g. 9967 for a second instance)
+  --control-addr host:port full control listen address (overrides --control-port; also --control_port)
+  INTERCEPTOR_CONTROL_ADDR same as --control-addr when the flag is not set
 
 Update flags:
   --check                  report whether an update is available
