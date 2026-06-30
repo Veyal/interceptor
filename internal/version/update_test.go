@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"strings"
 	"testing"
 )
@@ -77,6 +78,28 @@ func TestVerifySHA256(t *testing.T) {
 	}
 	if verifySHA256(data, "deadbeef") == nil {
 		t.Fatal("expected mismatch")
+	}
+}
+
+func TestFormatBytes(t *testing.T) {
+	if formatBytes(512) != "512 B" {
+		t.Fatalf("512 B")
+	}
+	if formatBytes(2<<20) != "2.0 MB" {
+		t.Fatalf("2 MiB")
+	}
+}
+
+func TestProgressReaderReports(t *testing.T) {
+	var buf bytes.Buffer
+	prog := &updateProgress{out: &buf, term: false}
+	data := bytes.Repeat([]byte("x"), 3<<20)
+	_, err := io.ReadAll(&progressReader{r: bytes.NewReader(data), prog: prog, total: int64(len(data))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "downloading:") {
+		t.Fatalf("expected progress output, got %q", buf.String())
 	}
 }
 
