@@ -84,6 +84,12 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "stop":
+			if err := runStop(os.Args[2:]); err != nil {
+				fmt.Fprintf(os.Stderr, "stop failed: %v\n", err)
+				os.Exit(1)
+			}
+			return
 		case "help", "-h", "--help":
 			printUsage()
 			return

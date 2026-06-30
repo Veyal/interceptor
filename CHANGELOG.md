@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-06-30
+
+**Stop what is running:** `interceptor stop` gracefully shuts down every Interceptor instance on the machine (SQLite flush, proxy drain, ports 8080/9966/…), with a 6s grace window before force-kill.
+
+### Added
+- **`interceptor stop` subcommand.** Gracefully stops every running Interceptor instance on the machine (flushes SQLite, drains the proxy, frees ports 8080/9966/…), falling back to a force-kill after a 6s grace window. Useful before launching a new version or reclaiming the proxy ports for another app. Reuses the existing signal-driven shutdown path; no daemon or PID file.
+
 ## [0.14.0] - 2026-06-30
 
 The **"you can attack that"** release: user-authored active checks, a fully automated agent pentest harness (readiness → discovery → auth → CSRF-aware active scan), Android ADB onboarding, and a unified Checks manager — plus a sweep of UI performance and accessibility fixes for large projects.
