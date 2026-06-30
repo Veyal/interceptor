@@ -17,14 +17,17 @@ const (
 // Endpoint is a unique (host, method, path) surface aggregated from flows — the
 // building block of the endpoint map. Repeated hits collapse into one row.
 type Endpoint struct {
-	Host       string `json:"host"`
-	Method     string `json:"method"`
-	Path       string `json:"path"`
-	Scheme     string `json:"scheme"`
-	LastStatus int    `json:"lastStatus"` // status of the most recent hit
-	Statuses   []int  `json:"statuses"`   // every distinct status seen, sorted
-	Hits       int    `json:"hits"`
-	LastFlowID int64  `json:"lastFlowId"` // most recent flow, for click-through
+	Host        string `json:"host"`
+	Method      string `json:"method"`
+	Path        string `json:"path"`
+	Scheme      string `json:"scheme"`
+	LastStatus  int    `json:"lastStatus"` // status of the most recent hit
+	Statuses    []int  `json:"statuses"`   // every distinct status seen, sorted
+	Hits        int    `json:"hits"`
+	LastFlowID  int64  `json:"lastFlowId"` // most recent flow, for click-through
+	ResBodyHash string `json:"resBodyHash"` // SHA-256 of latest response body (empty if none)
+	ResLen      int64  `json:"resLen"`      // length of latest response body
+	Soft404     bool   `json:"soft404"`     // 2xx/3xx body matches a "not found" content signature
 }
 
 // EndpointFilter narrows which flows are aggregated into endpoints.

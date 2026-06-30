@@ -81,20 +81,29 @@ func (s *Store) queryEndpointsAggregate(f EndpointFilter, term, scope string) ([
 			args = append(args, term, term, term)
 		}
 	}
-	q := `SELECT host, method, path, scheme, status, MAX(id) AS last_id, COUNT(*) AS hits,
-	             GROUP_CONCAT(DISTINCT status) AS statuses
-	      FROM flows`
+	whereClause := ""
 	if len(where) > 0 {
-		q += " WHERE " + strings.Join(where, " AND ")
+		whereClause = " WHERE " + strings.Join(where, " AND ")
 	}
-	q += " GROUP BY host, method, path"
+	having := ""
 	if f.HideNoiseOnly {
-		// Hide ferox/discovery dead paths: every captured status is 403 or 404.
-		// Endpoints that ever returned anything else (2xx, 401, 5xx, …) stay visible.
-		q += ` HAVING MAX(CASE WHEN status NOT IN (403, 404) AND status > 0 THEN status ELSE 0 END) > 0
+		having = ` HAVING MAX(CASE WHEN status NOT IN (403, 404) AND status > 0 THEN status ELSE 0 END) > 0
 		              OR MAX(COALESCE(status, 0)) = 0`
 	}
-	q += " ORDER BY host, path, method"
+	q := `WITH agg AS (
+	      SELECT host, method, path,
+	             MAX(id) AS last_id,
+	             COUNT(*) AS hits,
+	             GROUP_CONCAT(DISTINCT status) AS statuses
+	      FROM flows` + whereClause + `
+	      GROUP BY host, method, path` + having + `
+	      )
+	      SELECT a.host, a.method, a.path,
+	             f.scheme, f.status, f.res_body_hash, f.res_len,
+	             a.last_id, a.hits, a.statuses
+	      FROM agg a
+	      JOIN flows f ON f.id = a.last_id
+	      ORDER BY a.host, a.path, a.method`
 
 	rows, err := s.db.Query(q, args...)
 	if err != nil {
@@ -105,10 +114,11 @@ func (s *Store) queryEndpointsAggregate(f EndpointFilter, term, scope string) ([
 	for rows.Next() {
 		var e Endpoint
 		var statusCSV string
-		if err := rows.Scan(&e.Host, &e.Method, &e.Path, &e.Scheme, &e.LastStatus, &e.LastFlowID, &e.Hits, &statusCSV); err != nil {
+		if err := rows.Scan(&e.Host, &e.Method, &e.Path, &e.Scheme, &e.LastStatus, &e.ResBodyHash, &e.ResLen, &e.LastFlowID, &e.Hits, &statusCSV); err != nil {
 			return nil, err
 		}
 		e.Statuses = parseStatusCSV(statusCSV)
+		e.Soft404 = s.endpointSoft404(e.LastStatus, e.ResBodyHash)
 		out = append(out, e)
 	}
 	return out, rows.Err()
@@ -231,6 +241,22 @@ func (s *Store) endpointKeysAllSearch(f EndpointFilter) (map[endpointKey]struct{
 		keys[k] = struct{}{}
 	}
 	return keys, note, nil
+}
+
+func (s *Store) endpointSoft404(status int, resBodyHash string) bool {
+	if status < 200 || status >= 400 || resBodyHash == "" {
+		return false
+	}
+	rc, err := s.OpenBody(resBodyHash)
+	if err != nil {
+		return false
+	}
+	defer rc.Close()
+	data, err := io.ReadAll(io.LimitReader(rc, maxEndpointBodyReadBytes))
+	if err != nil {
+		return false
+	}
+	return isSoft404Content(data)
 }
 
 func (s *Store) bodyContainsTerm(hash, term string, maxBytes int64) (bool, error) {
