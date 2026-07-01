@@ -16,8 +16,8 @@ export const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'
 export const escAttr=s=>esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 
 export const state={flows:[],selId:null,detail:null,intercept:{enabled:false,queue:[]},
-  rules:[],scope:[],views:[],inScopeOnly:false,showManual:true,showAI:true,aiDisabled:false,flowTruncated:false,selected:new Set(),lastSelIdx:-1,aiIds:[],view:{req:'pretty',res:'pretty'},sort:{key:'id',dir:-1},proxyAddr:'127.0.0.1:8080',controlAddr:'127.0.0.1:9966',
-  filters:{scheme:'',search:'',searchScope:'path',method:'',status:'',host:'',tag:'',exclude:[]},notesOnly:false,activity:[],actUnseen:0,tags:[],tagColors:{},flowCols:['id','method','host','path','status','size','time'],oobEnabled:false};
+  rules:[],scope:[],views:[],inScopeOnly:false,showManual:true,showAI:true,aiDisabled:false,flowTruncated:false,selected:new Set(),lastSelIdx:-1,aiIds:[],view:{req:'pretty',res:'pretty'},sort:{key:'id',dir:-1},proxyAddr:'127.0.0.1:8080',deviceProxy:'127.0.0.1:8080',deviceProxyMode:'auto',controlAddr:'127.0.0.1:9966',
+  filters:{scheme:'',search:'',searchScope:'path',method:'',status:'',host:'',tag:'',exclude:[]},notesOnly:false,hideTlsFailed:true,activity:[],actUnseen:0,tags:[],tagColors:{},flowCols:['id','method','host','path','status','size','time'],oobEnabled:false};
 
 export function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove('show'),2200);}
 
@@ -69,6 +69,14 @@ export function closeAllUiSelects(){
   if(uiSelectOpen)closeUiSelectMenu(uiSelectOpen);
 }
 
+function scrollUiSelectMenuToSelected(menu){
+  const opt=menu.querySelector('.ui-select-opt.sel');
+  if(!opt)return;
+  const top=opt.offsetTop,bottom=top+opt.offsetHeight;
+  if(top<menu.scrollTop)menu.scrollTop=top;
+  else if(bottom>menu.scrollTop+menu.clientHeight)menu.scrollTop=bottom-menu.clientHeight;
+}
+
 function openUiSelectMenu(inst){
   closeAllUiSelects();
   const r=inst.trigger.getBoundingClientRect();
@@ -79,7 +87,7 @@ function openUiSelectMenu(inst){
   inst.menu.hidden=false;
   inst.trigger.setAttribute('aria-expanded','true');
   uiSelectOpen=inst;
-  inst.menu.querySelector('.ui-select-opt.sel')?.scrollIntoView({block:'nearest'});
+  scrollUiSelectMenuToSelected(inst.menu);
 }
 
 export function syncUiSelectStyles(sel){
@@ -175,6 +183,7 @@ export function enhanceSelect(sel){
   });
 
   menu.addEventListener('click',e=>{
+    e.stopPropagation();
     const opt=e.target.closest('.ui-select-opt');
     if(!opt||opt.disabled)return;
     const v=opt.dataset.value;
@@ -200,9 +209,16 @@ export function initUiSelects(root=document){
   root.querySelectorAll('select:not(.ui-select-native)').forEach(enhanceSelect);
 }
 
-document.addEventListener('click',()=>closeAllUiSelects());
+document.addEventListener('click',e=>{
+  if(e.target.closest?.('.ui-select'))return;
+  closeAllUiSelects();
+});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeAllUiSelects();});
-window.addEventListener('scroll',()=>closeAllUiSelects(),true);
+window.addEventListener('scroll',e=>{
+  const t=e.target;
+  if(t instanceof Element&&t.closest('.ui-select-menu'))return;
+  closeAllUiSelects();
+},true);
 window.addEventListener('resize',()=>closeAllUiSelects());
 new MutationObserver(muts=>{
   for(const m of muts){

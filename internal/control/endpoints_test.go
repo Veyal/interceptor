@@ -254,6 +254,44 @@ func TestListFlowsManualOnly(t *testing.T) {
 	}
 }
 
+func TestListFlowsHideTlsFailed(t *testing.T) {
+	h, s, _ := newHub(t)
+	s.InsertFlow(&store.Flow{TS: time.UnixMilli(1), Method: "CONNECT", Host: "ok.test", Path: "/", Status: 200})
+	s.InsertFlow(&store.Flow{TS: time.UnixMilli(2), Method: "CONNECT", Host: "pin.test", Path: "/", Flags: store.FlagTLSFailed, Error: "tls fail"})
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/flows?hideTlsFailed=1")
+	if err != nil {
+		t.Fatalf("GET hideTlsFailed: %v", err)
+	}
+	defer resp.Body.Close()
+	var hidden struct {
+		Flows []struct {
+			Host string `json:"host"`
+		} `json:"flows"`
+	}
+	json.NewDecoder(resp.Body).Decode(&hidden)
+	if len(hidden.Flows) != 1 || hidden.Flows[0].Host != "ok.test" {
+		t.Fatalf("hideTlsFailed=1 should drop PIN rows, got %+v", hidden.Flows)
+	}
+
+	resp2, err := http.Get(ts.URL + "/api/flows?tlsFailed=1")
+	if err != nil {
+		t.Fatalf("GET tlsFailed: %v", err)
+	}
+	defer resp2.Body.Close()
+	var only struct {
+		Flows []struct {
+			Host string `json:"host"`
+		} `json:"flows"`
+	}
+	json.NewDecoder(resp2.Body).Decode(&only)
+	if len(only.Flows) != 1 || only.Flows[0].Host != "pin.test" {
+		t.Fatalf("tlsFailed=1 should return only PIN rows, got %+v", only.Flows)
+	}
+}
+
 // GET /api/flows?limit=<bad> must not panic on the truncation reslice. A
 // negative limit previously produced flows[:limit] -> "slice bounds out of
 // range" and a recovered 500. Bad limits now fall back to the default.

@@ -379,14 +379,14 @@ function renderPayloadInputs(){
     updateIntrCount();return;
   }
   if(intrState.type!=='pitchfork'&&intrState.type!=='cluster'){
-    wrap.innerHTML=`<div class="intr-pl"><div class="intr-pl-h"><span class="sw" style="background:var(--accent)"></span>ALL § POSITIONS${INTR_FILE_BTNS}</div><div class="intr-pl-note hint" style="margin:4px 0 6px"></div><textarea class="rep-edit" data-pos="s" spellcheck="false" placeholder="one payload per line"></textarea></div>`;
+    wrap.innerHTML=`<div class="intr-pl"><div class="intr-pl-h"><span class="sw" style="background:var(--accent)"></span>ALL § POSITIONS${INTR_FILE_BTNS}</div><div class="intr-pl-note hint"></div><textarea class="rep-edit" data-pos="s" spellcheck="false" placeholder="one payload per line"></textarea></div>`;
   }else{
     const mk=intrMarkers();
     if(!mk.length){wrap.innerHTML='<div class="hint">Mark injection points with <b>§…§</b> in the template (select text → <b>§ Mark</b>). Each marker gets its own colour-matched payload list here.</div>';updateIntrCount();return;}
     wrap.innerHTML=mk.map((content,i)=>{const c=POS_COLORS[i%POS_COLORS.length];
-      return `<div class="intr-pl" style="border-top:2px solid ${c}">
+      return `<div class="intr-pl">
         <div class="intr-pl-h" title="payloads for the ${ordinal(i+1)} § marker${content?' (currently '+escAttr(content)+')':''}"><span class="sw" style="background:${c}"></span>§${i+1}${content?' · '+esc(content):''}${INTR_FILE_BTNS}</div>
-        <div class="intr-pl-note hint" style="margin:4px 0 6px"></div>
+        <div class="intr-pl-note hint"></div>
         <textarea class="rep-edit" data-pos="${i}" spellcheck="false" placeholder="payloads for §${i+1}"></textarea></div>`;}).join('');
   }
   wrap.querySelectorAll('textarea').forEach(ta=>{

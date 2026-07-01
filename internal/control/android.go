@@ -15,11 +15,14 @@ func (h *androidAPI) getAndroidStatus(w http.ResponseWriter, r *http.Request) {
 	rep := map[string]any{
 		"available":           android.Available(),
 		"proxy":               h.currentProxyAddr(),
+		"proxyAddrs":          h.currentProxyAddrs(),
 		"devices":             []android.Device{},
 		"externalBindAllowed": bind.ExternalBindAllowed(),
+		"deviceProxy":         h.resolveDeviceEndpoint().Endpoint,
+		"deviceProxyMode":     loadDeviceProxyMode(h.st),
 	}
-	if lan, err := android.LANHost(); err == nil {
-		rep["lanHost"] = lan
+	if ep := h.resolveDeviceEndpoint(); ep.SuggestedLAN != "" {
+		rep["lanHost"] = ep.SuggestedLAN
 	}
 	if !android.Available() {
 		writeJSON(w, http.StatusOK, rep)
@@ -61,23 +64,20 @@ func (h *androidAPI) androidDeviceAndPort(in androidRequest) (android.Device, in
 	if err != nil {
 		return android.Device{}, 0, err
 	}
-	_, port := proxyHostPort(h.currentProxyAddr())
+	_, port := h.deviceProxyHostPort("")
 	return d, port, nil
 }
 
 func (h *androidAPI) androidWiFiHost(override string) (string, error) {
-	if strings.TrimSpace(override) != "" {
-		return strings.TrimSpace(override), nil
-	}
-	return android.LANHost()
+	host, _ := h.deviceProxyHostPort(override)
+	return host, nil
 }
 
 func (h *androidAPI) validateWiFiProxy(port int) error {
-	host, _ := proxyHostPort(h.currentProxyAddr())
-	if isLoopbackHost(host) {
-		return fmt.Errorf("wifi proxy needs Interceptor listening on a LAN address — rebind to 0.0.0.0:%d in Settings → Proxy", port)
+	if h.hasExternalProxyOnPort(port) {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("wifi proxy needs Interceptor listening on a LAN address — rebind to 0.0.0.0:%d in Settings → Proxy", port)
 }
 
 func (h *androidAPI) postAndroidProxy(w http.ResponseWriter, r *http.Request) {

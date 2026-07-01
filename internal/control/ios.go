@@ -17,13 +17,16 @@ func (h *iosAPI) getIOSStatus(w http.ResponseWriter, r *http.Request) {
 		"simctlAvailable":     ios.SimctlAvailable(),
 		"ideviceAvailable":    ios.IDeviceAvailable(),
 		"proxy":               h.currentProxyAddr(),
+		"proxyAddrs":          h.currentProxyAddrs(),
 		"controlAddr":         h.currentControlAddr(),
 		"devices":             []ios.Device{},
 		"externalBindAllowed": bind.ExternalBindAllowed(),
 		"profilePath":         "/api/ios/profile.mobileconfig",
+		"deviceProxy":         h.resolveDeviceEndpoint().Endpoint,
+		"deviceProxyMode":     loadDeviceProxyMode(h.st),
 	}
-	if lan, err := ios.LANHost(); err == nil {
-		rep["lanHost"] = lan
+	if ep := h.resolveDeviceEndpoint(); ep.SuggestedLAN != "" {
+		rep["lanHost"] = ep.SuggestedLAN
 	}
 	devs, err := ios.AllDevices()
 	if err != nil {
@@ -42,7 +45,7 @@ func (h *iosAPI) getIOSProfile(w http.ResponseWriter, r *http.Request) {
 	host := strings.TrimSpace(r.URL.Query().Get("host"))
 	port := atoiOr(r.URL.Query().Get("port"), 0)
 	if host == "" || port <= 0 {
-		host, port = proxyHostPort(h.currentProxyAddr())
+		host, port = h.deviceProxyHostPort("")
 	}
 	if host == "" || port <= 0 {
 		httpErr(w, http.StatusBadRequest, "proxy host/port unknown — set proxy listen address in Settings")
@@ -78,23 +81,20 @@ func (h *iosAPI) iosDeviceAndPort(in iosRequest) (ios.Device, int, error) {
 	if err != nil {
 		return ios.Device{}, 0, err
 	}
-	_, port := proxyHostPort(h.currentProxyAddr())
+	_, port := h.deviceProxyHostPort("")
 	return d, port, nil
 }
 
 func (h *iosAPI) iosWiFiHost(override string) (string, error) {
-	if strings.TrimSpace(override) != "" {
-		return strings.TrimSpace(override), nil
-	}
-	return ios.LANHost()
+	host, _ := h.deviceProxyHostPort(override)
+	return host, nil
 }
 
 func (h *iosAPI) validateIOSWiFiProxy(port int) error {
-	host, _ := proxyHostPort(h.currentProxyAddr())
-	if isLoopbackHost(host) {
-		return fmt.Errorf("Wi‑Fi proxy needs Interceptor listening on a LAN address — rebind to 0.0.0.0:%d in Settings → Proxy", port)
+	if h.hasExternalProxyOnPort(port) {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("Wi‑Fi proxy needs Interceptor listening on a LAN address — rebind to 0.0.0.0:%d in Settings → Proxy", port)
 }
 
 func (h *iosAPI) profileBaseURL(r *http.Request) string {
