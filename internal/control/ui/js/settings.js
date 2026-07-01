@@ -85,6 +85,159 @@ if ($('#addHostHdrBtn')) $('#addHostHdrBtn').onclick = () => {
   row.querySelector('.host-hdr-host').focus();
 };
 
+/* ---- network hosts / proxy listeners ---- */
+let networkHosts = null;
+
+function parseListenAddr(addr){
+  addr=String(addr||'').trim();
+  if(!addr)return{host:'127.0.0.1',port:'8080'};
+  if(addr.startsWith('[')){
+    const m=addr.match(/^\[([^\]]+)\]:(\d+)$/);
+    if(m)return{host:m[1],port:m[2]};
+  }
+  const i=addr.lastIndexOf(':');
+  if(i<0)return{host:addr,port:'8080'};
+  return{host:addr.slice(0,i),port:addr.slice(i+1)};
+}
+
+function joinListenAddr(host,port){
+  host=String(host||'').trim();
+  port=String(port||'').trim();
+  if(!host||!port)return'';
+  if(host.includes(':')&&!host.startsWith('['))return'['+host+']:'+port;
+  return host+':'+port;
+}
+
+function hostSelectOptions(selectedHost){
+  const hosts=networkHosts?.hosts||[
+    {address:'127.0.0.1',label:'Loopback (localhost only)'},
+    {address:'0.0.0.0',label:'All IPv4 interfaces'},
+    {address:'::1',label:'IPv6 loopback'},
+  ];
+  const sel=String(selectedHost||'');
+  const has=hosts.some(h=>h.address===sel);
+  let html=hosts.map(h=>`<option value="${escAttr(h.address)}"${h.address===sel?' selected':''}>${esc(h.address)} — ${esc(h.label)}${h.suggested?' ★':''}</option>`).join('');
+  if(sel&&!has)html+=`<option value="${escAttr(sel)}" selected>${esc(sel)} (custom)</option>`;
+  return html;
+}
+
+function renderHostSelect(sel,selectedHost){
+  if(!sel)return;
+  sel.innerHTML=hostSelectOptions(selectedHost);
+  syncUiSelectStyles(sel);
+}
+
+async function loadNetworkHosts(){
+  try{networkHosts=await api('/api/network/hosts');}catch(e){networkHosts=null;}
+  const hint=$('#proxySuggestedHint');
+  if(hint){
+    if(networkHosts?.suggested){
+      hint.innerHTML=`Suggested listen host for mobile Wi‑Fi: <b style="color:var(--accent)">${esc(networkHosts.suggested)}</b>${networkHosts.suggestedLAN&&networkHosts.suggestedLAN!==networkHosts.suggested?' · LAN '+esc(networkHosts.suggestedLAN):''}`;
+    }else hint.textContent='';
+  }
+  renderHostSelect($('#setControlHost'),parseListenAddr(state.controlAddr).host);
+}
+
+function makeProxyListenerRow(addr){
+  const{host,port}=parseListenAddr(addr);
+  const row=document.createElement('div');
+  row.className='proxy-listener-row row';
+  row.style.cssText='gap:8px;align-items:flex-end;margin-bottom:8px;flex-wrap:wrap';
+  row.innerHTML=`<div style="flex:1;min-width:180px"><label class="hint">Host</label><select class="btn proxy-host-select" style="width:100%;text-align:left"></select></div>`+
+    `<div style="width:100px"><label class="hint">Port</label><input class="proxy-port-input" inputmode="numeric" value="${escAttr(port)}" style="width:100%"></div>`+
+    `<button type="button" class="btn proxy-listener-del" title="Remove listener" style="color:var(--red);padding:3px 10px">×</button>`;
+  renderHostSelect(row.querySelector('.proxy-host-select'),host);
+  row.querySelector('.proxy-listener-del').onclick=()=>{
+    const list=$('#proxyListenersList');
+    if(list&&list.querySelectorAll('.proxy-listener-row').length>1)row.remove();
+    else toast('at least one proxy listener required');
+  };
+  return row;
+}
+
+function renderProxyListeners(addrs){
+  const list=$('#proxyListenersList');
+  if(!list)return;
+  list.innerHTML='';
+  const items=(addrs&&addrs.length)?addrs:['127.0.0.1:8080'];
+  items.forEach(a=>list.appendChild(makeProxyListenerRow(a)));
+}
+
+function collectProxyAddrs(){
+  return [...document.querySelectorAll('.proxy-listener-row')].map(row=>{
+    const host=row.querySelector('.proxy-host-select')?.value;
+    const port=row.querySelector('.proxy-port-input')?.value?.trim();
+    return joinListenAddr(host,port);
+  }).filter(Boolean);
+}
+
+function syncControlAddrFields(){
+  const host=$('#setControlHost')?.value;
+  const port=$('#setControlPort')?.value?.trim();
+  const addr=joinListenAddr(host,port);
+  if($('#setControlAddr'))$('#setControlAddr').value=addr;
+  return addr;
+}
+
+if($('#addProxyListenerBtn'))$('#addProxyListenerBtn').onclick=()=>{
+  const list=$('#proxyListenersList');
+  if(!list)return;
+  const suggested=networkHosts?.suggested||'127.0.0.1';
+  const port=parseListenAddr(state.proxyAddr).port||'8080';
+  list.appendChild(makeProxyListenerRow(joinListenAddr(suggested,port)));
+};
+
+function renderDeviceProxyUI(ep){
+  const mode=ep?.mode||state.deviceProxyMode||'auto';
+  const endpoint=ep?.endpoint||state.deviceProxy||'';
+  state.deviceProxy=endpoint;
+  state.deviceProxyMode=mode;
+  const chip=$('#deviceProxyAddr');
+  if(chip){
+    const label=mode==='manual'?'manual':'auto';
+    chip.textContent=endpoint?endpoint+' ('+label+')':'…';
+  }
+  const resolved=$('#deviceProxyResolved');
+  if(resolved){
+    const src=ep?.source?(' · '+ep.source.replace(/_/g,' ')):'';
+    resolved.innerHTML=endpoint?`Resolved: <b style="font-family:var(--mono);color:var(--accent)">${esc(endpoint)}</b>${src}`:'';
+  }
+  const seg=$('#deviceProxyModeSeg');
+  if(seg)seg.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.mode===mode));
+  const manual=$('#deviceProxyManualField');
+  if(manual)manual.style.display=mode==='manual'?'':'none';
+  if($('#deviceProxyManualHost')&&ep?.manualHost!=null)$('#deviceProxyManualHost').value=ep.manualHost;
+}
+
+async function loadDeviceProxyEndpoint(){
+  try{
+    const ep=await api('/api/proxy/device-endpoint');
+    renderDeviceProxyUI(ep);
+  }catch(e){/* non-fatal */}
+}
+
+async function saveDeviceProxyEndpoint(){
+  const mode=$('#deviceProxyModeSeg')?.querySelector('.on')?.dataset.mode||'auto';
+  const host=($('#deviceProxyManualHost')?.value||'').trim();
+  try{
+    const ep=await api('/api/proxy/device-endpoint',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mode,host})});
+    renderDeviceProxyUI(ep);
+    toast('device proxy → '+ep.endpoint+(ep.mode==='auto'?' (auto)':' (manual)'));
+  }catch(e){toast(e.message);}
+}
+
+if($('#deviceProxyModeSeg'))$('#deviceProxyModeSeg').querySelectorAll('button').forEach(b=>{
+  b.onclick=()=>{
+    $('#deviceProxyModeSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+    const manual=$('#deviceProxyManualField');
+    if(manual)manual.style.display=b.dataset.mode==='manual'?'':'none';
+  };
+});
+if($('#saveDeviceProxyBtn'))$('#saveDeviceProxyBtn').onclick=saveDeviceProxyEndpoint;
+if($('#deviceProxyChip'))$('#deviceProxyChip').onclick=()=>openSettingsProxy();
+
+export { loadDeviceProxyEndpoint };
+
 /* settings sub-nav */
 export function openSettingsSection(sec){
   const tab=document.querySelector('.tab[data-tab="settings"]');
@@ -94,8 +247,8 @@ export function openSettingsSection(sec){
 
 export function openSettingsProxy(){
   openSettingsSection('proxy');
-  const inp=$('#setAddr');
-  if(inp)setTimeout(()=>{inp.closest('.field')?.scrollIntoView({block:'nearest',behavior:'smooth'});inp.focus();},50);
+  const row=$('#proxyListenersList .proxy-listener-row');
+  if(row)setTimeout(()=>{row.scrollIntoView({block:'nearest',behavior:'smooth'});row.querySelector('.proxy-host-select')?.focus();},50);
 }
 
 $$('#setNav button').forEach(b=>b.onclick=()=>{
@@ -104,7 +257,7 @@ $$('#setNav button').forEach(b=>b.onclick=()=>{
   try{localStorage.setItem('setSec',b.dataset.sec);}catch(e){}
   // lazy-load retention stats the first time the project section is opened
   if(b.dataset.sec==='project'&&!retentionLoaded){retentionLoaded=true;loadRetention();}
-  if(b.dataset.sec==='tls'){import('./tlsdiag.js').then(m=>m.loadTrafficDiagnosis());loadIOS();}
+  if(b.dataset.sec==='tls'){import('./tlsdiag.js').then(m=>m.loadTrafficDiagnosis());loadIOS();loadIOSSsh();}
   if(b.dataset.sec==='api'&&!apiLoaded){apiLoaded=true;import('./apipanel.js').then(m=>{m.loadApiKeys();m.loadReference();m.loadMCP();});}
 });
 
@@ -112,7 +265,17 @@ $$('#setNav button').forEach(b=>b.onclick=()=>{
 let savedAiModel='';
 let apiLoaded=false;
 
-export async function loadSettings(){try{const s=await api('/api/settings');state.proxyAddr=s.proxyAddr;state.controlAddr=s.controlAddr||'127.0.0.1:9966';$('#proxyAddr').textContent=s.proxyAddr;$('#controlAddr').textContent=state.controlAddr;$('#setAddr').value=s.proxyAddr;$('#setControlAddr').value=state.controlAddr;
+export async function loadSettings(){try{const s=await api('/api/settings');state.proxyAddr=s.proxyAddr;state.deviceProxy=s.deviceProxy||s.proxyAddr;state.deviceProxyMode=s.deviceProxyMode||'auto';state.controlAddr=s.controlAddr||'127.0.0.1:9966';
+  await loadNetworkHosts();
+  renderProxyListeners(s.proxyAddrs||[s.proxyAddr]);
+  if($('#setAddr'))$('#setAddr').value=s.proxyAddr;
+  $('#proxyAddr').textContent=s.proxyAddr;
+  await loadDeviceProxyEndpoint();
+  $('#controlAddr').textContent=state.controlAddr;
+  const c=parseListenAddr(state.controlAddr);
+  if($('#setControlPort'))$('#setControlPort').value=c.port;
+  renderHostSelect($('#setControlHost'),c.host);
+  if($('#setControlAddr'))$('#setControlAddr').value=state.controlAddr;
   const tun=$('#oobModalTunnelCmd');if(tun)tun.textContent='cloudflared tunnel --url http://'+state.controlAddr;
   if($('#setUpstream'))$('#setUpstream').value=s.upstreamProxy||'';
   state.aiDisabled=!!s.aiDisabled;
@@ -536,12 +699,26 @@ export async function openProjectModal(){
 {const nb=$('#pmNewBtn');if(nb)nb.onclick=()=>{const v=(($('#pmNew')||{}).value||'').trim();if(v)doSwitchProject(v);else toast('enter a project name');};}
 {const ni=$('#pmNew');if(ni)ni.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();const v=ni.value.trim();if(v)doSwitchProject(v);}});}
 $('#saveAddrBtn').onclick=async()=>{
-  try{const s=await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({proxyAddr:$('#setAddr').value})});
-    state.proxyAddr=s.proxyAddr;$('#proxyAddr').textContent=s.proxyAddr;toast('proxy now on '+s.proxyAddr);}catch(e){toast(e.message);}
+  const addrs=collectProxyAddrs();
+  if(!addrs.length){toast('enter at least one listener');return;}
+  try{
+    const s=await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({proxyAddrs:addrs})});
+    state.proxyAddr=s.proxyAddr;$('#proxyAddr').textContent=s.proxyAddr;
+    if($('#setAddr'))$('#setAddr').value=s.proxyAddr;
+    renderProxyListeners(s.proxyAddrs||addrs);
+    await loadDeviceProxyEndpoint();
+    toast('proxy now on '+s.proxyAddr);
+  }catch(e){toast(e.message);}
 };
 $('#saveControlAddrBtn').onclick=async()=>{
-  try{const s=await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({controlAddr:$('#setControlAddr').value})});
+  const controlAddr=syncControlAddrFields();
+  if(!controlAddr){toast('enter control host and port');return;}
+  try{
+    const s=await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({controlAddr})});
     state.controlAddr=s.controlAddr;$('#controlAddr').textContent=s.controlAddr;
+    const c=parseListenAddr(s.controlAddr);
+    if($('#setControlPort'))$('#setControlPort').value=c.port;
+    renderHostSelect($('#setControlHost'),c.host);
     const newUrl='http://'+s.controlAddr;
     if(location.host!==s.controlAddr)toast('Control UI now on '+newUrl+' — open that URL if this page stops updating');
     else toast('control UI now on '+s.controlAddr);
@@ -646,12 +823,17 @@ async function androidPost(path,body){
 
 function isLoopbackProxyBind(addr){
   if(!addr)return true;
-  const host=String(addr).replace(/^\[/,'').split(':')[0].replace(/\]$/,'').toLowerCase();
+  const host=parseListenAddr(addr).host.toLowerCase();
   return host==='127.0.0.1'||host==='localhost'||host==='::1';
 }
 
+function proxyHasExternalBind(s){
+  const addrs=(s&&s.proxyAddrs&&s.proxyAddrs.length)?s.proxyAddrs:[s?.proxy||state.proxyAddr];
+  return addrs.some(a=>!isLoopbackProxyBind(a));
+}
+
 function androidWifiNeedsProxyBind(s){
-  return androidProxyMode()==='wifi'&&(!s.externalBindAllowed||isLoopbackProxyBind(s.proxy));
+  return androidProxyMode()==='wifi'&&(!s.externalBindAllowed||!proxyHasExternalBind(s));
 }
 
 export async function loadAndroid(){
@@ -813,7 +995,7 @@ async function iosPost(path,body){
 }
 
 function iosWifiNeedsProxyBind(s){
-  return iosProxyMode()==='wifi'&&(!s.externalBindAllowed||isLoopbackProxyBind(s.proxy));
+  return iosProxyMode()==='wifi'&&(!s.externalBindAllowed||!proxyHasExternalBind(s));
 }
 
 export async function loadIOS(){
@@ -882,4 +1064,103 @@ $('#iosInstallCaBtn')&&($('#iosInstallCaBtn').onclick=()=>iosAction(async()=>{
 $('#iosOpenProfileBtn')&&($('#iosOpenProfileBtn').onclick=()=>iosAction(async()=>{
   const r=await iosPost('/api/ios/open-profile',{});
   toast(r.message||'Profile opened in simulator');
+}));
+
+/* ---- iOS jailbroken SSH ---- */
+const iosSshSessionKey='interceptor.iosSsh';
+
+function iosSshFields(){
+  return {
+    host:($('#iosSshHost')||{}).value?.trim()||'',
+    port:parseInt(($('#iosSshPort')||{}).value,10)||22,
+    user:($('#iosSshUser')||{}).value?.trim()||'root',
+    password:($('#iosSshPassword')||{}).value||'',
+    keyPath:($('#iosSshKeyPath')||{}).value?.trim()||'',
+  };
+}
+
+function iosSshRemember(){
+  const f=iosSshFields();
+  try{
+    sessionStorage.setItem(iosSshSessionKey,JSON.stringify({
+      host:f.host,port:f.port,user:f.user,keyPath:f.keyPath,
+    }));
+  }catch(e){}
+}
+
+function iosSshRestore(){
+  try{
+    const raw=sessionStorage.getItem(iosSshSessionKey);
+    if(!raw)return;
+    const s=JSON.parse(raw);
+    if(s.host&&$('#iosSshHost'))$('#iosSshHost').value=s.host;
+    if(s.port&&$('#iosSshPort'))$('#iosSshPort').value=s.port;
+    if(s.user&&$('#iosSshUser'))$('#iosSshUser').value=s.user;
+    if(s.keyPath&&$('#iosSshKeyPath'))$('#iosSshKeyPath').value=s.keyPath;
+  }catch(e){}
+}
+
+async function iosSshPost(path,extra){
+  const f=iosSshFields();
+  if(!f.host)throw new Error('SSH host is required');
+  if(!f.password&&!f.keyPath)throw new Error('SSH password or private key path is required');
+  iosSshRemember();
+  const body={host:f.host,port:f.port,user:f.user,...extra};
+  if(f.password)body.password=f.password;
+  if(f.keyPath)body.keyPath=f.keyPath;
+  return api(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+}
+
+export async function loadIOSSsh(){
+  const sec=$('#iosSshSection'),hint=$('#iosSshHint'),lanHint=$('#iosSshLanHint');
+  if(!sec)return;
+  iosSshRestore();
+  try{
+    const s=await api('/api/ios/ssh/status');
+    sec.style.display='';
+    if(lanHint){
+      let html='';
+      if(s.lanHost)html=`<span>LAN host for profile proxy: ${esc(s.lanHost)}</span>`;
+      if(!s.externalBindAllowed||!proxyHasExternalBind(s)){
+        if(html)html+='<br>';
+        html+=`<span>Device proxy needs bind <code>0.0.0.0</code> on the proxy listener.</span> <button type="button" class="btn" id="iosSshOpenProxyBtn">Settings → Proxy</button>`;
+      }
+      lanHint.innerHTML=html;
+      lanHint.style.display=html?'':'none';
+    }
+    if(hint&&!iosSshFields().host)hint.textContent='Enter the jailbroken device IP and SSH credentials, then Check SSH status or Setup all.';
+  }catch(e){
+    if(hint)hint.textContent='';
+  }
+}
+
+async function iosSshAction(fn){
+  try{
+    await fn();
+    await loadIOSSsh();
+  }catch(e){toast(e.message);}
+}
+
+{const lh=$('#iosSshLanHint');if(lh)lh.addEventListener('click',e=>{if(e.target.closest('#iosSshOpenProxyBtn'))openSettingsProxy();});}
+['iosSshHost','iosSshPort','iosSshUser','iosSshKeyPath'].forEach(id=>{
+  const el=$('#'+id);
+  if(el)el.addEventListener('change',iosSshRemember);
+});
+$('#iosSshStatusBtn')&&($('#iosSshStatusBtn').onclick=()=>iosSshAction(async()=>{
+  const r=await iosSshPost('/api/ios/ssh/status',{});
+  const hint=$('#iosSshHint');
+  if(hint)hint.textContent=r.message||'SSH status checked';
+  toast(r.message||'SSH status checked');
+}));
+$('#iosSshSetupBtn')&&($('#iosSshSetupBtn').onclick=()=>iosSshAction(async()=>{
+  const r=await iosSshPost('/api/ios/ssh/setup',{});
+  const hint=$('#iosSshHint');
+  if(hint)hint.textContent=r.warning?(r.message+' — '+r.warning):r.message;
+  toast(r.message||'iOS SSH setup started');
+}));
+$('#iosSshInstallCaBtn')&&($('#iosSshInstallCaBtn').onclick=()=>iosSshAction(async()=>{
+  const r=await iosSshPost('/api/ios/ssh/install-ca',{});
+  const hint=$('#iosSshHint');
+  if(hint)hint.textContent=r.message||'Profile opened on device';
+  toast(r.message||'Profile opened on device');
 }));

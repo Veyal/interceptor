@@ -214,21 +214,21 @@ func run() error {
 	pm.handler = prx
 	cm.handler = hub.Handler()
 	hub.SyncSelfPorts = func() {
-		prx.SelfPorts = selfPorts(cm.Addr(), pm.Addr())
+		addrs := pm.Addrs()
+		all := append([]string{cm.Addr()}, addrs...)
+		prx.SelfPorts = selfPorts(all...)
 		hub.SetSelfAddr(cm.Addr())
 	}
 
-	proxyAddr := "127.0.0.1:8080"
+	proxyAddrs := control.LoadProxyAddrs(st)
 	if v := os.Getenv("INTERCEPTOR_PROXY_ADDR"); v != "" {
-		proxyAddr = v // env wins (lets you run a second instance / custom port without the UI)
-	} else if v, ok, _ := st.GetSetting("proxy.addr"); ok && v != "" {
-		proxyAddr = v
+		proxyAddrs = []string{v} // env wins (lets you run a second instance / custom port without the UI)
 	}
 	// Never record traffic aimed at our own listeners, so proxying localhost
 	// doesn't fill history with — or feedback-loop on — our own UI/API.
-	prx.SelfPorts = selfPorts(controlAddr, proxyAddr)
-	if err := pm.Start(proxyAddr); err != nil {
-		return fmt.Errorf("proxy listen on %s: %w", proxyAddr, err)
+	prx.SelfPorts = selfPorts(append([]string{controlAddr}, proxyAddrs...)...)
+	if err := pm.StartAddrs(proxyAddrs); err != nil {
+		return fmt.Errorf("proxy listen on %s: %w", strings.Join(proxyAddrs, ", "), err)
 	}
 
 	if err := cm.Start(controlAddr); err != nil {
@@ -340,15 +340,15 @@ func (m *controlManager) Shutdown(ctx context.Context) {
 	}
 }
 
-// proxyManager owns the proxy listener and supports runtime rebinding: it opens
-// the new listener before tearing down the old one, so a failed rebind leaves
-// the running proxy untouched. It implements control.Rebinder.
+// proxyManager owns one or more proxy listeners and supports runtime rebinding: it opens
+// new listeners before tearing down old ones, so a failed rebind leaves the running
+// proxy untouched. It implements control.Rebinder and control.MultiProxyRebinder.
 type proxyManager struct {
 	handler http.Handler
 
-	mu   sync.Mutex
-	addr string
-	srv  *http.Server
+	mu    sync.Mutex
+	addrs []string
+	srvs  []*http.Server
 }
 
 func (m *proxyManager) serve(ln net.Listener) *http.Server {
@@ -361,16 +361,118 @@ func (m *proxyManager) serve(ln net.Listener) *http.Server {
 	return srv
 }
 
-// Start brings up the initial proxy listener.
-func (m *proxyManager) Start(addr string) error {
-	ln, err := listenRetry(addr)
+func (m *proxyManager) listenAll(addrs []string) ([]net.Listener, error) {
+	lns := make([]net.Listener, 0, len(addrs))
+	for _, addr := range addrs {
+		ln, err := listenRetry(addr)
+		if err != nil {
+			for _, open := range lns {
+				_ = open.Close()
+			}
+			return nil, err
+		}
+		lns = append(lns, ln)
+	}
+	return lns, nil
+}
+
+// StartAddrs brings up the initial proxy listeners.
+func (m *proxyManager) StartAddrs(addrs []string) error {
+	if len(addrs) == 0 {
+		addrs = []string{"127.0.0.1:8080"}
+	}
+	lns, err := m.listenAll(addrs)
 	if err != nil {
 		return err
 	}
+	srvs := make([]*http.Server, len(lns))
+	for i, ln := range lns {
+		srvs[i] = m.serve(ln)
+	}
 	m.mu.Lock()
-	m.addr, m.srv = addr, m.serve(ln)
+	m.addrs, m.srvs = append([]string(nil), addrs...), srvs
 	m.mu.Unlock()
 	return nil
+}
+
+// Start brings up a single proxy listener (backward compatible).
+func (m *proxyManager) Start(addr string) error {
+	return m.StartAddrs([]string{addr})
+}
+
+// Rebind opens a listener on addr and, only if that succeeds, swaps it in and
+// gracefully drains the old one. Returns the bind error otherwise (old kept).
+func (m *proxyManager) Rebind(addr string) error {
+	return m.RebindAddrs([]string{addr})
+}
+
+// RebindAddrs replaces all proxy listeners atomically.
+func (m *proxyManager) RebindAddrs(addrs []string) error {
+	if len(addrs) == 0 {
+		return fmt.Errorf("at least one proxy listen address required")
+	}
+	lns, err := m.listenAll(addrs)
+	if err != nil {
+		return err
+	}
+	newSrvs := make([]*http.Server, len(lns))
+	for i, ln := range lns {
+		newSrvs[i] = m.serve(ln)
+	}
+	m.mu.Lock()
+	oldSrvs := m.srvs
+	m.addrs, m.srvs = append([]string(nil), addrs...), newSrvs
+	m.mu.Unlock()
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		for _, srv := range oldSrvs {
+			if srv != nil {
+				_ = srv.Shutdown(ctx)
+			}
+		}
+	}()
+	if len(addrs) == 1 {
+		log.Printf("proxy rebound to %s", addrs[0])
+	} else {
+		log.Printf("proxy rebound to %s", strings.Join(addrs, ", "))
+	}
+	return nil
+}
+
+// Addr reports the current proxy bind address(es), comma-joined when multiple.
+func (m *proxyManager) Addr() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.addrs) == 0 {
+		return ""
+	}
+	if len(m.addrs) == 1 {
+		return m.addrs[0]
+	}
+	return strings.Join(m.addrs, ", ")
+}
+
+// Addrs reports all active proxy listen addresses.
+func (m *proxyManager) Addrs() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, len(m.addrs))
+	copy(out, m.addrs)
+	return out
+}
+
+// Shutdown gracefully stops all proxy listeners.
+func (m *proxyManager) Shutdown(ctx context.Context) {
+	m.mu.Lock()
+	srvs := m.srvs
+	m.mu.Unlock()
+	for _, srv := range srvs {
+		if srv != nil {
+			_ = srv.Shutdown(ctx)
+		}
+	}
 }
 
 // listenRetry binds addr, retrying briefly when the port is still held by a
@@ -397,35 +499,6 @@ func listenRetry(addr string) (net.Listener, error) {
 	return nil, err
 }
 
-// Rebind opens a listener on addr and, only if that succeeds, swaps it in and
-// gracefully drains the old one. Returns the bind error otherwise (old kept).
-func (m *proxyManager) Rebind(addr string) error {
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return err
-	}
-	newSrv := m.serve(ln)
-	m.mu.Lock()
-	old := m.srv
-	m.addr, m.srv = addr, newSrv
-	m.mu.Unlock()
-
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = old.Shutdown(ctx)
-	}()
-	log.Printf("proxy rebound to %s", addr)
-	return nil
-}
-
-// Addr reports the current proxy bind address.
-func (m *proxyManager) Addr() string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.addr
-}
-
 // selfPorts extracts the TCP ports from host:port listener addresses, skipping
 // any that don't parse. Used to keep our own traffic out of captured history.
 func selfPorts(addrs ...string) []int {
@@ -440,17 +513,7 @@ func selfPorts(addrs ...string) []int {
 	return ports
 }
 
-// Shutdown gracefully stops the current proxy listener.
-func (m *proxyManager) Shutdown(ctx context.Context) {
-	m.mu.Lock()
-	srv := m.srv
-	m.mu.Unlock()
-	if srv != nil {
-		_ = srv.Shutdown(ctx)
-	}
-}
-
-// openBrowser best-effort opens url in the default browser. Opening is opt-in
+// openBrowser best-effort opens url in the default browser.
 // (--open / INTERCEPTOR_OPEN_BROWSER); INTERCEPTOR_NO_BROWSER hard-disables it.
 func openBrowser(url string) {
 	if os.Getenv("INTERCEPTOR_NO_BROWSER") != "" {

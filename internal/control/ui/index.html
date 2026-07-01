@@ -21,7 +21,7 @@
   <span class="brand">INTERCEPTOR</span>
   <span class="tag">INTERCEPTING PROXY</span>
   <div class="spacer"></div>
-  <div class="row" style="gap:6px" title="Proxy listener — the dot pulses when traffic is captured"><div class="dot" id="capDot"></div><span class="kv">proxy <b id="proxyAddr">…</b></span><span class="kv" id="capStat" style="color:var(--fg3)">· waiting for traffic</span><span class="kv" id="icptStat" aria-live="polite" style="display:none;color:var(--amber);font-weight:600"></span></div>
+  <div class="row" style="gap:6px" title="Proxy listener — the dot pulses when traffic is captured"><div class="dot" id="capDot"></div><span class="kv">proxy <b id="proxyAddr">…</b></span><button type="button" class="btn kv" id="deviceProxyChip" title="Device proxy endpoint for phones — click to change" style="padding:2px 8px;font-size:inherit">device <b id="deviceProxyAddr">…</b></button><span class="kv" id="capStat" style="color:var(--fg3)">· waiting for traffic</span><span class="kv" id="icptStat" aria-live="polite" style="display:none;color:var(--amber);font-weight:600"></span></div>
   <span class="kv">control <b id="controlAddr">…</b></span>
   <button id="cmdkBtn" class="btn" title="Command palette (Ctrl+K)" aria-label="Command palette" style="padding:4px 10px">⌘K</button>
   <button id="helpBtn" class="btn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" style="padding:4px 10px">?</button>
@@ -58,6 +58,7 @@
       <select id="fMethod" class="btn"><option value="">method</option><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option></select>
       <select id="fStatus" class="btn"><option value="">status</option><option value="2">2xx</option><option value="3">3xx</option><option value="4">4xx</option><option value="5">5xx</option></select>
       <button class="btn" id="notesFilter" title="Show only flows with a note">📝 notes</button>
+      <button class="btn accent" id="hideTlsFilter" title="Hide TLS handshake failures (PIN rows) — click to show them">⛔ PIN</button>
       <button class="btn" id="scopeToggle" title="Show only in-scope flows (define scope in Settings → Target scope)" aria-pressed="false" aria-label="Filter history to in-scope flows only">◎ in scope</button>
       <button class="btn accent" id="manualFilter" title="Show manual / proxy-captured flows">Manual</button>
       <button class="btn" id="viewsBtn" title="Apply, save, or delete a saved view">Views ▾</button>
@@ -459,15 +460,37 @@ Content-Type: application/json
         <section class="set-sec" data-sec="proxy">
           <div class="section">
             <h3>PROXY LISTENER</h3>
-            <div class="field"><label>Bind address &amp; port</label><input id="setAddr" placeholder="127.0.0.1:8080"></div>
-            <div class="row" style="gap:8px"><button class="btn accent" id="saveAddrBtn">Apply &amp; rebind</button>
-              <span class="hint">Defaults to loopback (<b>127.0.0.1:8080</b>); bind <b>0.0.0.0:8080</b> for LAN/device capture. Use <b>127.0.0.1</b> to stay localhost-only.</span></div>
+            <p class="hint" id="proxySuggestedHint" style="margin-bottom:10px"></p>
+            <div id="proxyListenersList"></div>
+            <div class="row" style="gap:8px;margin-top:8px">
+              <button class="btn" type="button" id="addProxyListenerBtn">+ Add listener</button>
+              <button class="btn accent" id="saveAddrBtn">Apply &amp; rebind</button>
+            </div>
+            <p class="hint" style="margin-top:8px">Add multiple listeners to bind loopback and LAN at once (e.g. <b>127.0.0.1:8080</b> + <b>0.0.0.0:8080</b>). Suggested host is marked ★ for mobile Wi‑Fi proxy setup.</p>
+            <input type="hidden" id="setAddr">
+          </div>
+          <div class="section">
+            <h3>DEVICE PROXY</h3>
+            <p class="hint" style="margin-bottom:10px">Address phones and tablets use for Wi‑Fi proxy / mobileconfig (ADB USB still uses <b>127.0.0.1</b>). <b>Auto</b> picks the best LAN listener — usually invisible until you need to override.</p>
+            <div class="row" style="gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+              <div class="seg" id="deviceProxyModeSeg"><button type="button" class="on" data-mode="auto">Auto</button><button type="button" data-mode="manual">Manual</button></div>
+              <span class="hint" id="deviceProxyResolved">…</span>
+            </div>
+            <div class="field" id="deviceProxyManualField" style="display:none">
+              <label>Manual host (port comes from listener)</label>
+              <input id="deviceProxyManualHost" placeholder="192.168.1.5" spellcheck="false" style="font-family:var(--mono)">
+            </div>
+            <div class="row" style="gap:8px;margin-top:8px"><button class="btn accent" type="button" id="saveDeviceProxyBtn">Save device proxy</button></div>
           </div>
           <div class="section">
             <h3>CONTROL UI (this window)</h3>
             <p class="hint" style="margin-bottom:10px">Where the web UI and REST API listen. Change the port to run a second instance, or bind <b>0.0.0.0</b> so remote OOB callbacks can reach <code>/oob</code>. After rebinding, bookmark the new URL — this tab may stop updating if the port changed.</p>
-            <div class="field"><label>Bind address &amp; port</label><input id="setControlAddr" placeholder="127.0.0.1:9966"></div>
-            <div class="row" style="gap:8px"><button class="btn accent" id="saveControlAddrBtn">Apply &amp; rebind</button></div>
+            <div class="field row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
+              <div style="flex:1;min-width:180px"><label>Host</label><select id="setControlHost" class="btn" style="width:100%;text-align:left"></select></div>
+              <div style="width:100px"><label>Port</label><input id="setControlPort" inputmode="numeric" placeholder="9966" style="width:100%"></div>
+            </div>
+            <input type="hidden" id="setControlAddr">
+            <div class="row" style="gap:8px;margin-top:8px"><button class="btn accent" id="saveControlAddrBtn">Apply &amp; rebind</button></div>
             <div class="field" style="margin-top:16px"><label>Upstream proxy (chain through another proxy; blank = direct)</label><input id="setUpstream" placeholder="http://corp-proxy:8080"></div>
             <div class="row"><button class="btn" id="saveUpstreamBtn">Save upstream</button></div>
           </div>
@@ -572,10 +595,47 @@ Content-Type: application/json
             <p class="hint" id="iosHint"></p>
             <p class="hint" style="margin-top:6px">After installing the profile: Settings → General → VPN &amp; Device Management → trust it → Settings → General → About → <b>Certificate Trust Settings</b> → enable full trust for Interceptor CA.</p>
           </div>
+          <div class="section" id="iosSshSection">
+            <h3>iOS JAILBROKEN (SSH)</h3>
+            <p class="hint" style="margin-bottom:10px">Automate <b>jailbroken</b> devices via <code>ssh</code> (OpenSSH as <code>root</code>). Interceptor opens the configuration profile on the phone — you must still tap <b>Install</b> and enable <b>Certificate Trust Settings</b> (one-time). Credentials are sent per request and are <b>not</b> saved to settings on disk.</p>
+            <div class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:8px">
+              <div class="field" style="min-width:140px;flex:1">
+                <label for="iosSshHost">SSH host</label>
+                <input type="text" id="iosSshHost" placeholder="192.168.1.42" autocomplete="off">
+              </div>
+              <div class="field" style="min-width:72px;max-width:88px">
+                <label for="iosSshPort">Port</label>
+                <input type="number" id="iosSshPort" value="22" min="1" max="65535" autocomplete="off">
+              </div>
+              <div class="field" style="min-width:100px;max-width:120px">
+                <label for="iosSshUser">User</label>
+                <input type="text" id="iosSshUser" value="root" autocomplete="off">
+              </div>
+            </div>
+            <div class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:8px">
+              <div class="field" style="min-width:140px;flex:1">
+                <label for="iosSshPassword">Password</label>
+                <input type="password" id="iosSshPassword" placeholder="optional if using key" autocomplete="off">
+              </div>
+              <div class="field" style="min-width:180px;flex:1">
+                <label for="iosSshKeyPath">Private key path (on this machine)</label>
+                <input type="text" id="iosSshKeyPath" placeholder="~/.ssh/id_rsa" autocomplete="off">
+              </div>
+            </div>
+            <div class="hint android-lan-hint" id="iosSshLanHint" style="margin:-4px 0 10px;display:none"></div>
+            <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px">
+              <button class="btn" type="button" id="iosSshStatusBtn">Check SSH status</button>
+              <button class="btn accent" type="button" id="iosSshSetupBtn">Setup all (profile)</button>
+              <button class="btn" type="button" id="iosSshInstallCaBtn">Install CA (profile)</button>
+            </div>
+            <p class="hint" id="iosSshHint"></p>
+            <p class="hint" style="margin-top:6px">Requires OpenSSH on the device. Profile includes global HTTP proxy — Interceptor must bind <code>0.0.0.0</code> on the proxy port. Does <b>not</b> bypass SSL pinning.</p>
+          </div>
           <div class="section" id="tlsPinningSection">
             <h3>SSL PINNING &amp; MISSING TRAFFIC</h3>
             <p class="hint" style="margin-bottom:10px;line-height:1.65">Interceptor is a <b>proxy</b> — it decrypts HTTPS only when the client trusts the CA. It does <b>not</b> bypass SSL pinning. If an app pins certificates, you must change the app or hook it on the device (Frida, patched APK, etc.).</p>
             <div id="tlsDiagPanel" class="tls-diag-panel hint" style="margin-bottom:12px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg2);line-height:1.6">Checking traffic…</div>
+            <label class="hint" style="display:flex;align-items:center;gap:8px;margin-bottom:10px;cursor:pointer"><input type="checkbox" id="tlsShowBanner" checked> Show TLS blocked banner in Proxy History</label>
             <details class="ca-how" open><summary>What the verdicts mean</summary>
               <ul style="margin:8px 0 4px;padding-left:20px;color:var(--fg2);line-height:1.7">
                 <li><b style="color:var(--red)">TLS blocked</b> — the app sent CONNECT but rejected the MITM cert (<b>pinning or untrusted CA</b>). Look for red <b>PIN</b> rows in History.</li>

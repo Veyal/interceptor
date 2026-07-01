@@ -8,7 +8,9 @@ const VERDICT = {
   no_https: { label: 'No HTTPS intercepted yet', color: 'var(--amber)', icon: '?' },
 };
 
+export const BANNER_HIDDEN_KEY = 'tlsDiagBannerHidden';
 let lastDiag = null;
+let bannerDismissedVerdict = null;
 
 function verdictMeta(v) {
   return VERDICT[v] || { label: v, color: 'var(--fg2)', icon: '·' };
@@ -23,6 +25,51 @@ function bypassNote() {
   return `<p style="margin:8px 0 0;font-size:11.5px;color:var(--fg3)"><b>Interceptor cannot bypass SSL pinning</b> — bypass requires changes on the device (Frida, patched APK, emulator + system CA if the app does not pin).</p>`;
 }
 
+export function isTlsBannerHidden() {
+  try {
+    if (localStorage.getItem(BANNER_HIDDEN_KEY) === '1') return true;
+  } catch (e) {}
+  return false;
+}
+
+export function setTlsBannerHidden(hidden) {
+  try {
+    if (hidden) localStorage.setItem(BANNER_HIDDEN_KEY, '1');
+    else localStorage.removeItem(BANNER_HIDDEN_KEY);
+  } catch (e) {}
+  syncTlsBannerSetting();
+}
+
+function isBannerSuppressed(rep) {
+  if (!rep || rep.verdict === 'ok') return false;
+  if (isTlsBannerHidden()) return true;
+  return bannerDismissedVerdict === rep.verdict;
+}
+
+function dismissBannerForVerdict(verdict) {
+  bannerDismissedVerdict = verdict || null;
+  const banner = $('#tlsDiagBanner');
+  if (banner) {
+    banner.style.display = 'none';
+    banner.innerHTML = '';
+  }
+}
+
+function wireBannerDismiss(root, rep) {
+  if (!root || !rep) return;
+  root.querySelector('#tlsBannerDismiss')?.addEventListener('click', () => dismissBannerForVerdict(rep.verdict));
+  root.querySelector('#tlsBannerDismissForever')?.addEventListener('click', () => {
+    setTlsBannerHidden(true);
+    dismissBannerForVerdict(rep.verdict);
+  });
+}
+
+export function syncTlsBannerSetting() {
+  const inp = $('#tlsShowBanner');
+  if (!inp) return;
+  inp.checked = !isTlsBannerHidden();
+}
+
 export function renderTrafficDiagnosis(rep) {
   lastDiag = rep;
   const v = verdictMeta(rep.verdict);
@@ -34,6 +81,8 @@ export function renderTrafficDiagnosis(rep) {
     <span style="flex:1;min-width:200px;color:var(--fg2);font-size:12px;line-height:1.55">${esc(rep.detail || '')}</span>
     ${rep.verdict === 'tls_blocked' ? `<button type="button" class="btn" id="tlsFilterPinBtn" style="flex:none">Show PIN rows</button>` : ''}
     ${rep.verdict !== 'ok' ? `<button type="button" class="btn" id="tlsOpenSettingsBtn" style="flex:none">Settings → TLS</button>` : ''}
+    <button type="button" class="btn" id="tlsBannerDismiss" title="Dismiss until verdict changes" style="flex:none;padding:3px 8px" aria-label="Dismiss TLS diagnosis banner">✕</button>
+    <button type="button" class="btn" id="tlsBannerDismissForever" title="Never show this banner in Proxy History" style="flex:none;font-size:11px">Don't show again</button>
   </div>
   ${rep.fix ? `<div style="margin-top:6px;font-size:11.5px;color:var(--fg2)"><b>Fix:</b> ${esc(rep.fix)}</div>` : ''}
   ${hostsLine(rep)}
@@ -41,6 +90,10 @@ export function renderTrafficDiagnosis(rep) {
 
   if (banner) {
     if (rep.verdict === 'ok' && rep.totalFlows > 0) {
+      bannerDismissedVerdict = null;
+      banner.style.display = 'none';
+      banner.innerHTML = '';
+    } else if (isBannerSuppressed(rep)) {
       banner.style.display = 'none';
       banner.innerHTML = '';
     } else {
@@ -48,6 +101,7 @@ export function renderTrafficDiagnosis(rep) {
       banner.style.cssText = 'display:block;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--bg2);font-size:12px;line-height:1.55';
       banner.innerHTML = body;
       wireTrafficDiagnosisActions(banner);
+      wireBannerDismiss(banner, rep);
     }
   }
 
@@ -67,7 +121,10 @@ function wireTrafficDiagnosisActions(root) {
   const pin = root.querySelector('#tlsFilterPinBtn');
   if (pin) pin.onclick = () => {
     document.querySelector('.tab[data-tab="proxy"]')?.click();
-    import('./proxy.js').then(m => m.setFilter('tag', 'tls-failed'));
+    import('./proxy.js').then(m => {
+      m.setShowTlsFailed(true);
+      m.setFilter('tag', 'tls-failed');
+    });
   };
   const set = root.querySelector('#tlsOpenSettingsBtn');
   if (set) set.onclick = () => {

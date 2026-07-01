@@ -189,7 +189,7 @@ func TestPutSettingsRejectsExternalControlBindWhenLocked(t *testing.T) {
 
 func TestPutSettingsRebindsControlAddr(t *testing.T) {
 	h, st, _ := newHub(t)
-	fake := &fakeRebinder{addr: "127.0.0.1:9966"}
+	fake := &fakeRebinder{addrs: []string{"127.0.0.1:9966"}}
 	h.SetControlRebinder(fake)
 	ts := httptest.NewServer(h.Handler())
 	defer ts.Close()
@@ -204,8 +204,8 @@ func TestPutSettingsRebindsControlAddr(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d, body %s", resp.StatusCode, readAll(resp.Body))
 	}
-	if fake.addr != "127.0.0.1:9967" {
-		t.Fatalf("rebind addr = %q, want 127.0.0.1:9967", fake.addr)
+	if fake.Addr() != "127.0.0.1:9967" {
+		t.Fatalf("rebind addr = %q, want 127.0.0.1:9967", fake.Addr())
 	}
 	if v, ok, _ := st.GetSetting("control.addr"); !ok || v != "127.0.0.1:9967" {
 		t.Fatalf("persisted control.addr = %q, ok=%v", v, ok)
@@ -215,10 +215,28 @@ func TestPutSettingsRebindsControlAddr(t *testing.T) {
 	}
 }
 
-type fakeRebinder struct{ addr string }
+type fakeRebinder struct{ addrs []string }
 
-func (f *fakeRebinder) Rebind(addr string) error { f.addr = addr; return nil }
-func (f *fakeRebinder) Addr() string             { return f.addr }
+func (f *fakeRebinder) Rebind(addr string) error {
+	f.addrs = []string{addr}
+	return nil
+}
+func (f *fakeRebinder) RebindAddrs(addrs []string) error {
+	f.addrs = append([]string(nil), addrs...)
+	return nil
+}
+func (f *fakeRebinder) Addr() string {
+	if len(f.addrs) == 0 {
+		return ""
+	}
+	if len(f.addrs) == 1 {
+		return f.addrs[0]
+	}
+	return strings.Join(f.addrs, ", ")
+}
+func (f *fakeRebinder) Addrs() []string {
+	return append([]string(nil), f.addrs...)
+}
 
 func TestPutSettingsRejectsExternalBindWhenLocked(t *testing.T) {
 	t.Setenv("INTERCEPTOR_ALLOW_EXTERNAL_BIND", "0")
@@ -263,7 +281,68 @@ func TestPutSettingsAllowsExternalBindByDefault(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("external bind 0.0.0.0 should be allowed by default, got %d", resp.StatusCode)
 	}
-	if reb.addr != "0.0.0.0:8080" {
-		t.Fatalf("rebind addr = %q", reb.addr)
+	if reb.Addr() != "0.0.0.0:8080" {
+		t.Fatalf("rebind addr = %q", reb.Addr())
+	}
+}
+
+func TestPutSettingsRebindsMultipleProxyAddrs(t *testing.T) {
+	h, st, _ := newHub(t)
+	reb := &fakeRebinder{addrs: []string{"127.0.0.1:8080"}}
+	h.rebind = reb
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	body := `{"proxyAddrs":["127.0.0.1:8080","0.0.0.0:8080"]}`
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/settings", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, body %s", resp.StatusCode, readAll(resp.Body))
+	}
+	if !proxyAddrsEqual(reb.Addrs(), []string{"127.0.0.1:8080", "0.0.0.0:8080"}) {
+		t.Fatalf("rebind addrs = %v", reb.Addrs())
+	}
+	if v, ok, _ := st.GetSetting("proxy.addrs"); !ok || !strings.Contains(v, "0.0.0.0:8080") {
+		t.Fatalf("persisted proxy.addrs = %q, ok=%v", v, ok)
+	}
+	var out settingsJSON
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.ProxyAddrs) != 2 {
+		t.Fatalf("response proxyAddrs = %v", out.ProxyAddrs)
+	}
+}
+
+func TestGetNetworkHosts(t *testing.T) {
+	h, _, _ := newHub(t)
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/network/hosts")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	var out struct {
+		Hosts     []struct{ Address string } `json:"hosts"`
+		Suggested string                      `json:"suggested"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Hosts) < 4 {
+		t.Fatalf("expected baseline hosts, got %d", len(out.Hosts))
+	}
+	if out.Suggested == "" {
+		t.Fatal("missing suggested host")
 	}
 }

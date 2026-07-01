@@ -41,10 +41,16 @@ import (
 //go:embed ui
 var uiFS embed.FS
 
-// Rebinder lets the control plane move the proxy listener at runtime.
+// Rebinder lets the control plane move a listener at runtime.
 type Rebinder interface {
 	Rebind(addr string) error // open the new listener first; keep the old one on failure
-	Addr() string             // the current proxy listen address
+	Addr() string             // the current listen address (comma-joined when multiple)
+}
+
+// MultiProxyRebinder supports multiple proxy listeners sharing one handler.
+type MultiProxyRebinder interface {
+	RebindAddrs(addrs []string) error
+	Addrs() []string
 }
 
 // Hub is the control-plane HTTP handler and live-event broadcaster. It also
@@ -236,8 +242,9 @@ type interceptJSON struct {
 }
 
 type settingsJSON struct {
-	ProxyAddr                string `json:"proxyAddr"`
-	ControlAddr              string `json:"controlAddr"`
+	ProxyAddr                string   `json:"proxyAddr"`
+	ProxyAddrs               []string `json:"proxyAddrs,omitempty"`
+	ControlAddr              string   `json:"controlAddr"`
 	InterceptEnabled         bool   `json:"interceptEnabled"`
 	UpstreamProxy            string `json:"upstreamProxy"`
 	AiProvider               string `json:"aiProvider"`
@@ -247,6 +254,8 @@ type settingsJSON struct {
 	OobEnabled               bool   `json:"oobEnabled"`
 	CaptureScopeOnly         bool   `json:"captureScopeOnly"`
 	SuppressBrowserTelemetry bool   `json:"suppressBrowserTelemetry"`
+	DeviceProxy              string `json:"deviceProxy,omitempty"`
+	DeviceProxyMode          string `json:"deviceProxyMode,omitempty"`
 }
 
 func toFlowJSON(f *store.Flow) flowJSON {
@@ -546,6 +555,8 @@ func (h *flowAPI) listFlows(w http.ResponseWriter, r *http.Request) {
 	}
 	if q.Get("tlsFailed") == "1" {
 		f.RequireFlags |= store.FlagTLSFailed
+	} else if q.Get("hideTlsFailed") == "1" {
+		f.WithoutFlags |= store.FlagTLSFailed
 	}
 	switch {
 	case showManual && showAI && !h.aiDisabled():
@@ -1132,14 +1143,35 @@ func (h *interceptAPI) dropResponse(w http.ResponseWriter, r *http.Request) {
 
 // ---- Settings / CA ----
 
-func (h *Hub) currentProxyAddr() string {
+func (h *Hub) currentProxyAddrs() []string {
+	if mr, ok := h.rebind.(MultiProxyRebinder); ok {
+		if addrs := mr.Addrs(); len(addrs) > 0 {
+			return addrs
+		}
+	}
 	if h.rebind != nil {
-		return h.rebind.Addr()
+		if a := h.rebind.Addr(); a != "" {
+			if strings.Contains(a, ", ") {
+				return parseProxyAddrsRaw(strings.ReplaceAll(a, ", ", "\n"))
+			}
+			return []string{a}
+		}
 	}
-	if v, ok, _ := h.st.GetSetting("proxy.addr"); ok && v != "" {
-		return v
+	return loadProxyAddrs(h.st)
+}
+
+func (h *Hub) currentProxyAddr() string {
+	return displayProxyAddrs(h.currentProxyAddrs())
+}
+
+func (h *Hub) hasExternalProxyOnPort(port int) bool {
+	for _, addr := range h.currentProxyAddrs() {
+		_, p := proxyHostPort(addr)
+		if p == port && isExternalProxyBind(addr) {
+			return true
+		}
 	}
-	return "127.0.0.1:8080"
+	return false
 }
 
 func (h *Hub) SetSelfAddr(addr string) {
@@ -1183,8 +1215,13 @@ func (h *settingsAPI) getSettings(w http.ResponseWriter, r *http.Request) {
 	// Default to true when the key has never been written (first run).
 	suppressTelemetryOn := !stOK || suppressTelemetry == "1"
 	aiDisabled, _, _ := h.st.GetSetting("ai.disabled")
+	proxyAddrs := h.currentProxyAddrs()
+	deviceEP := h.resolveDeviceEndpoint()
 	writeJSON(w, http.StatusOK, settingsJSON{
-		ProxyAddr:                h.currentProxyAddr(),
+		ProxyAddr:                displayProxyAddrs(proxyAddrs),
+		ProxyAddrs:               proxyAddrs,
+		DeviceProxy:              deviceEP.Endpoint,
+		DeviceProxyMode:          loadDeviceProxyMode(h.st),
 		ControlAddr:              h.currentControlAddr(),
 		InterceptEnabled:         h.eng != nil && h.eng.Enabled(),
 		UpstreamProxy:            up,
@@ -1208,8 +1245,9 @@ func (h *Hub) persistSetting(w http.ResponseWriter, key, val string) bool {
 
 func (h *settingsAPI) putSettings(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		ProxyAddr                string  `json:"proxyAddr"`
-		ControlAddr              string  `json:"controlAddr"`
+		ProxyAddr                string   `json:"proxyAddr"`
+		ProxyAddrs               []string `json:"proxyAddrs"`
+		ControlAddr              string   `json:"controlAddr"`
 		UpstreamProxy            *string `json:"upstreamProxy"` // pointer so "" can clear it
 		AiProvider               *string `json:"aiProvider"`
 		AiApiKey                 *string `json:"aiApiKey"`
@@ -1314,20 +1352,34 @@ func (h *settingsAPI) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		h.broadcast(map[string]any{"type": "settings.update"})
 	}
-	if in.ProxyAddr != "" && in.ProxyAddr != h.currentProxyAddr() {
-		// Refuse to expose the proxy on a non-loopback interface when external bind
-		// is locked down (INTERCEPTOR_ALLOW_EXTERNAL_BIND=0).
-		if !isLoopbackHost(in.ProxyAddr) && !bind.ExternalBindAllowed() {
-			httpErr(w, http.StatusBadRequest, "proxy bind address must be loopback (127.0.0.1/localhost/::1); external bind is disabled (INTERCEPTOR_ALLOW_EXTERNAL_BIND=0)")
+	newProxyAddrs := in.ProxyAddrs
+	if len(newProxyAddrs) == 0 && in.ProxyAddr != "" {
+		newProxyAddrs = []string{in.ProxyAddr}
+	}
+	if len(newProxyAddrs) > 0 && !proxyAddrsEqual(newProxyAddrs, h.currentProxyAddrs()) {
+		newProxyAddrs = normalizeProxyAddrs(newProxyAddrs)
+		if err := validateProxyAddrs(newProxyAddrs); err != nil {
+			httpErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if h.rebind != nil {
-			if err := h.rebind.Rebind(in.ProxyAddr); err != nil {
+		if mr, ok := h.rebind.(MultiProxyRebinder); ok {
+			if err := mr.RebindAddrs(newProxyAddrs); err != nil {
 				httpErr(w, http.StatusBadRequest, "rebind failed: "+err.Error())
 				return
 			}
+		} else if h.rebind != nil && len(newProxyAddrs) == 1 {
+			if err := h.rebind.Rebind(newProxyAddrs[0]); err != nil {
+				httpErr(w, http.StatusBadRequest, "rebind failed: "+err.Error())
+				return
+			}
+		} else if len(newProxyAddrs) > 1 {
+			httpErr(w, http.StatusBadRequest, "multiple proxy listeners are not supported by this build")
+			return
 		}
-		if !h.persistSetting(w, "proxy.addr", in.ProxyAddr) {
+		if !h.persistSetting(w, "proxy.addrs", formatProxyAddrs(newProxyAddrs)) {
+			return
+		}
+		if !h.persistSetting(w, "proxy.addr", newProxyAddrs[0]) {
 			return
 		}
 		if h.SyncSelfPorts != nil {

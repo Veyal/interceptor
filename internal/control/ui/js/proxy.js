@@ -58,6 +58,23 @@ let virtActive=false;          // set in renderRows: true only while the list is
 let scrollTick=false;          // rAF guard: coalesce multiple scroll events per frame
 const EXCLUDE_NORM=64|128|512; // repeater, intruder, active scan
 const FLOW_COLS_KEY='proxy.cols';
+const HIDE_TLS_KEY='proxy.hideTlsFailed';
+function loadProxyPrefs(){
+  try{state.hideTlsFailed=localStorage.getItem(HIDE_TLS_KEY)!=='0';}catch(e){state.hideTlsFailed=true;}
+}
+loadProxyPrefs();
+function syncHideTlsFilter(){
+  const btn=$('#hideTlsFilter');
+  if(!btn)return;
+  btn.classList.toggle('accent',state.hideTlsFailed);
+  btn.title=state.hideTlsFailed?'TLS handshake failures hidden — click to show PIN rows':'Showing TLS handshake failures — click to hide PIN rows';
+}
+export function setShowTlsFailed(show){
+  state.hideTlsFailed=!show;
+  try{localStorage.setItem(HIDE_TLS_KEY,state.hideTlsFailed?'1':'0');}catch(e){}
+  syncHideTlsFilter();
+  renderChips();
+}
 const FLOW_COLUMNS=[
   {key:'id',label:'#',sort:'id',w:'44px'},
   {key:'method',label:'Method',sort:'method',w:'64px'},
@@ -182,6 +199,7 @@ function canIncremental(){
 function flowMatchesFilters(f){
   const fl=state.filters;
   if(flowExcluded(f))return false;
+  if(state.hideTlsFailed&&(f.flags&FLAG_TLS)&&state.filters.tag!=='tls-failed')return false;
   if(!state.showManual&&!(f.flags&FLAG_AI))return false;
   if(!state.showAI&&(f.flags&FLAG_AI))return false;
   if(fl.scheme&&f.scheme!==fl.scheme)return false;
@@ -467,6 +485,7 @@ function buildFlowParams(){
   if(state.inScopeOnly)q.set('inScope','1');
   if(!state.showManual)q.set('manual','0');
   if(!state.showAI)q.set('ai','0');
+  if(state.hideTlsFailed&&f.tag!=='tls-failed')q.set('hideTlsFailed','1');
   q.set('sort',state.sort.key);
   q.set('dir',sortDirParam());
   return q;
@@ -736,6 +755,14 @@ function syncSearchPlaceholder(){
 if($('#fSearchScope'))$('#fSearchScope').onchange=e=>{state.filters.searchScope=e.target.value||'path';syncSearchPlaceholder();if(state.filters.search)loadFlows();};
 syncSearchPlaceholder();
 if($('#notesFilter'))$('#notesFilter').onclick=()=>{state.notesOnly=!state.notesOnly;$('#notesFilter').classList.toggle('accent',state.notesOnly);loadFlows();};
+if($('#hideTlsFilter'))$('#hideTlsFilter').onclick=()=>{
+  const next=!state.hideTlsFailed;
+  if(next&&state.filters.tag==='tls-failed')state.filters.tag='';
+  state.hideTlsFailed=next;
+  try{localStorage.setItem(HIDE_TLS_KEY,state.hideTlsFailed?'1':'0');}catch(e){}
+  syncHideTlsFilter();renderChips();renderTagBar();loadFlows();
+};
+syncHideTlsFilter();
 // Inspector header actions — operate on the currently-selected flow.
 function inspectorFlow(){return state.detail||flowMap.get(state.selId)||null;}
 {const b=$('#insRepeater');if(b)b.onclick=()=>{const f=inspectorFlow();if(f)sendToRepeater(f);else toast('select a flow first');};}
@@ -864,7 +891,13 @@ export function syncControls(){
   $('#fSearch').value=state.filters.search;
   const ss=$('#fSearchScope');if(ss)ss.value=state.filters.searchScope||'path';
 }
-export function setFilter(key,val){state.filters[key]=val;syncControls();renderChips();renderTagBar();loadFlows();}
+export function setFilter(key,val){
+  if(key==='tag'&&val==='tls-failed'){
+    state.hideTlsFailed=false;
+    try{localStorage.setItem(HIDE_TLS_KEY,'0');}catch(e){}
+  }
+  state.filters[key]=val;syncControls();syncHideTlsFilter();renderChips();renderTagBar();loadFlows();
+}
 export function clearFilter(key){setFilter(key,'');}
 export function clearAllFilters(){
   state.filters={scheme:'',search:'',searchScope:'path',method:'',status:'',host:'',tag:'',exclude:[]};
@@ -921,6 +954,7 @@ export function renderChips(){
   add('host','host',f.host);
   add('tag','🏷',f.tag);
   add('search',f.searchScope==='body'?'body':f.searchScope==='id'?'id':'path',f.search);
+  if(state.hideTlsFailed)items.push(`<span class="chip"><span>hiding <b>PIN</b> failures</span><span class="x" id="chipHideTlsClear" title="show TLS failures">✕</span></span>`);
   (f.exclude||[]).forEach((e,i)=>{items.push(`<span class="chip not"><span>${esc(e.field)} ≠ <b>${esc(e.value)}</b></span><span class="x" data-ex="${i}" title="remove">✕</span></span>`);});
   const hasFilters=items.length>0;
   if(hasFilters)items.push(`<button class="chip-clear" id="chipsClear" title="Remove all filters">Clear all ✕</button>`);
@@ -928,6 +962,7 @@ export function renderChips(){
   box.classList.toggle('has',hasFilters);
   box.querySelectorAll('[data-clear]').forEach(x=>x.onclick=()=>clearFilter(x.dataset.clear));
   box.querySelectorAll('[data-ex]').forEach(x=>x.onclick=()=>removeExclude(Number(x.dataset.ex)));
+  const htc=$('#chipHideTlsClear');if(htc)htc.onclick=()=>{state.hideTlsFailed=false;try{localStorage.setItem(HIDE_TLS_KEY,'0');}catch(e){}syncHideTlsFilter();renderChips();loadFlows();};
   const cc=$('#chipsClear');if(cc)cc.onclick=clearAllFilters;
 }
 /* ---- right-click context menu ---- */

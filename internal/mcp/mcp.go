@@ -1347,7 +1347,7 @@ func (s *Server) registerTools() {
 			"serial":    p("string", "device serial when multiple are connected"),
 			"proxyMode": p("string", "usb (default) or wifi"),
 			"caMode":    p("string", "user, system, or auto (default auto)"),
-			"wifiHost":  p("string", "LAN IP override for wifi mode (default: auto-detect)"),
+			"wifiHost":  p("string", "LAN IP override for wifi mode (default: device proxy auto-selection)"),
 		}),
 		func(a map[string]any) (string, error) {
 			body := map[string]any{}
@@ -1392,7 +1392,7 @@ func (s *Server) registerTools() {
 		obj(map[string]any{
 			"udid":      p("string", "simulator UDID or omit for auto-select booted simulator / sole device"),
 			"proxyMode": p("string", "localhost (simulator, default) or wifi (physical device)"),
-			"wifiHost":  p("string", "LAN IP for Wi‑Fi proxy (default: auto-detect)"),
+			"wifiHost":  p("string", "LAN IP for Wi‑Fi proxy (default: device proxy auto-selection)"),
 		}),
 		func(a map[string]any) (string, error) {
 			body := map[string]any{"proxyMode": argStr(a, "proxyMode")}
@@ -1416,6 +1416,96 @@ func (s *Server) registerTools() {
 				body["udid"] = v
 			}
 			return s.api(http.MethodPost, "/api/ios/install-ca", body)
+		})
+
+	s.add("ios_ssh_status",
+		"Check jailbroken iOS device SSH reachability and authentication. Requires OpenSSH on device (default root@IP:22). Credentials are not persisted.",
+		obj(map[string]any{
+			"host":     p("string", "device IP or hostname (required for auth check)"),
+			"port":     p("integer", "SSH port (default 22)"),
+			"user":     p("string", "SSH user (default root)"),
+			"password": p("string", "SSH password (e.g. default jailbreak passwords)"),
+			"keyPath":  p("string", "path to SSH private key on the Interceptor host"),
+		}),
+		func(a map[string]any) (string, error) {
+			host := argStr(a, "host")
+			if host == "" {
+				return s.apiGet("/api/ios/ssh/status")
+			}
+			body := map[string]any{"host": host}
+			if v := argInt(a, "port", 0); v > 0 {
+				body["port"] = v
+			}
+			if v := argStr(a, "user"); v != "" {
+				body["user"] = v
+			}
+			if v := argStr(a, "password"); v != "" {
+				body["password"] = v
+			}
+			if v := argStr(a, "keyPath"); v != "" {
+				body["keyPath"] = v
+			}
+			return s.api(http.MethodPost, "/api/ios/ssh/status", body)
+		})
+
+	s.add("ios_ssh_setup",
+		"One-click jailbroken iOS HTTPS intercept via SSH: opens mobileconfig on device (CA + global HTTP proxy). Operator must tap Install and enable Certificate Trust Settings. Does not bypass SSL pinning.",
+		obj(map[string]any{
+			"host":      p("string", "device IP or hostname (required)"),
+			"port":      p("integer", "SSH port (default 22)"),
+			"user":      p("string", "SSH user (default root)"),
+			"password":  p("string", "SSH password"),
+			"keyPath":   p("string", "path to SSH private key on the Interceptor host"),
+			"proxyHost": p("string", "LAN IP embedded in profile proxy (default: device proxy auto-selection)"),
+		}),
+		func(a map[string]any) (string, error) {
+			body := map[string]any{"host": argStr(a, "host")}
+			if v := argInt(a, "port", 0); v > 0 {
+				body["port"] = v
+			}
+			if v := argStr(a, "user"); v != "" {
+				body["user"] = v
+			}
+			if v := argStr(a, "password"); v != "" {
+				body["password"] = v
+			}
+			if v := argStr(a, "keyPath"); v != "" {
+				body["keyPath"] = v
+			}
+			if v := argStr(a, "proxyHost"); v != "" {
+				body["proxyHost"] = v
+			}
+			return s.api(http.MethodPost, "/api/ios/ssh/setup", body)
+		})
+
+	s.add("ios_ssh_install_ca",
+		"Open the Interceptor mobileconfig (CA + proxy) on a jailbroken iOS device via SSH. Same manual trust steps as ios_ssh_setup but only triggers profile install UI.",
+		obj(map[string]any{
+			"host":      p("string", "device IP or hostname (required)"),
+			"port":      p("integer", "SSH port (default 22)"),
+			"user":      p("string", "SSH user (default root)"),
+			"password":  p("string", "SSH password"),
+			"keyPath":   p("string", "path to SSH private key on the Interceptor host"),
+			"proxyHost": p("string", "LAN IP for profile proxy settings (default: device proxy auto-selection)"),
+		}),
+		func(a map[string]any) (string, error) {
+			body := map[string]any{"host": argStr(a, "host")}
+			if v := argInt(a, "port", 0); v > 0 {
+				body["port"] = v
+			}
+			if v := argStr(a, "user"); v != "" {
+				body["user"] = v
+			}
+			if v := argStr(a, "password"); v != "" {
+				body["password"] = v
+			}
+			if v := argStr(a, "keyPath"); v != "" {
+				body["keyPath"] = v
+			}
+			if v := argStr(a, "proxyHost"); v != "" {
+				body["proxyHost"] = v
+			}
+			return s.api(http.MethodPost, "/api/ios/ssh/install-ca", body)
 		})
 
 	s.add("check_readiness",

@@ -9,7 +9,7 @@ import { repInit, repSend, sendToRepeater, sendToIntruder, scheduleIntr } from '
 import { loadIssues, runScan, loadScanTargets, openActive, openDecoder, openChecks, loadActive, loadChecksList, loadOob, renderAsScopePanel } from './scanner.js';
 import { loadEndpoints } from './map.js';
 import { loadDiscovery, refreshDiscovery } from './discovery.js';
-import { loadSettings, loadSysProxy, loadAndroid, loadIOS, loadSession, loadProject, openProjectModal, applyAiDisabledUI, applyOobDisabledUI } from './settings.js';
+import { loadSettings, loadSysProxy, loadAndroid, loadIOS, loadIOSSsh, loadSession, loadProject, openProjectModal, applyAiDisabledUI, applyOobDisabledUI } from './settings.js';
 import { loadNotes, flushNotesSave, focusNotes, organizeNotes } from './notes.js';
 import { renderActivity, onActivity, loadActivity, clearActSeen } from './activity.js';
 import { loadFindings } from './findings.js';
@@ -20,7 +20,7 @@ import './ai.js'; // side-effect: wires the AI assist modal (its openAi is also 
 import './authz.js'; // side-effect: wires authz modal buttons
 import { openAuthz, renderAuthzScopePanel } from './authz.js';
 import { maybeShowSetup } from './setup.js';
-import { loadTrafficDiagnosis } from './tlsdiag.js';
+import { loadTrafficDiagnosis, syncTlsBannerSetting, setTlsBannerHidden } from './tlsdiag.js';
 
 /* ---- tabs ---- */
 function activateTab(t){
@@ -328,9 +328,15 @@ function toggleTheme(){const t=currentTheme()==='light'?'dark':'light';try{local
 $('#themeToggle').onclick=toggleTheme;
 applyTheme(currentTheme()); // sync the button icon with the theme applied pre-paint
 
+{const tlsBanner=$('#tlsShowBanner');
+if(tlsBanner){
+  syncTlsBannerSetting();
+  tlsBanner.onchange=()=>{setTlsBannerHidden(!tlsBanner.checked);loadTrafficDiagnosis();};
+}}
+
 /* ---- boot ---- */
 async function refreshIntercept(){try{state.intercept=await api('/api/intercept');renderIntercept();}catch(e){}}
-renderChips();loadSettings();loadSysProxy();loadAndroid();loadIOS();loadSession();loadFlows();loadTrafficDiagnosis();loadRules();loadScope();loadViews();refreshIntercept().then(()=>renderIcptStat());repInit();loadIssues();loadActivity();loadProject();loadVersion(true);loadHumanInput();loadFindings();loadTags();connectEvents();restoreTab();
+renderChips();loadSettings();loadSysProxy();loadAndroid();loadIOS();loadIOSSsh();loadSession();loadFlows();loadTrafficDiagnosis();loadRules();loadScope();loadViews();refreshIntercept().then(()=>renderIcptStat());repInit();loadIssues();loadActivity();loadProject();loadVersion(true);loadHumanInput();loadFindings();loadTags();connectEvents();restoreTab();
 // First-run setup wizard: shown once after the initial flow load, unless the
 // user already completed/skipped it or already has captured traffic.
 setTimeout(()=>{ if(state.flows && !state.flows.length) maybeShowSetup(); }, 600);
