@@ -358,6 +358,24 @@ func TestProxyDoesNotInterceptOwnTraffic(t *testing.T) {
 	}
 }
 
+func TestConnectUpstreamHost(t *testing.T) {
+	cases := []struct {
+		name, connectHost, sni, want string
+	}{
+		{"IP CONNECT target with SNI uses SNI", "172.67.204.174", "connect.treasury.id", "connect.treasury.id"},
+		{"IPv6 CONNECT target with SNI uses SNI", "2606:4700:3031::1", "connect.treasury.id", "connect.treasury.id"},
+		{"domain CONNECT target is left untouched even with SNI", "connect.treasury.id", "connect.treasury.id", "connect.treasury.id"},
+		{"IP CONNECT target with no SNI falls back to the IP", "172.67.204.174", "", "172.67.204.174"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := connectUpstreamHost(c.connectHost, c.sni); got != c.want {
+				t.Fatalf("connectUpstreamHost(%q, %q) = %q, want %q", c.connectHost, c.sni, got, c.want)
+			}
+		})
+	}
+}
+
 func TestProxyMITMCapturesHTTPS(t *testing.T) {
 	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)

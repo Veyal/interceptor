@@ -95,12 +95,29 @@ func (s *Server) Serve(ln net.Listener) error {
 
 // hopHeaders are stripped when forwarding (RFC 7230 §6.1).
 var hopHeaders = []string{
-	"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate",
+	"Proxy-Connection", "Keep-Alive", "Proxy-Authorization",
+	"Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
+}
+
+// hopRequestHeaders are stripped only from outbound requests (not from
+// responses relayed to the client). Some hop-by-hop headers — notably
+// Connection — must be preserved in MITM responses so Flutter's
+// dart:io HttpClient (and similar strict clients) don't treat every
+// response as connection-close and time out waiting for data that never
+// arrives on a reused connection.
+var hopRequestHeaders = []string{
+	"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authorization",
 	"Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
 }
 
 func removeHopHeaders(h http.Header) {
 	for _, k := range hopHeaders {
+		h.Del(k)
+	}
+}
+
+func removeHeaders(h http.Header, blacklist []string) {
+	for _, k := range blacklist {
 		h.Del(k)
 	}
 }
@@ -185,6 +202,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var sni string
 	cfg := &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		GetCertificate: func(chi *tls.ClientHelloInfo) (*tls.Certificate, error) {
@@ -192,6 +210,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 			if name == "" {
 				name = host // IP literals send no SNI; fall back to the CONNECT host
 			}
+			sni = chi.ServerName
 			return s.ca.LeafForHost(name)
 		},
 	}
@@ -201,6 +220,8 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		return // client rejected our leaf (pinning or untrusted CA)
 	}
 	defer tlsConn.Close()
+
+	host = connectUpstreamHost(host, sni)
 
 	br := bufio.NewReader(tlsConn)
 	for {
@@ -217,6 +238,26 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+// connectUpstreamHost picks which hostname to use for the upstream connection.
+//
+// Some hardened clients defeat SNI-based interception by resolving the target
+// domain themselves and issuing "CONNECT <IP>:443" instead of
+// "CONNECT host:443" — the CONNECT target is then a bare IP (a fresh one on
+// every DNS lookup for anycast hosts like Cloudflare). Forwarding upstream
+// using that IP as the TLS ServerName either sends no SNI at all (crypto/tls
+// never sends SNI for IP literals) or the wrong one, so SNI-routed upstreams
+// (Cloudflare, most CDNs) reject or misroute the handshake. The client's
+// ClientHello SNI is the actual intended hostname, so prefer it for the
+// upstream connection whenever the CONNECT target itself was an IP literal —
+// this matches how mitmproxy and other transparent MITM proxies behave by
+// default. When the CONNECT target is already a domain, it's left untouched.
+func connectUpstreamHost(connectHost, sni string) string {
+	if sni != "" && net.ParseIP(connectHost) != nil {
+		return sni
+	}
+	return connectHost
 }
 
 // tunnelIdleTimeout bounds how long a CONNECT tunnel may sit between requests.
@@ -472,7 +513,7 @@ func (s *Server) gateAndForward(flow *store.Flow, r *http.Request) (*http.Respon
 	out.RequestURI = ""
 	out.URL.Scheme = flow.Scheme
 	out.URL.Host = hostPort(flow.Host, flow.Port, flow.Scheme)
-	removeHopHeaders(out.Header)
+	removeHeaders(out.Header, hopRequestHeaders)
 
 	// Intercept gate (Burp-style hold) — only for in-scope, non-self, non-telemetry requests.
 	if s.eng != nil && s.eng.Enabled() && s.shouldCapture(flow) && (s.Scope == nil || s.Scope.InScope(flow)) &&
@@ -553,7 +594,13 @@ func (s *Server) writeResponseHTTP(w http.ResponseWriter, resp *http.Response, f
 		s.record(flow)
 		return
 	}
+	flow.Status = resp.StatusCode
+	flow.ResHeaders = resp.Header.Clone()
+	flow.Mime = resp.Header.Get("Content-Type")
 	removeHopHeaders(resp.Header)
+	if resp.ContentLength < 0 && len(resp.TransferEncoding) == 0 {
+		resp.TransferEncoding = []string{"chunked"}
+	}
 	copyHeader(w.Header(), resp.Header)
 	if len(resp.Trailer) > 0 {
 		// Declare announced trailer keys before the body so the server emits them.
@@ -564,10 +611,6 @@ func (s *Server) writeResponseHTTP(w http.ResponseWriter, resp *http.Response, f
 		w.Header().Set("Trailer", strings.Join(tk, ", "))
 	}
 	w.WriteHeader(resp.StatusCode)
-
-	flow.Status = resp.StatusCode
-	flow.ResHeaders = resp.Header.Clone()
-	flow.Mime = resp.Header.Get("Content-Type")
 
 	if resTee, resFinalize, err := s.teeBody(flow, resp.Body); err == nil && resTee != nil {
 		if _, err := io.Copy(w, resTee); err != nil {
@@ -609,11 +652,28 @@ func (s *Server) writeResponseConn(conn net.Conn, resp *http.Response, flow *sto
 		s.record(flow)
 		return werr
 	}
-	removeHopHeaders(resp.Header)
-
 	flow.Status = resp.StatusCode
 	flow.ResHeaders = resp.Header.Clone()
 	flow.Mime = resp.Header.Get("Content-Type")
+
+	removeHopHeaders(resp.Header)
+
+	// Go's http.Transport may produce an HTTP/2 response. When written
+	// back over an HTTP/1.1 MITM connection, resp.Write sends
+	// "HTTP/2.0 ..." as the status line, ContentLength=-1, and empty
+	// TransferEncoding — so the client gets no framing at all and
+	// hangs until timeout.  Fix: downgrade to HTTP/1.1 with chunked
+	// framing when necessary.
+	if resp.ProtoMajor >= 2 {
+		resp.ProtoMajor, resp.ProtoMinor = 1, 1
+		resp.Proto = "HTTP/1.1"
+	}
+	if resp.ContentLength < 0 && len(resp.TransferEncoding) == 0 {
+		resp.TransferEncoding = []string{"chunked"}
+	}
+
+	log.Printf("proxy: MITM resp %d cl=%d te=%v proto=%s to %s",
+		resp.StatusCode, resp.ContentLength, resp.TransferEncoding, resp.Proto, conn.RemoteAddr())
 
 	resTee, resFinalize, err := s.teeBody(flow, upstream)
 	if err == nil && resTee != nil {
