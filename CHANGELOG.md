@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Switching (or creating) a project could reload the UI into stale data from the project you just left.** The reload-readiness check polled `/api/version`, which any live server answers identically — old or new — since the version string doesn't encode which project is loaded. On Windows, the outgoing process keeps the control port bound for up to ~800ms after answering the switch request while the incoming one is still binding, so the client's first poll (at ~500ms) very often hit the *old* process and reloaded before the handover finished, leaving the old project's proxy history and other data on screen until a second, manual refresh. The check now polls `/api/project` and waits for `current` to actually flip to the new project before reloading (bounded by a ~5s grace period so re-selecting the *same* project doesn't hang).
+
 ## [0.25.0] - 2026-07-03
 
 ### Security

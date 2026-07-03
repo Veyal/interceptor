@@ -711,9 +711,23 @@ export async function doSwitchProject(target){
   const notes=['#projSwitchNote','#pmNote'].map(s=>$(s)).filter(Boolean);
   const setNote=t=>notes.forEach(n=>{n.style.display='block';n.textContent=t;});
   setNote('Switching to "'+target+'" — restarting & reconnecting…');
+  // The old process keeps serving (same version, same "ok") for a few hundred ms
+  // after the switch is requested while the new one is still binding — polling
+  // /api/version can't tell them apart and would reload straight back into the
+  // OLD project's data. Remember which project we're leaving and poll /api/project
+  // instead, waiting for `current` to actually flip before reloading. Bounded by a
+  // grace period so re-selecting the *same* project (current never changes) doesn't
+  // hang forever — after that we accept any live reply, same as before.
+  let prevProject=null;
+  try{prevProject=(await api('/api/project?_t='+Date.now())).current;}catch(e){}
   try{await api('/api/project/switch',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({target})});}catch(e){}
+  const graceTries=10; // ~5s worth of polls
   let tries=0;const poll=setInterval(async()=>{tries++;
-    try{await api('/api/version?_t='+Date.now());clearInterval(poll);location.reload();}
+    try{
+      const d=await api('/api/project?_t='+Date.now());
+      if(prevProject!=null&&d.current===prevProject&&tries<=graceTries)return; // still the old process — keep waiting
+      clearInterval(poll);location.reload();
+    }
     catch(e){if(tries>60){clearInterval(poll);setNote('Still restarting… reload the page manually if it doesn\'t return.');}}
   },500);
 }
