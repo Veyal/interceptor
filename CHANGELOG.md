@@ -9,9 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-07-03
+
+### Added
+- **AI provider: GLM Coding Plan (Zhipu / z.ai).** A third AI-assist provider alongside Anthropic and OpenRouter. GLM's coding plan exposes an Anthropic-compatible Messages endpoint (`https://api.z.ai/api/anthropic`), so it reuses the native request/response path with a Bearer token. Settings → AI assist shows a **model picker with the full GLM lineup** — the flagship `glm-5.2` (1M context), `glm-5.1`, `glm-5-turbo`, `glm-5`, `glm-4.7`/`glm-4.6`/`glm-4.5` and the free flash tiers — defaulting to `glm-5-turbo` (the GLM-5 speed model). Key also read from `GLM_API_KEY`/`ZAI_API_KEY` env. Agent mode (let-AI-send-requests) works since GLM speaks the Anthropic tool-use format.
+- **Update-check cache.** `internal/version/github_cache.go` caches the last "latest version" lookup for an hour at `~/.interceptor/update-check.json`, avoiding redundant GitHub calls.
+- **Rate-limit fallback for `interceptor update`.** When the GitHub API is rate-limited (or no `GITHUB_TOKEN` is set), version checks and release fetches fall back to the unauthenticated `releases/latest` redirect and synthesize release asset URLs from GoReleaser naming, verifying each with a HEAD/range request before use.
+
 ### Changed
-- Consolidated `CLAUDE.md` + `CONTRIBUTING.md` into single `AGENTS.md` with symlinks to `CLAUDE.md`, `.cursorrules`, `.opencode/rules.md`.
-- Added `orchestrator` skill for subagent delegation (architect, backend, frontend, reviewer, tester).
+- **GitHub API errors** now surface a `Retry-After`/`X-RateLimit-Reset` hint when available.
+- **Command palette (Ctrl+K)** now finds more of the app: switch/create project, toggle theme, and send the selected flow to Repeater/Intruder, in addition to existing tab/settings navigation.
+- **Proxy History gives the flow list the whole screen until you need the inspector.** The request/response inspector (plus its splitter and note bar) is only useful once a flow is picked — until then it was ~40% of the viewport showing two "select a flow" placeholders while the flow list, the thing you actually scan, was squeezed to ~36%. It's now hidden when nothing is selected (flow list ≈79% of the viewport, roughly 2× the visible rows) and reappears at its remembered height the instant a row is clicked — the same detail-on-demand pattern as Chrome DevTools' Network panel and Burp's history.
+- **Top-bar declutter.** The header device-proxy chip is hidden when it resolves to a loopback address, which merely duplicated the listener address beside it (`127.0.0.1:8080  127.0.0.1:8080`). It reappears the moment a real, phone-reachable LAN endpoint exists — which is the only time it carries information.
+- **Settings — real wide-desktop layout.** Every section was hard-capped at 780px and pinned left, so on a wide window ~40% of the screen was dead space and the page was one tall single-column scroll. Multi-card panels (Proxy & network, Project & data, TLS/CA) now lay out as a **responsive 2–3 column card grid** (like macOS System Settings) that collapses to one column on narrow windows; a section carrying a data table (Data & retention) spans the full width. Single-card panels and the Session panel (whose extras are collapsible `<details>`) stay a normal-width vertical flow, so a lone form is never dragged edge-to-edge. Implemented with `:has()` — where unsupported it degrades to the prior block layout.
+- **Settings — nav reordered by how often each panel is used** during an engagement: Proxy & network → **Project & data** (frequent project switching) → Target scope → Session / auth → TLS / CA → Scanner → AI assist → API & MCP. Previously Project & data sat second-to-last despite being one of the most-used panels.
+
+### Fixed
+- **Settings — "Control UI" Host/Port fields no longer float disconnected in the middle.** The row used `class="field row"`, but `.field`'s `flex-direction:column` overrode `.row`, so Host and Port stacked and right-aligned instead of sitting side by side. Rebuilt as a proper `.row` of `.field`s (Host grows, Port fixed-width), left-aligned like the rest of the form.
+- **Settings — "Proxy listener" Host dropdown now fills its cell** instead of shrinking to content width and leaving a large gap before the Port field. The enhanced `.ui-select-btn` trigger defaults to `width:auto`; listener host selects are now forced to `width:100%`.
+- **Proxy History — "Views ▾" menu.** Clicking it opened and instantly closed the dropdown on the same click, because the app-wide "click outside closes the context menu" listener fired for the very click that opened it. It's the only context menu wired to a left-click handler instead of right-click, so it needed its own `stopPropagation()` (matching the pattern already used elsewhere).
+- **Custom `<select>` dropdowns showing a stale label.** `enhanceSelect`'s trigger button only re-rendered on a native `change` event, but code across the app sets `select.value = x` programmatically when loading data (e.g. Settings → AI assist loading the saved provider) — which never fires `change`. The dropdown's underlying value was correct but the visible label was wrong (e.g. showed "Anthropic" while "OpenRouter" was actually selected/saved). The `value` property on enhanced selects now re-syncs the visible widget on every set, closing the whole bug class instead of one instance.
+- **Toolbar buttons/toggles with longer labels wrapped across 2–3 lines** (e.g. Map's "Hiding 403/404-only", "Collapsing identical"), making toolbars taller and harder to scan. `.btn`/`.toggle` now stay single-line (`white-space:nowrap`) and rely on the toolbar's existing horizontal scroll for overflow, consistent with the rest of the app.
+- **Intruder "Start" silently no-oped** when the target field was empty or no `§` markers were set — a toast fired but auto-dismissed with no lasting indication of what to fix. Both validation failures now focus the offending field.
 
 ## [0.23.0] - 2026-07-02
 

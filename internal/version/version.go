@@ -12,8 +12,12 @@ import (
 	"strings"
 )
 
-// Version is the baked-in release version — keep it in sync with the git tag.
-const Version = "0.22.0"
+// Version is the baked-in fallback version for dev builds. Release binaries
+// report the real version from the module build info (the git tag) instead, so
+// this constant deliberately tracks the last *published* release — bumping it
+// ahead of the tag would break the update-check test, which verifies the named
+// release actually exists on GitHub.
+const Version = "0.23.0"
 
 // Repo is the GitHub owner/name used for the update check.
 const Repo = "Veyal/interceptor"
@@ -42,15 +46,32 @@ func isReleaseVersion(v string) bool {
 // is newer than the running version. Best-effort: any error (offline, rate
 // limit, etc.) returns ("", false, err) for the caller to ignore quietly.
 func CheckLatest(ctx context.Context) (latest string, newer bool, err error) {
-	latest, err = checkLatestAPI(ctx)
-	if err != nil {
-		if fb, fbErr := checkLatestRedirect(ctx); fbErr == nil && fb != "" {
-			latest = fb
-			err = nil
-		} else {
-			return "", false, err
-		}
+	if c, ok := readLatestCache(); ok {
+		return finishLatestCheck(c.Latest)
 	}
+
+	var apiErr error
+	if githubToken() != "" {
+		latest, err = checkLatestAPI(ctx)
+		if err == nil {
+			writeLatestCache(latest, "")
+			return finishLatestCheck(latest)
+		}
+		apiErr = err
+	}
+
+	latest, err = checkLatestRedirect(ctx)
+	if err != nil {
+		if apiErr != nil {
+			return "", false, apiErr
+		}
+		return "", false, err
+	}
+	writeLatestCache(latest, "")
+	return finishLatestCheck(latest)
+}
+
+func finishLatestCheck(latest string) (string, bool, error) {
 	cur := parseSemver(String())
 	best := parseSemver(latest)
 	if best == nil {
