@@ -156,12 +156,21 @@ func (e *Engine) fireNotify() {
 // State returns a copy-safe snapshot of the current/last run.
 func (e *Engine) State() State {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	out := State{
 		Running: e.running, BaseURL: e.baseURL, Tried: e.tried,
 		Found: len(e.results), StartedMs: e.startedMs, DoneMs: e.doneMs, Note: e.note,
 	}
 	out.Results = append([]Result(nil), e.results...)
+	e.mu.Unlock()
+	// Sort the snapshot (never the shared slice) for a readable, deterministic UI:
+	// stable by depth then path. Doing it here rather than on every hit keeps result
+	// recording O(1) instead of O(n log n) per append under the lock.
+	sort.SliceStable(out.Results, func(i, j int) bool {
+		if out.Results[i].Depth != out.Results[j].Depth {
+			return out.Results[i].Depth < out.Results[j].Depth
+		}
+		return out.Results[i].Path < out.Results[j].Path
+	})
 	return out
 }
 
@@ -387,13 +396,6 @@ func (e *Engine) appendResult(res Result) {
 	}
 	e.mu.Lock()
 	e.results = append(e.results, res)
-	// Keep results stably ordered by depth then path for a readable, deterministic UI.
-	sort.SliceStable(e.results, func(i, j int) bool {
-		if e.results[i].Depth != e.results[j].Depth {
-			return e.results[i].Depth < e.results[j].Depth
-		}
-		return e.results[i].Path < e.results[j].Path
-	})
 	e.mu.Unlock()
 	e.fireNotify()
 }

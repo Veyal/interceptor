@@ -518,23 +518,32 @@ func (s *Server) gateAndForward(flow *store.Flow, r *http.Request) (*http.Respon
 	// Intercept gate (Burp-style hold) — only for in-scope, non-self, non-telemetry requests.
 	if s.eng != nil && s.eng.Enabled() && s.shouldCapture(flow) && (s.Scope == nil || s.Scope.InScope(flow)) &&
 		(!s.suppressTelemetry.Load() || !isBrowserTelemetry(flow.Host)) {
-		raw := dumpRequest(out)
-		d := s.eng.Hold(flow, out, raw)
-		// Only flag as intercepted when the request was actually held; the
-		// conditional filter forwards non-matching requests without holding.
-		if d.Held {
-			flow.Flags |= store.FlagIntercepted
-		}
-		if d.Drop {
-			flow.Flags |= store.FlagDropped
-			return nil, true, nil
-		}
-		out = d.Request
-		out.RequestURI = ""
-		out.URL.Scheme = flow.Scheme
-		out.URL.Host = hostPort(flow.Host, flow.Port, flow.Scheme)
-		if d.Edited {
-			flow.Flags |= store.FlagEdited
+		raw, truncated := dumpRequest(out)
+		if truncated {
+			// The body exceeds the editor buffer, so the raw dump is truncated and a
+			// round-tripped edit would forward a truncated body. Skip the hold and
+			// forward the full original stream unedited rather than silently corrupt
+			// it — a >64 MB body can't be meaningfully hand-edited anyway.
+			log.Printf("proxy: intercept bypassed for %s %s%s — body too large to edit (> %d bytes)",
+				out.Method, flow.Host, flow.Path, maxTransformBody)
+		} else {
+			d := s.eng.Hold(flow, out, raw)
+			// Only flag as intercepted when the request was actually held; the
+			// conditional filter forwards non-matching requests without holding.
+			if d.Held {
+				flow.Flags |= store.FlagIntercepted
+			}
+			if d.Drop {
+				flow.Flags |= store.FlagDropped
+				return nil, true, nil
+			}
+			out = d.Request
+			out.RequestURI = ""
+			out.URL.Scheme = flow.Scheme
+			out.URL.Host = hostPort(flow.Host, flow.Port, flow.Scheme)
+			if d.Edited {
+				flow.Flags |= store.FlagEdited
+			}
 		}
 	}
 
@@ -964,8 +973,10 @@ func headerWithHost(r *http.Request) map[string][]string {
 }
 
 // dumpRequest renders an origin-form raw request (request line + headers + body)
-// for the intercept UI to edit. It reads and restores the body.
-func dumpRequest(r *http.Request) []byte {
+// for the intercept UI to edit. It reads and restores the body. truncated is true
+// when the body exceeded the editor buffer, in which case the returned dump holds
+// only the first maxTransformBody bytes (the full stream is restored to r.Body).
+func dumpRequest(r *http.Request) (raw []byte, truncated bool) {
 	var body []byte
 	if r.Body != nil {
 		body, _ = io.ReadAll(io.LimitReader(r.Body, maxTransformBody+1))
@@ -973,6 +984,7 @@ func dumpRequest(r *http.Request) []byte {
 			// Body too large to buffer for the intercept editor — restore the full
 			// stream so forwarding isn't broken; the editable dump is truncated.
 			r.Body = restoreBody(body, r.Body)
+			truncated = true
 		} else {
 			r.Body.Close()
 			r.Body = io.NopCloser(bytes.NewReader(body))
@@ -997,7 +1009,7 @@ func dumpRequest(r *http.Request) []byte {
 	}
 	b.WriteString("\r\n")
 	b.Write(body)
-	return b.Bytes()
+	return b.Bytes(), truncated
 }
 
 func writeSimpleResponse(conn net.Conn, code int, msg string) {

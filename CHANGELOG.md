@@ -15,8 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 - **Quiet by default:** dropped the per-response `proxy: MITM resp …` debug log that fired on every intercepted HTTPS response (a leftover from the HTTP/2-downgrade work) and spammed the console while a device drove traffic. Real capture failures are still logged.
 - **Critical findings now render a filled-red severity badge.** `.sev.Critical` had no styling, so Critical scanner/check results showed a text-colored outline instead of red; it's now a solid red badge, visually distinct from High.
+- **Content discovery no longer re-sorts its whole result set on every hit.** `appendResult` used to run a stable sort under the engine lock for each finding — O(n² log n) over a run, and it blocked concurrent state polls. Recording is now O(1); the depth-then-path ordering is applied once to the snapshot when the UI reads `State()`. A forced-browse run that finds thousands of paths no longer degrades or stalls the live UI.
+- **SSE broadcast no longer holds the hub lock across the client fan-out.** It snapshots the subscriber channels under a short lock and sends outside it, so heavy capture no longer contends with client connect/disconnect. Sends stay non-blocking.
 
 ### Fixed
+- **WebSocket repeater caps total retained payload at 32 MB** across all collected reply frames. Each frame was already capped at 16 MB, but up to 64 frames could otherwise buffer ~1 GB for a single repeat.
+- **Intercept no longer forwards a truncated body** when an operator edits a request whose body exceeds the 64 MB editor buffer. Such requests now bypass the hold and forward their full original stream unedited (a >64 MB body can't be meaningfully hand-edited), instead of reconstructing a truncated body from the editor dump.
 - **Map cluster badges** (`+N identical` / soft-404 clusters) drew their border from an **undefined `--border`** token, so it fell back to the text color; now uses `--line2`.
 - **Map "searching bodies" warning strip** had **no background** — it referenced an undefined `--amberDim` with no fallback; now uses the existing amber-tinted `--noteDim`.
 - **Response capture no longer records a truncated body as authoritative** when the client aborts mid-download. The plain-HTTP path previously overwrote the flow's body hash/length with the partial finalize result and left the flow unflagged; it now marks such flows with `FlagCaptureError` so history and replay don't treat an incomplete body as the full response.

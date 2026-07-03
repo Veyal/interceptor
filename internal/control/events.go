@@ -63,9 +63,17 @@ func (h *Hub) broadcast(v any) {
 		return
 	}
 	s := string(msg)
+	// Snapshot the subscriber channels under a short lock, then send outside it so
+	// the fan-out doesn't hold h.mu against client connect/disconnect. Sends stay
+	// non-blocking; channels are only removed from the map (never closed), so a send
+	// racing an unsubscribe just lands in a buffer nobody reads — harmless.
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	chans := make([]chan string, 0, len(h.clients))
 	for ch := range h.clients {
+		chans = append(chans, ch)
+	}
+	h.mu.Unlock()
+	for _, ch := range chans {
 		select {
 		case ch <- s:
 		default:

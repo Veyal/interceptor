@@ -32,6 +32,11 @@ const (
 	opPong   = 0xA
 )
 
+// maxReplyBytes caps the total payload retained across all collected reply
+// frames. Each frame is already capped at 16 MB, but 64 frames could otherwise
+// buffer ~1 GB; this bounds one repeater action to a sane amount for display.
+const maxReplyBytes = 32 << 20
+
 // Request is one WebSocket send.
 type Request struct {
 	URL     string            // ws:// wss:// (http/https also accepted)
@@ -123,6 +128,7 @@ func Send(req Request) (*Result, error) {
 
 	// Collect response frames until the read window closes or the server closes.
 	conn.SetReadDeadline(time.Now().Add(readFor))
+	total := 0
 	for i := 0; i < 64; i++ {
 		op, payload, err := readFrame(br)
 		if err != nil {
@@ -136,6 +142,9 @@ func Send(req Request) (*Result, error) {
 			continue
 		}
 		res.Frames = append(res.Frames, Frame{Dir: "recv", Opcode: op, Text: string(payload), Len: len(payload)})
+		if total += len(payload); total > maxReplyBytes {
+			break
+		}
 	}
 	return res, nil
 }
