@@ -1158,9 +1158,8 @@ window.addEventListener('blur',hideCtx);
   const el=$('#'+id);
   if(el)el.addEventListener('contextmenu',e=>{e.preventDefault();e.stopPropagation();showInspectorCtx(e.clientX,e.clientY,id==='reqView'?'req':'resp');});
 });
-const hideReqDec=wireSelectionDecode($('#reqView'),$('#reqDecode'),{onDecoder:openDecoder});
-const hideResDec=wireSelectionDecode($('#resView'),$('#resDecode'),{onDecoder:openDecoder});
-export function hideInspectorDecodeBars(){hideReqDec&&hideReqDec();hideResDec&&hideResDec();}
+wireSelectionDecode($('#reqView'),$('#reqDecode'),{onDecoder:openDecoder});
+wireSelectionDecode($('#resView'),$('#resDecode'),{onDecoder:openDecoder});
 export function flowURL(f){const def=(f.scheme==='https'&&f.port===443)||(f.scheme==='http'&&f.port===80);return `${f.scheme}://${f.host}${def?'':':'+f.port}${f.path}`;}
 export function copyURL(f){copyText(flowURL(f),'URL copied');}
 function shq(s){return "'"+String(s).replace(/'/g,"'\\''")+"'";}

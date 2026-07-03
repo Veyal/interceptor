@@ -18,7 +18,7 @@ function osHint() {
 
 const TRUST_STEPS = {
   mac: `<li>Open the downloaded <code>interceptor-ca.crt</code> — Keychain Access opens.</li><li>Add it to <b>System</b> (or login) → double-click <b>Interceptor</b> CA → <b>Trust</b> → <b>Always Trust</b>.</li>`,
-  win: `<li>Double-click the <code>.crt</code> → <b>Install Certificate</b> → <b>Local Machine</b> → <b>Place all certificates in: Trusted Root Certification Authorities</b>.</li>`,
+  win: `<li>Double-click the <code>.crt</code> → <b>Install Certificate</b> → <b>Local Machine</b> <span class="hint">(needs admin — choose <b>Current User</b> if you're not)</span> → <b>Place all certificates in: Trusted Root Certification Authorities</b>.</li>`,
   linux: `<li><b>Debian/Ubuntu:</b> copy to <code>/usr/local/share/ca-certificates/interceptor.crt</code> → <code>sudo update-ca-certificates</code>.</li><li>Or one-off: <code>curl --cacert ~/.interceptor/ca/ca.crt -x http://127.0.0.1:8080 https://…</code></li>`,
 };
 

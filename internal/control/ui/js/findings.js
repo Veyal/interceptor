@@ -257,14 +257,6 @@ export function chainSteps(blocks, impact) {
   return steps;
 }
 
-/** Step list + edge indices; kept for testability. */
-export function chainLayout(blocks, impact) {
-  const steps = chainSteps(blocks, impact);
-  const edges = [];
-  for (let i = 0; i < steps.length - 1; i++) edges.push([i, i + 1]);
-  return { nodes: steps, edges, w: 0, h: steps.length };
-}
-
 function chainFlowCard(b, i) {
   if (b.missing) {
     return `<blockquote class="find-poc-callout find-poc-missing">

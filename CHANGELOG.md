@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+- **Removed engagement artifacts committed to the repo** (a one-off bounty script and a pentest spec) that contained real target hosts, vulnerability details, and third-party PII, and **purged them from git history**. Redacted test fixtures that echoed real captured data (CONNECT hosts/IPs, a session-cookie name) to RFC-5737 / RFC-2606 placeholders, and added `.gitignore` guards so engagement artifacts cannot re-enter.
+
+### Changed
+- **Quiet by default:** dropped the per-response `proxy: MITM resp …` debug log that fired on every intercepted HTTPS response (a leftover from the HTTP/2-downgrade work) and spammed the console while a device drove traffic. Real capture failures are still logged.
+- **Critical findings now render a filled-red severity badge.** `.sev.Critical` had no styling, so Critical scanner/check results showed a text-colored outline instead of red; it's now a solid red badge, visually distinct from High.
+
+### Fixed
+- **Map cluster badges** (`+N identical` / soft-404 clusters) drew their border from an **undefined `--border`** token, so it fell back to the text color; now uses `--line2`.
+- **Map "searching bodies" warning strip** had **no background** — it referenced an undefined `--amberDim` with no fallback; now uses the existing amber-tinted `--noteDim`.
+- **Response capture no longer records a truncated body as authoritative** when the client aborts mid-download. The plain-HTTP path previously overwrote the flow's body hash/length with the partial finalize result and left the flow unflagged; it now marks such flows with `FlagCaptureError` so history and replay don't treat an incomplete body as the full response.
+- **Windows setup CA step** now notes that "Local Machine" trust needs admin and points non-admins to "Current User".
+
+### Removed
+- **Dead UI code:** `hideInspectorDecodeBars` (proxy.js) and `chainLayout` (findings.js) — neither was referenced anywhere.
+
 ## [0.24.0] - 2026-07-03
 
 ### Added

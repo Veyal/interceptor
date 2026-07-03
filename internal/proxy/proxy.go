@@ -613,11 +613,16 @@ func (s *Server) writeResponseHTTP(w http.ResponseWriter, resp *http.Response, f
 	w.WriteHeader(resp.StatusCode)
 
 	if resTee, resFinalize, err := s.teeBody(flow, resp.Body); err == nil && resTee != nil {
-		if _, err := io.Copy(w, resTee); err != nil {
-			flow.Error = "stream resp: " + err.Error()
-		}
+		_, cerr := io.Copy(w, resTee)
 		h, n, _ := resFinalize()
 		flow.ResBodyHash, flow.ResLen = h, n
+		if cerr != nil {
+			// Client aborted mid-stream: the stored body is whatever was
+			// tee'd before the write failed. Flag it so history/replay don't
+			// treat a truncated body + its length/hash as the full response.
+			flow.Flags |= store.FlagCaptureError
+			flow.Error = "stream resp: " + cerr.Error()
+		}
 	} else if err != nil {
 		flow.Flags |= store.FlagCaptureError
 		flow.Error = "capture resp: " + err.Error()
