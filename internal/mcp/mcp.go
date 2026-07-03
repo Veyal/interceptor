@@ -160,6 +160,19 @@ func (s *Server) handleLine(line []byte, out io.Writer) {
 	s.write(out, req.ID, result, rerr)
 }
 
+// mcpInstructions is the guidance surfaced to an AI agent on connect: the
+// pentest workflow, plus a pointer to report bugs/gaps in Interceptor itself.
+func mcpInstructions() string {
+	return "Interceptor — an AI web-pentest workspace; a human watches everything you do and can take over manually, so record your work as you go.\n\n" +
+		"SETUP: check_readiness (structured JSON blockers: OOB, scope, auth identities, login macro) → fix blockers → scope_from_url → ca_info + route traffic through proxy. Re-run check_readiness if list_flows/scans come back empty.\n\n" +
+		"AUTH: list_flows tag=auth → promote_flow_to_authz (Surveyor, Admin, …) → authz_run inScope:true → set_login_macro_from_flow → run_login_macro (refresh CSRF).\n\n" +
+		"RECON: start_discovery (wordlist optional — server default) → suggest_discovery_paths.\n\n" +
+		"SCAN: run_scanner (passive) → active_scan arm:true inScope:true csrfAware:true → cross_host_token_replay mode:auto for SSO/JWT apps → oob_* for blind callbacks.\n\n" +
+		"RECORD: create_finding (body blocks) → add_finding_poc position:N → update_finding impact/detail (detail-only updates preserve interleaved PoC blocks).\n\n" +
+		"Everything you do is tagged AI. Pass optional `intent` on consequential tools. Use request_human_input before destructive or ambiguous steps.\n\n" +
+		"IMPROVE INTERCEPTOR: this workspace is a tool under active development, separate from the target you are testing. If an Interceptor tool errors, returns something wrong, or is missing a capability you needed, report it (or ask the human to) at https://github.com/" + version.Repo + "/issues — include the tool name, what you expected, and what actually happened. Do not file issues about the target application there."
+}
+
 func (s *Server) dispatch(method string, params json.RawMessage) (any, *rpcError) {
 	switch method {
 	case "initialize":
@@ -175,7 +188,7 @@ func (s *Server) dispatch(method string, params json.RawMessage) (any, *rpcError
 			"protocolVersion": ver,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "interceptor", "version": version.Version},
-			"instructions":    "Interceptor — an AI web-pentest workspace; a human watches everything you do and can take over manually, so record your work as you go.\n\nSETUP: check_readiness (structured JSON blockers: OOB, scope, auth identities, login macro) → fix blockers → scope_from_url → ca_info + route traffic through proxy. Re-run check_readiness if list_flows/scans come back empty.\n\nAUTH: list_flows tag=auth → promote_flow_to_authz (Surveyor, Admin, …) → authz_run inScope:true → set_login_macro_from_flow → run_login_macro (refresh CSRF).\n\nRECON: start_discovery (wordlist optional — server default) → suggest_discovery_paths.\n\nSCAN: run_scanner (passive) → active_scan arm:true inScope:true csrfAware:true → cross_host_token_replay mode:auto for SSO/JWT apps → oob_* for blind callbacks.\n\nRECORD: create_finding (body blocks) → add_finding_poc position:N → update_finding impact/detail (detail-only updates preserve interleaved PoC blocks).\n\nEverything you do is tagged AI. Pass optional `intent` on consequential tools. Use request_human_input before destructive or ambiguous steps.",
+			"instructions":    mcpInstructions(),
 		}, nil
 	case "tools/list":
 		return map[string]any{"tools": s.toolList()}, nil

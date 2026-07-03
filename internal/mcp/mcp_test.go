@@ -353,10 +353,15 @@ func TestMCPProtocolAndTools(t *testing.T) {
 		ServerInfo struct {
 			Name string `json:"name"`
 		} `json:"serverInfo"`
+		Instructions string `json:"instructions"`
 	}
 	json.Unmarshal(resps[0].Result, &initRes)
 	if initRes.ProtocolVersion == "" || initRes.ServerInfo.Name != "interceptor" || initRes.Capabilities.Tools == nil {
 		t.Fatalf("bad initialize result: %s", resps[0].Result)
+	}
+	// Agents must be told where to report bugs/gaps in Interceptor itself.
+	if !strings.Contains(initRes.Instructions, "github.com/Veyal/interceptor/issues") {
+		t.Fatalf("initialize instructions missing the issues URL: %q", initRes.Instructions)
 	}
 
 	// tools/list contains the key tools
