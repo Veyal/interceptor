@@ -181,6 +181,35 @@ func printMCPUpdateNote(out io.Writer) {
 
 func fetchRelease(ctx context.Context, version string) (*releaseInfo, error) {
 	tag := "v" + strings.TrimPrefix(strings.TrimSpace(version), "v")
+
+	if githubToken() != "" {
+		rel, err := fetchReleaseAPI(ctx, tag)
+		if err == nil {
+			return rel, nil
+		}
+		if apiErr, ok := err.(releaseAPIError); ok && apiErr.status == http.StatusNotFound {
+			return nil, fmt.Errorf("release %s not found", tag)
+		}
+		if apiErr, ok := err.(releaseAPIError); !ok || !githubAPIRateLimited(apiErr.status) {
+			return nil, err
+		}
+	}
+
+	rel := syntheticRelease(tag)
+	if err := verifyReleaseAssets(ctx, rel); err != nil {
+		return nil, err
+	}
+	return rel, nil
+}
+
+type releaseAPIError struct {
+	status int
+	msg    string
+}
+
+func (e releaseAPIError) Error() string { return e.msg }
+
+func fetchReleaseAPI(ctx context.Context, tag string) (*releaseInfo, error) {
 	u := fmt.Sprintf("%s/releases/tags/%s", githubAPIRoot, tag)
 	req, err := newGitHubRequest(ctx, http.MethodGet, u)
 	if err != nil {
@@ -192,10 +221,10 @@ func fetchRelease(ctx context.Context, version string) (*releaseInfo, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("release %s not found", tag)
+		return nil, releaseAPIError{status: resp.StatusCode, msg: fmt.Sprintf("release %s not found", tag)}
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, githubAPIError(resp, "github release")
+		return nil, releaseAPIError{status: resp.StatusCode, msg: githubAPIError(resp, "github release").Error()}
 	}
 	var raw struct {
 		TagName string `json:"tag_name"`
@@ -212,6 +241,65 @@ func fetchRelease(ctx context.Context, version string) (*releaseInfo, error) {
 		rel.Assets = append(rel.Assets, releaseAsset{Name: a.Name, URL: a.BrowserDownloadURL})
 	}
 	return rel, nil
+}
+
+// syntheticRelease builds release metadata from GoReleaser asset naming without
+// calling api.github.com (works when the GitHub API rate limit is exhausted).
+func syntheticRelease(tag string) *releaseInfo {
+	ver := strings.TrimPrefix(tag, "v")
+	var assets []releaseAsset
+	for _, name := range assetCandidates(ver, runtime.GOOS, runtime.GOARCH) {
+		assets = append(assets, releaseAsset{Name: name, URL: releaseDownloadURL(tag, name)})
+	}
+	assets = append(assets, releaseAsset{Name: "checksums.txt", URL: releaseDownloadURL(tag, "checksums.txt")})
+	return &releaseInfo{Tag: tag, Assets: assets}
+}
+
+func verifyReleaseAssets(ctx context.Context, rel *releaseInfo) error {
+	ver := strings.TrimPrefix(rel.Tag, "v")
+	var verified []releaseAsset
+	for _, name := range assetCandidates(ver, runtime.GOOS, runtime.GOARCH) {
+		url := releaseDownloadURL(rel.Tag, name)
+		if releaseAssetExists(ctx, url) {
+			verified = append(verified, releaseAsset{Name: name, URL: url})
+		}
+	}
+	if len(verified) == 0 {
+		return fmt.Errorf("release %s not found", rel.Tag)
+	}
+	verified = append(verified, releaseAsset{
+		Name: "checksums.txt",
+		URL:  releaseDownloadURL(rel.Tag, "checksums.txt"),
+	})
+	rel.Assets = verified
+	return nil
+}
+
+func releaseAssetExists(ctx context.Context, url string) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("User-Agent", "interceptor/"+String()+" (https://github.com/"+Repo+")")
+	resp, err := githubWebHTTP.Do(req)
+	if err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			return true
+		}
+	}
+	req, err = http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Range", "bytes=0-0")
+	req.Header.Set("User-Agent", "interceptor/"+String()+" (https://github.com/"+Repo+")")
+	resp, err = githubWebHTTP.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusPartialContent
 }
 
 // pickAsset chooses a release archive for the running platform.

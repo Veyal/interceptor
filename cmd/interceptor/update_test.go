@@ -8,11 +8,12 @@ import (
 )
 
 func TestRunUpdateCheckOnly(t *testing.T) {
-	// --check against a real tag should not error (network permitting).
+	// --check against a real tagged release should not error (network permitting).
+	// Uses direct release URLs when the GitHub API is rate-limited.
 	if testing.Short() {
 		t.Skip("network")
 	}
-	if err := runUpdate([]string{"--check", "--version", "0.6.0"}); err != nil {
+	if err := runUpdate([]string{"--check", "--version", version.Version}); err != nil {
 		t.Fatalf("check: %v", err)
 	}
 }
