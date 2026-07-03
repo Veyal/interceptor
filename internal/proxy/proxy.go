@@ -672,9 +672,6 @@ func (s *Server) writeResponseConn(conn net.Conn, resp *http.Response, flow *sto
 		resp.TransferEncoding = []string{"chunked"}
 	}
 
-	log.Printf("proxy: MITM resp %d cl=%d te=%v proto=%s to %s",
-		resp.StatusCode, resp.ContentLength, resp.TransferEncoding, resp.Proto, conn.RemoteAddr())
-
 	resTee, resFinalize, err := s.teeBody(flow, upstream)
 	if err == nil && resTee != nil {
 		resp.Body = io.NopCloser(resTee)
