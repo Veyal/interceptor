@@ -423,39 +423,98 @@ func (m *proxyManager) Rebind(addr string) error {
 	return m.RebindAddrs([]string{addr})
 }
 
-// RebindAddrs replaces all proxy listeners atomically.
+// RebindAddrs reconciles the live proxy listeners to the desired address set:
+// listeners already bound to a still-desired address are kept as-is, only newly
+// added addresses are bound, and dropped addresses are drained. This is what lets
+// a user add a second listener (e.g. :8083 alongside :8080) without the rebind
+// re-binding — and failing on — the port the running listener still holds.
 func (m *proxyManager) RebindAddrs(addrs []string) error {
-	if len(addrs) == 0 {
+	desired := dedupeAddrs(addrs)
+	if len(desired) == 0 {
 		return fmt.Errorf("at least one proxy listen address required")
 	}
-	lns, err := m.listenAll(addrs)
+
+	m.mu.Lock()
+	cur := make(map[string]*http.Server, len(m.addrs))
+	for i, a := range m.addrs {
+		cur[a] = m.srvs[i]
+	}
+	m.mu.Unlock()
+
+	// Only bind addresses not already served (open-before-close). listenAll closes
+	// anything it opened if one fails, so a bad new address leaves the live set intact.
+	var toAdd []string
+	for _, a := range desired {
+		if _, ok := cur[a]; !ok {
+			toAdd = append(toAdd, a)
+		}
+	}
+	lns, err := m.listenAll(toAdd)
 	if err != nil {
 		return err
 	}
-	newSrvs := make([]*http.Server, len(lns))
+	added := make(map[string]*http.Server, len(lns))
 	for i, ln := range lns {
-		newSrvs[i] = m.serve(ln)
+		added[toAdd[i]] = m.serve(ln)
 	}
+
+	// Build the new ordered listener set: keep existing servers for retained
+	// addresses, slot in the freshly bound ones.
+	newSrvs := make([]*http.Server, len(desired))
+	for i, a := range desired {
+		if s, ok := cur[a]; ok {
+			newSrvs[i] = s
+		} else {
+			newSrvs[i] = added[a]
+		}
+	}
+	// Anything currently bound but no longer desired gets drained.
+	var toClose []*http.Server
+	keep := make(map[string]struct{}, len(desired))
+	for _, a := range desired {
+		keep[a] = struct{}{}
+	}
+	for a, s := range cur {
+		if _, ok := keep[a]; !ok {
+			toClose = append(toClose, s)
+		}
+	}
+
 	m.mu.Lock()
-	oldSrvs := m.srvs
-	m.addrs, m.srvs = append([]string(nil), addrs...), newSrvs
+	m.addrs, m.srvs = desired, newSrvs
 	m.mu.Unlock()
 
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		for _, srv := range oldSrvs {
-			if srv != nil {
-				_ = srv.Shutdown(ctx)
+	if len(toClose) > 0 {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			for _, srv := range toClose {
+				if srv != nil {
+					_ = srv.Shutdown(ctx)
+				}
 			}
-		}
-	}()
-	if len(addrs) == 1 {
-		log.Printf("proxy rebound to %s", addrs[0])
-	} else {
-		log.Printf("proxy rebound to %s", strings.Join(addrs, ", "))
+		}()
 	}
+	log.Printf("proxy listeners: %s", strings.Join(desired, ", "))
 	return nil
+}
+
+// dedupeAddrs trims blanks and removes duplicate addresses, preserving order.
+func dedupeAddrs(addrs []string) []string {
+	seen := make(map[string]struct{}, len(addrs))
+	out := make([]string, 0, len(addrs))
+	for _, a := range addrs {
+		a = strings.TrimSpace(a)
+		if a == "" {
+			continue
+		}
+		if _, ok := seen[a]; ok {
+			continue
+		}
+		seen[a] = struct{}{}
+		out = append(out, a)
+	}
+	return out
 }
 
 // Addr reports the current proxy bind address(es), comma-joined when multiple.
