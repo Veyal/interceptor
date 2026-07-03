@@ -294,6 +294,11 @@ export async function loadSettings(){try{const s=await api('/api/settings');stat
   if($('#capScopeToggle'))setCapScope(!!s.captureScopeOnly);
   if($('#suppressTelemetryToggle'))setSuppressTelemetry(s.suppressBrowserTelemetry!==false);
   if($('#invisibleProxyToggle'))setInvisibleProxy(!!s.invisibleProxy);
+  if($('#autoBypassToggle'))setAutoBypass(!!s.autoBypassOnPinFailure);
+  // Don't clobber the list while the operator is mid-edit (a live settings.update
+  // — e.g. an auto-bypass addition — must not overwrite unsaved typing).
+  const bl=$('#tlsBypassList');
+  if(bl&&document.activeElement!==bl){bl.value=(s.tlsBypassHosts||[]).join('\n');updateBypassCount();}
   aiSyncProviderUI();
   applyAiDisabledUI();
   applyOobDisabledUI();
@@ -455,6 +460,23 @@ $('#invisibleProxyToggle')&&($('#invisibleProxyToggle').onclick=async()=>{
   const on=!$('#invisibleProxyToggle').classList.contains('on');
   try{await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({invisibleProxy:on})});setInvisibleProxy(on);toast(on?'Invisible proxy enabled':'Invisible proxy disabled');}
   catch(e){toast('invisible: '+e.message);}
+});
+// ---- TLS passthrough / SSL-pinning bypass ----
+export function setAutoBypass(on){const b=$('#autoBypassToggle');if(!b)return;b.classList.toggle('on',on);b.setAttribute('aria-pressed',on?'true':'false');b.textContent=on?'Auto-bypass on pinning failure is on':'Auto-bypass on pinning failure is off';}
+function bypassHostsFromText(){return ($('#tlsBypassList')?.value||'').split(/[\n,]/).map(x=>x.trim().toLowerCase()).filter((v,i,a)=>v&&a.indexOf(v)===i);}
+function updateBypassCount(){const el=$('#tlsBypassCount');if(el)el.textContent=(n=>n?n+' domain'+(n>1?'s':'')+' passed through':'No passthrough domains')(bypassHostsFromText().length);}
+$('#tlsBypassList')&&($('#tlsBypassList').addEventListener('input',updateBypassCount));
+$('#autoBypassToggle')&&($('#autoBypassToggle').onclick=async()=>{
+  const on=!$('#autoBypassToggle').classList.contains('on');
+  try{await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({autoBypassOnPinFailure:on})});setAutoBypass(on);toast(on?'Auto-bypass on pinning failure enabled':'Auto-bypass disabled');}
+  catch(e){toast('auto-bypass: '+e.message);}
+});
+$('#tlsBypassSave')&&($('#tlsBypassSave').onclick=async()=>{
+  const hosts=bypassHostsFromText();
+  try{await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({tlsBypassHosts:hosts})});
+    if($('#tlsBypassList'))$('#tlsBypassList').value=hosts.join('\n');updateBypassCount();
+    toast(hosts.length?('Passing through '+hosts.length+' domain'+(hosts.length>1?'s':'')):'Passthrough list cleared');}
+  catch(e){toast('passthrough: '+e.message);}
 });
 $('#saveUpstreamBtn').onclick=async()=>{
   try{await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({upstreamProxy:$('#setUpstream').value.trim()})});

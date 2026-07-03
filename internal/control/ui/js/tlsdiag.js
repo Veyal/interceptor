@@ -1,5 +1,5 @@
 // tlsdiag.js — surfaces SSL pinning / missing-traffic diagnosis in the UI.
-import { $, esc, state, api } from './core.js';
+import { $, esc, state, api, toast } from './core.js';
 
 const VERDICT = {
   ok: { label: 'HTTPS OK', color: 'var(--accent)', icon: '✓' },
@@ -22,7 +22,7 @@ function hostsLine(rep) {
 }
 
 function bypassNote() {
-  return `<p style="margin:8px 0 0;font-size:11.5px;color:var(--fg3)"><b>Interceptor cannot bypass SSL pinning</b> — bypass requires changes on the device (Frida, patched APK, emulator + system CA if the app does not pin).</p>`;
+  return `<p style="margin:8px 0 0;font-size:11.5px;color:var(--fg3)"><b>Interceptor cannot bypass SSL pinning to read this traffic</b> — that requires changes on the device (Frida, patched APK, emulator + system CA if the app does not pin). If these domains aren't important to your test, <b>pass them through</b> so the app keeps working while you intercept the rest.</p>`;
 }
 
 export function isTlsBannerHidden() {
@@ -80,6 +80,7 @@ export function renderTrafficDiagnosis(rep) {
     <span style="font-weight:700;color:${v.color};white-space:nowrap">${v.icon} ${esc(v.label)}</span>
     <span style="flex:1;min-width:200px;color:var(--fg2);font-size:12px;line-height:1.55">${esc(rep.detail || '')}</span>
     ${rep.verdict === 'tls_blocked' ? `<button type="button" class="btn" id="tlsFilterPinBtn" style="flex:none">Show PIN rows</button>` : ''}
+    ${rep.verdict === 'tls_blocked' && rep.hostsBlocked && rep.hostsBlocked.length ? `<button type="button" class="btn accent" id="tlsPassthroughBtn" style="flex:none" title="Tunnel these pinned hosts straight through (no interception) so the app works">Pass through ${rep.hostsBlocked.length} host${rep.hostsBlocked.length > 1 ? 's' : ''}</button>` : ''}
     ${rep.verdict !== 'ok' ? `<button type="button" class="btn" id="tlsOpenSettingsBtn" style="flex:none">Settings → TLS</button>` : ''}
     <button type="button" class="btn" id="tlsBannerDismiss" title="Dismiss until verdict changes" style="flex:none;padding:3px 8px" aria-label="Dismiss TLS diagnosis banner">✕</button>
     <button type="button" class="btn" id="tlsBannerDismissForever" title="Never show this banner in Proxy History" style="flex:none;font-size:11px">Don't show again</button>
@@ -131,6 +132,22 @@ function wireTrafficDiagnosisActions(root) {
     document.querySelector('.tab[data-tab="settings"]')?.click();
     document.querySelector('#setNav button[data-sec="tls"]')?.click();
   };
+  const pass = root.querySelector('#tlsPassthroughBtn');
+  if (pass) pass.onclick = () => addHostsToPassthrough((lastDiag && lastDiag.hostsBlocked) || []);
+}
+
+// addHostsToPassthrough merges the given hosts into the TLS-bypass list so the
+// app can keep using them (untouched) while everything else stays intercepted.
+async function addHostsToPassthrough(hosts) {
+  hosts = (hosts || []).map(h => String(h).trim().toLowerCase()).filter(Boolean);
+  if (!hosts.length) return;
+  try {
+    const cur = await api('/api/settings');
+    const merged = [...new Set([...(cur.tlsBypassHosts || []), ...hosts])];
+    await api('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tlsBypassHosts: merged }) });
+    toast('Passing through ' + hosts.length + ' pinned host' + (hosts.length > 1 ? 's' : '') + ' — reconnect the app');
+    loadTrafficDiagnosis();
+  } catch (e) { toast('passthrough: ' + e.message); }
 }
 
 export async function loadTrafficDiagnosis(host) {

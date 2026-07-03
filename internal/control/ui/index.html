@@ -194,11 +194,17 @@
       <section class="pane rep-req">
         <div class="pane-head"><span class="lbl">REQUEST</span></div>
         <div class="rep-sub">HEADERS</div>
-        <textarea id="repHeaders" class="rep-edit" spellcheck="false" placeholder="Header: value (one per line)"></textarea>
-        <div class="rep-sub row"><span>BODY</span><div class="spacer"></div>
-          <div class="seg rep-req-seg" id="repReqSeg"><button class="on" data-view="raw">Raw</button><button data-view="pretty">Pretty</button></div>
+        <div class="rep-field rep-field-headers">
+          <pre class="rep-hl" id="repHeadersHL" aria-hidden="true"></pre>
+          <textarea id="repHeaders" class="rep-edit" spellcheck="false" placeholder="Header: value (one per line)"></textarea>
         </div>
-        <textarea id="repBody" class="rep-edit" spellcheck="false" placeholder="Request body…"></textarea>
+        <div class="rep-sub row"><span>BODY</span><div class="spacer"></div>
+          <div class="seg rep-req-seg" id="repReqSeg"><button data-view="raw">Raw</button><button class="on" data-view="pretty">Pretty</button></div>
+        </div>
+        <div class="rep-field rep-field-body">
+          <pre class="rep-hl" id="repBodyHL" aria-hidden="true"></pre>
+          <textarea id="repBody" class="rep-edit" spellcheck="false" placeholder="Request body…"></textarea>
+        </div>
       </section>
       <section class="pane rep-res">
         <div class="pane-head"><span class="lbl">RESPONSE</span><span id="repStatus" class="statusline"></span>
@@ -503,6 +509,13 @@ Content-Type: application/json
             <h3>TLS CERTIFICATE AUTHORITY</h3>
             <p class="hint" style="margin-bottom:12px">Install &amp; trust this CA to intercept HTTPS. HTTP works without it.</p>
             <a class="btn accent" id="dlCaBtn" href="/api/ca.crt" download style="text-decoration:none;display:inline-block">Download CA certificate</a>
+          </div>
+          <div class="section" id="tlsBypassSection">
+            <h3>TLS PASSTHROUGH · SSL PINNING</h3>
+            <p class="hint" style="margin-bottom:10px">Domains listed here are tunneled straight through <b>without interception</b>, so pinned apps keep working while you focus on the domains you <i>can</i> intercept. One host per line — exact (<code>api.example.com</code>) or wildcard (<code>*.example.com</code>).</p>
+            <div class="row" style="gap:12px;margin-bottom:10px"><button class="toggle" id="autoBypassToggle">Auto-bypass on pinning failure is off</button><span class="hint">Adds a domain here automatically the first time its TLS handshake fails (pinning).</span></div>
+            <textarea id="tlsBypassList" spellcheck="false" placeholder="api.pinned-app.com&#10;*.analytics.example.com" style="width:100%;min-height:96px;font-family:var(--mono);font-size:11.5px;line-height:1.6;padding:8px 12px;background:var(--bg3);color:var(--fg);border:1px solid var(--line);border-radius:8px;resize:vertical"></textarea>
+            <div class="row" style="gap:8px;margin-top:8px"><button class="btn accent" id="tlsBypassSave">Save passthrough list</button><span class="hint" id="tlsBypassCount"></span></div>
           </div>
           <div class="section" id="androidAdbSection" style="display:none">
             <h3>ANDROID (ADB)</h3>

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **TLS passthrough for pinned domains — keep an app working while you intercept the rest.** A new Settings → TLS/CA section lets you list domains (exact `api.example.com` or wildcard `*.example.com`) that are tunneled **raw, without MITM**, so the client's TLS/pinning reaches the real origin and those requests just work — useful when some domains are SSL-pinned but unimportant, so testing can focus on the domains that *can* be intercepted. An **Auto-bypass on pinning failure** toggle adds a domain to the list automatically the first time its MITM handshake fails (the pinning signal), so the app recovers on its next attempt with no manual step. The SSL-pinning diagnosis banner gains a one-click **"Pass through N hosts"** action for the detected blocked hosts. Passed-through connections are recorded once per host as an informational `tls-bypassed` flow so they're visible in history. Also exposed to the AI agent via the settings API. The global CA and interception of every other domain are unaffected.
+
+### Changed
+- **Repeater request panes are now syntax-highlighted and pretty by default.** The editable request Headers and Body fields render live color-coding (header names/values; JSON/HTML/XML/CSS bodies) via a colored overlay behind a transparent-text textarea — matching the read-only response pane — so requests are as readable as responses while staying fully editable. New Repeater tabs also default the body view to **Pretty** (beautified) instead of Raw; toggling to Raw still compacts before sending, so the wire format is unchanged.
+
 ## [0.26.0] - 2026-07-03
 
 ### Added

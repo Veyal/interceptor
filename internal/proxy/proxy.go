@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -53,6 +54,15 @@ type Server struct {
 	scopeOnly           atomic.Bool             // when set, only in-scope flows are persisted
 	suppressTelemetry   atomic.Bool             // when set, browser telemetry is not captured or intercepted
 	invisible           atomic.Bool             // when set, origin-form requests (no absolute URI) are forwarded from the Host header
+
+	// TLS-bypass: CONNECTs to a matching host are tunneled raw (no MITM) so the
+	// client's pinning/handshake reaches the real origin and the app keeps working.
+	bypassHosts atomic.Pointer[[]string] // host patterns to pass through untouched
+	autoBypass  atomic.Bool              // add a host to bypassHosts when its MITM handshake fails (pinning)
+	bypassSeen  sync.Map                 // host → struct{}: hosts already logged as bypassed (dedupe the info flow)
+	// OnBypassAdded is fired (outside locks) after autoBypass appends a host, with
+	// the full updated list, so the control plane can persist it and refresh the UI.
+	OnBypassAdded func([]string)
 
 	// SelfPorts are this tool's own loopback ports (control plane + proxy). Set
 	// by cmd; traffic to them is forwarded but never recorded, so proxying
@@ -202,6 +212,14 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// TLS-bypass: tunnel this host straight through without MITM, so the client
+	// negotiates TLS (and its pinning) with the real origin. Lets a pinned-but-
+	// unimportant domain keep working while other domains are still intercepted.
+	if s.shouldBypassTLS(host) {
+		s.tunnelRaw(clientConn, host, port, r)
+		return
+	}
+
 	var sni string
 	cfg := &tls.Config{
 		MinVersion: tls.VersionTLS12,
@@ -217,7 +235,12 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	tlsConn := tls.Server(clientConn, cfg)
 	if err := tlsConn.Handshake(); err != nil {
 		s.recordTLSFailure(host, port, clientConn.RemoteAddr().String(), r, connectStarted, err)
-		return // client rejected our leaf (pinning or untrusted CA)
+		// The client rejected our leaf (pinning or untrusted CA). If auto-bypass is
+		// on, add this host so the app's next attempt tunnels through and works.
+		if s.autoBypass.Load() {
+			s.addBypassHost(host)
+		}
+		return
 	}
 	defer tlsConn.Close()
 

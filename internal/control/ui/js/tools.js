@@ -1,4 +1,4 @@
-import { $, esc, escAttr, toast, api, methodColor, statusColor, statusText, highlightHTTP, prettify, beautifyBody, fmtDur, fmtSize, openCtxMenu, DEC_OPS, contentTypeFromRaw, pickTextFile, normalizeListText, parseListLines, previewListLines, LIST_PREVIEW_LINES, wireRowKey, uiPrompt } from './core.js';
+import { $, esc, escAttr, toast, api, methodColor, statusColor, statusText, highlightHTTP, highlightHeaderLines, highlightBodyText, prettify, beautifyBody, fmtDur, fmtSize, openCtxMenu, DEC_OPS, contentTypeFromRaw, pickTextFile, normalizeListText, parseListLines, previewListLines, LIST_PREVIEW_LINES, wireRowKey, uiPrompt } from './core.js';
 
 // repStatusLine builds a rich response summary: "200 OK · 142 ms · 4.1 KB".
 function repStatusLine(f){
@@ -8,7 +8,18 @@ function repStatusLine(f){
 
 /* ---- repeater (multi-tab; each tab = an endpoint with its own history) ---- */
 export let repSeq=1, repTabs=[], repActive=null;
-export function repBlank(){return {tid:repSeq++,title:'new tab',method:'GET',url:'',headers:'',body:'',reqView:'raw',resId:null,resView:'pretty',status:'',color:''};}
+export function repBlank(){return {tid:repSeq++,title:'new tab',method:'GET',url:'',headers:'',body:'',reqView:'pretty',resId:null,resView:'pretty',status:'',color:''};}
+// repReqContentType reads Content-Type from the editable headers pane so the body
+// overlay highlights with the right syntax (JSON/markup/CSS) even before a send.
+function repReqContentType(){const h=$('#repHeaders');if(!h)return'';const m=(h.value||'').match(/^content-type:\s*(\S.*?)(?:\s*;|\s*$)/im);return m?m[1].trim():'';}
+// repRefreshHL repaints the colored overlays behind the request headers/body
+// textareas from their current values. A trailing newline mirrors the textarea's
+// reserved last line so the two stay vertically aligned.
+export function repRefreshHL(){
+  const h=$('#repHeadersHL'),b=$('#repBodyHL');
+  if(h)h.innerHTML=highlightHeaderLines(($('#repHeaders').value)||'')+'\n';
+  if(b)b.innerHTML=highlightBodyText(($('#repBody').value)||'',repReqContentType())+'\n';
+}
 export function repCur(){return repTabs.find(t=>t.tid===repActive)||null;}
 export function repTitle(t){if(!t.url)return 'new tab';try{const u=new URL(t.url);return t.method+' '+u.host+u.pathname;}catch(e){return t.method+' '+t.url.slice(0,46);}}
 export function repTabEndpoint(t){if(!t||!t.url)return null;try{const u=new URL(t.url);return u.host+u.pathname;}catch(e){return null;}}
@@ -56,6 +67,7 @@ export function repLoadEditor(){
   const rv=t.reqView||'raw';
   repSyncReqSeg(rv);
   $('#repBody').value=repBodyForDisplay(t.body,rv);
+  repRefreshHL();
   $('#repResSeg').querySelectorAll('button').forEach(x=>{const on=x.dataset.view===(t.resView||'pretty');x.classList.toggle('on',on);x.setAttribute('aria-pressed',on?'true':'false');});
   if(t.resId){$('#repStatus').textContent=t.status||'';$('#repStatus').style.color=t.color||'var(--fg3)';renderRepResponse();}
   else{$('#repStatus').textContent='';$('#repResView').innerHTML='<span style="color:var(--fg3)">Send a request to see the response.</span>';}
@@ -67,6 +79,7 @@ export async function repSend(){
   t.body=compactBody(t.body);
   if((t.reqView||'raw')==='pretty')$('#repBody').value=repBodyForDisplay(t.body,'pretty');
   else $('#repBody').value=t.body;
+  repRefreshHL();
   $('#repSend').textContent='Sending…';$('#repSend').disabled=true;
   $('#repStatus').textContent='sending…';$('#repStatus').style.color='var(--fg3)';
   $('#repResView').innerHTML='<span class="blink" style="color:var(--fg3)">sending…</span>';
@@ -136,13 +149,13 @@ export async function sendToRepeater(f){
     toast('loaded #'+f.id+' into Repeater');
   }catch(e){toast(e.message);}
 }
-export function repPersist(){try{localStorage.setItem('rep.tabs',JSON.stringify({seq:repSeq,active:repActive,tabs:repTabs.map(t=>({tid:t.tid,method:t.method,url:t.url,headers:t.headers,body:t.body,reqView:t.reqView||'raw',resView:t.resView}))}));}catch(e){}}
+export function repPersist(){try{localStorage.setItem('rep.tabs',JSON.stringify({seq:repSeq,active:repActive,tabs:repTabs.map(t=>({tid:t.tid,method:t.method,url:t.url,headers:t.headers,body:t.body,reqView:t.reqView||'pretty',resView:t.resView}))}));}catch(e){}}
 export let repPersistT=null;export function repPersistDebounced(){clearTimeout(repPersistT);repPersistT=setTimeout(repPersist,400);}
 export function repInit(){
   let ok=false;
   try{const d=JSON.parse(localStorage.getItem('rep.tabs')||'null');
     if(d&&d.tabs&&d.tabs.length){
-      repTabs=d.tabs.map(t=>({tid:t.tid,method:t.method||'GET',url:t.url||'',headers:t.headers||'',body:t.body||'',reqView:t.reqView||'raw',resView:t.resView||'pretty',resId:null,status:'',color:'',title:''}));
+      repTabs=d.tabs.map(t=>({tid:t.tid,method:t.method||'GET',url:t.url||'',headers:t.headers||'',body:t.body||'',reqView:t.reqView||'pretty',resView:t.resView||'pretty',resId:null,status:'',color:'',title:''}));
       repTabs.forEach(t=>t.title=repTitle(t));
       repActive=(d.active&&repTabs.find(x=>x.tid===d.active))?d.active:repTabs[0].tid;
       {const fin=repTabs.map(t=>t.tid).filter(Number.isFinite);repSeq=Math.max(d.seq||0,(fin.length?Math.max(...fin):0)+1);}ok=true;
@@ -161,7 +174,12 @@ export function repInit(){
     }
     repPersistDebounced();
   });});
-  ['#repHeaders','#repBody'].forEach(s=>{const el=$(s);if(el)el.addEventListener('input',()=>{repSaveEditor();repPersistDebounced();});});
+  ['#repHeaders','#repBody'].forEach(s=>{const el=$(s);if(el)el.addEventListener('input',()=>{repSaveEditor();repRefreshHL();repPersistDebounced();});});
+  // Keep each colored overlay scrolled in lockstep with its textarea.
+  [['#repHeaders','#repHeadersHL'],['#repBody','#repBodyHL']].forEach(([ta,hl])=>{
+    const t=$(ta),p=$(hl);if(t&&p)t.addEventListener('scroll',()=>{p.scrollTop=t.scrollTop;p.scrollLeft=t.scrollLeft;});
+  });
+  repRefreshHL();
   repWireEncodeCtx();
 }
 async function repEncodeSel(el,op){
@@ -172,7 +190,7 @@ async function repEncodeSel(el,op){
     if(r.error){toast(r.error);return;}
     el.value=el.value.slice(0,a)+r.output+el.value.slice(b);
     el.selectionStart=a;el.selectionEnd=a+r.output.length;
-    repSaveEditor();repPersistDebounced();
+    repSaveEditor();repRefreshHL();repPersistDebounced();
   }catch(e){toast(e.message);}
 }
 function repShowEncodeCtx(e,el){
@@ -200,6 +218,7 @@ $('#repReqSeg')&&$('#repReqSeg').querySelectorAll('button').forEach(b=>b.onclick
   t.reqView=next;
   repSyncReqSeg(next);
   $('#repBody').value=repBodyForDisplay(t.body,next);
+  repRefreshHL();
   repPersistDebounced();
 });
 $('#repResSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{const t=repCur();if(t)t.resView=b.dataset.view;$('#repResSeg').querySelectorAll('button').forEach(x=>{x.classList.toggle('on',x===b);x.setAttribute('aria-pressed',x===b?'true':'false');});renderRepResponse();});

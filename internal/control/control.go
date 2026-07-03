@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"mime"
 	"net/http"
 	"net/url"
@@ -80,6 +81,11 @@ type Hub struct {
 	SetSuppressBrowserTelemetry func(bool)
 	// SetInvisibleProxy toggles transparent/invisible proxy mode. Set by cmd.
 	SetInvisibleProxy func(bool)
+	// SetTLSBypassHosts replaces the list of hosts tunneled raw (no MITM). Set by cmd.
+	SetTLSBypassHosts func([]string)
+	// SetAutoBypassOnPinFailure toggles auto-adding a host to the bypass list on
+	// an MITM handshake failure (SSL pinning). Set by cmd.
+	SetAutoBypassOnPinFailure func(bool)
 
 	// ChecksDir holds user-authored Starlark scanner checks (global, shared across
 	// projects — typically ~/.interceptor/checks). Set by cmd.
@@ -257,8 +263,29 @@ type settingsJSON struct {
 	CaptureScopeOnly         bool   `json:"captureScopeOnly"`
 	SuppressBrowserTelemetry bool   `json:"suppressBrowserTelemetry"`
 	InvisibleProxy           bool   `json:"invisibleProxy"`
+	TLSBypassHosts           []string `json:"tlsBypassHosts"`
+	AutoBypassOnPinFailure   bool     `json:"autoBypassOnPinFailure"`
 	DeviceProxy              string `json:"deviceProxy,omitempty"`
 	DeviceProxyMode          string `json:"deviceProxyMode,omitempty"`
+}
+
+// tlsBypassSettingKey stores the newline-separated host patterns that bypass MITM.
+const tlsBypassSettingKey = "proxy.tlsBypassHosts"
+
+// parseHostList splits a stored/edited host-list blob (newline- or comma-
+// separated) into trimmed, non-empty, lower-cased, de-duplicated patterns.
+func parseHostList(s string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, part := range strings.FieldsFunc(s, func(r rune) bool { return r == '\n' || r == '\r' || r == ',' }) {
+		h := strings.ToLower(strings.TrimSpace(part))
+		if h == "" || seen[h] {
+			continue
+		}
+		seen[h] = true
+		out = append(out, h)
+	}
+	return out
 }
 
 func toFlowJSON(f *store.Flow) flowJSON {
@@ -1223,6 +1250,8 @@ func (h *settingsAPI) getSettings(w http.ResponseWriter, r *http.Request) {
 	// Default to true when the key has never been written (first run).
 	suppressTelemetryOn := !stOK || suppressTelemetry == "1"
 	invisibleProxy, _, _ := h.st.GetSetting("proxy.invisibleProxy")
+	tlsBypassRaw, _, _ := h.st.GetSetting(tlsBypassSettingKey)
+	autoBypass, _, _ := h.st.GetSetting("proxy.autoBypassOnPinFailure")
 	aiDisabled, _, _ := h.st.GetSetting("ai.disabled")
 	proxyAddrs := h.currentProxyAddrs()
 	deviceEP := h.resolveDeviceEndpoint()
@@ -1242,7 +1271,19 @@ func (h *settingsAPI) getSettings(w http.ResponseWriter, r *http.Request) {
 		CaptureScopeOnly:         scopeOnly == "1",
 		SuppressBrowserTelemetry: suppressTelemetryOn,
 		InvisibleProxy:           invisibleProxy == "1",
+		TLSBypassHosts:           parseHostList(tlsBypassRaw),
+		AutoBypassOnPinFailure:   autoBypass == "1",
 	})
+}
+
+// NotifyBypassAdded persists an updated TLS-bypass host list (produced when the
+// proxy auto-bypasses a pinned host) and pushes a settings refresh to the UI.
+// Wired as the proxy's OnBypassAdded callback; safe to call from proxy goroutines.
+func (h *Hub) NotifyBypassAdded(hosts []string) {
+	if err := h.st.SetSetting(tlsBypassSettingKey, strings.Join(hosts, "\n")); err != nil {
+		log.Printf("control: persist auto-bypass host list: %v", err)
+	}
+	h.broadcast(map[string]any{"type": "settings.update"})
 }
 
 func (h *Hub) persistSetting(w http.ResponseWriter, key, val string) bool {
@@ -1265,8 +1306,10 @@ func (h *settingsAPI) putSettings(w http.ResponseWriter, r *http.Request) {
 		AiDisabled               *bool   `json:"aiDisabled"`
 		OobEnabled               *bool   `json:"oobEnabled"`
 		CaptureScopeOnly         *bool   `json:"captureScopeOnly"`
-		SuppressBrowserTelemetry *bool   `json:"suppressBrowserTelemetry"`
-		InvisibleProxy           *bool   `json:"invisibleProxy"`
+		SuppressBrowserTelemetry *bool     `json:"suppressBrowserTelemetry"`
+		InvisibleProxy           *bool     `json:"invisibleProxy"`
+		TLSBypassHosts           *[]string `json:"tlsBypassHosts"`
+		AutoBypassOnPinFailure   *bool     `json:"autoBypassOnPinFailure"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		httpErr(w, http.StatusBadRequest, "bad json")
@@ -1373,6 +1416,29 @@ func (h *settingsAPI) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if h.SetInvisibleProxy != nil {
 			h.SetInvisibleProxy(*in.InvisibleProxy)
+		}
+		h.broadcast(map[string]any{"type": "settings.update"})
+	}
+	if in.TLSBypassHosts != nil {
+		hosts := parseHostList(strings.Join(*in.TLSBypassHosts, "\n"))
+		if !h.persistSetting(w, tlsBypassSettingKey, strings.Join(hosts, "\n")) {
+			return
+		}
+		if h.SetTLSBypassHosts != nil {
+			h.SetTLSBypassHosts(hosts)
+		}
+		h.broadcast(map[string]any{"type": "settings.update"})
+	}
+	if in.AutoBypassOnPinFailure != nil {
+		v := "0"
+		if *in.AutoBypassOnPinFailure {
+			v = "1"
+		}
+		if !h.persistSetting(w, "proxy.autoBypassOnPinFailure", v) {
+			return
+		}
+		if h.SetAutoBypassOnPinFailure != nil {
+			h.SetAutoBypassOnPinFailure(*in.AutoBypassOnPinFailure)
 		}
 		h.broadcast(map[string]any{"type": "settings.update"})
 	}

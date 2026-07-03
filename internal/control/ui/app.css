@@ -300,9 +300,20 @@ textarea.raw{width:100%;height:200px;resize:vertical;background:var(--bg);color:
 .rep-sub{flex:none;padding:7px 10px 2px;font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3)}
 .rep-sub.row{display:flex;align-items:center;gap:8px;padding:7px 10px 4px}
 .rep-req-seg button{padding:2px 8px;font-size:10px}
-.rep-req #repHeaders{flex:none;height:32%;min-height:64px}
-.rep-req #repBody{flex:1}
+.rep-req .rep-field-headers{flex:none;height:32%;min-height:64px}
+.rep-req .rep-field-body{flex:1}
 .rep-req .rep-edit{border-top:none}
+/* editable request panes: a colored <pre> overlay behind a transparent-text
+   textarea (the textarea keeps the caret + editing; the pre shows the colors).
+   Both boxes must share identical font/padding/wrapping so the text lines up. */
+.rep-field{position:relative;min-height:0}
+.rep-field>pre.rep-hl,.rep-field>textarea.rep-edit{position:absolute;inset:0;width:100%;height:100%;margin:0;box-sizing:border-box;
+  font-family:var(--mono);font-size:11.5px;line-height:1.7;padding:8px 12px;border:none;
+  white-space:pre-wrap;word-break:break-word;overflow-wrap:break-word;scrollbar-gutter:stable}
+.rep-field>pre.rep-hl{overflow:hidden;pointer-events:none;background:var(--bg);color:var(--fg);z-index:0}
+.rep-field>textarea.rep-edit{overflow:auto;resize:none;background:transparent;color:transparent;caret-color:var(--fg);z-index:1}
+.rep-field>textarea.rep-edit::placeholder{color:var(--fg3)}
+.rep-field>textarea.rep-edit::selection{background:var(--accentDim);color:transparent}
 /* intruder workspace */
 .intr-bar{flex:none;display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--bg1)}
 .intr-sep{width:1px;align-self:stretch;background:var(--line2);margin:3px 2px;flex:none}

@@ -60,6 +60,7 @@ const (
 	FlagAI                             // request originated from the AI assistant (over MCP)
 	FlagAuthz                          // a request replayed by the authorization (access-control) tester
 	FlagDiscovery                      // an endpoint found by the content-discovery (forced-browse) engine
+	FlagTLSBypassed                    // CONNECT tunneled raw (no MITM) — host on the TLS-bypass list
 )
 
 // flowColumns is the canonical SELECT column order; scanFlow consumes it.

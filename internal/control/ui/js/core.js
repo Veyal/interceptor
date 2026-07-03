@@ -364,6 +364,20 @@ export function highlightHTTP(text,pretty,mime){
   if(sep>=0) html+='\n\n'+highlightBody(body,pretty,mime||contentTypeFromRaw(text));
   return html;
 }
+// highlightHeaderLines colorizes bare "Name: value" header lines (no HTTP start
+// line) for the editable Repeater request-headers overlay. Reuses the read-only
+// header token classes so the editor matches the response pane.
+export function highlightHeaderLines(text){
+  return String(text).split('\n').map(ln=>{
+    const c=ln.indexOf(':');
+    if(c<=0)return esc(ln);
+    return '<span class="hl-hname">'+esc(ln.slice(0,c))+'</span>:<span class="hl-hval">'+esc(ln.slice(c+1))+'</span>';
+  }).join('\n');
+}
+// highlightBodyText colorizes a body by sniffed kind (JSON / markup / CSS),
+// falling back to escaped plain text; a public wrapper over highlightBody with
+// the PRETTY_MAX size guard applied (large bodies render escaped, not tokenized).
+export function highlightBodyText(body,mime){return highlightBody(String(body),true,mime);}
 // Color a (pretty-printed) JSON body: keys, string / number / literal values.
 // Escapes first, then tokenizes the escaped text, so the result is safe for
 // innerHTML even though the body is arbitrary captured bytes.

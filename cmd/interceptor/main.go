@@ -217,6 +217,17 @@ func run() error {
 	if v, ok, _ := st.GetSetting("proxy.invisibleProxy"); ok && v == "1" {
 		prx.SetInvisibleProxy(true)
 	}
+	// TLS-bypass list: CONNECTs to these hosts are tunneled raw (no MITM) so a
+	// pinned-but-unimportant domain keeps working while others stay intercepted.
+	hub.SetTLSBypassHosts = prx.SetTLSBypassHosts
+	hub.SetAutoBypassOnPinFailure = prx.SetAutoBypassOnPinFailure
+	prx.OnBypassAdded = hub.NotifyBypassAdded // persist + refresh UI on auto-bypass
+	if v, ok, _ := st.GetSetting("proxy.tlsBypassHosts"); ok && v != "" {
+		prx.SetTLSBypassHosts(strings.FieldsFunc(v, func(r rune) bool { return r == '\n' || r == '\r' || r == ',' }))
+	}
+	if v, ok, _ := st.GetSetting("proxy.autoBypassOnPinFailure"); ok && v == "1" {
+		prx.SetAutoBypassOnPinFailure(true)
+	}
 	pm.handler = prx
 	cm.handler = hub.Handler()
 	hub.SyncSelfPorts = func() {
