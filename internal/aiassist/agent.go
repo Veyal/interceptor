@@ -91,7 +91,7 @@ func (c *Client) CompleteAgentTurn(ctx context.Context, system string, messages 
 func (c *Client) completeAnthropicAgentTurn(ctx context.Context, system string, messages []AgentMessage, tools []Tool) (*AgentTurn, error) {
 	body, _ := json.Marshal(map[string]any{
 		"model":      c.model,
-		"max_tokens": maxTokens,
+		"max_tokens": agentMaxTokens,
 		"system":     system,
 		"messages":   agentMessageMaps(messages),
 		"tools":      anthropicTools(tools),
@@ -117,7 +117,7 @@ func (c *Client) CompleteStreamAgentMessages(ctx context.Context, system string,
 	case c.usesAnthropicWire():
 		body, _ := json.Marshal(map[string]any{
 			"model":      c.model,
-			"max_tokens": maxTokens,
+			"max_tokens": agentMaxTokens,
 			"stream":     true,
 			"system":     system,
 			"messages":   agentMessageMaps(messages),
@@ -147,7 +147,7 @@ func (c *Client) completeOpenAIAgentTurn(ctx context.Context, system string, mes
 	msgs = append(msgs, openAIAgentMessages(messages)...)
 	payload := map[string]any{
 		"model":      c.model,
-		"max_tokens": maxTokens,
+		"max_tokens": agentMaxTokens,
 		"messages":   msgs,
 	}
 	if len(tools) > 0 {

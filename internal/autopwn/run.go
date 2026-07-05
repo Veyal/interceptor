@@ -163,7 +163,10 @@ func (e *Engine) planPhase(ctx context.Context, runID int64, opts StartOpts) (Pl
 	if err != nil || tc == nil {
 		return Plan{}, fmt.Errorf("autopwn: build planner: %w", errOrNil(err))
 	}
-	task := buildPlanTask(opts.TargetHint)
+	// Gather recon deterministically over the tool bus and inject it into the task,
+	// so a model that will not (or cannot) call tools still plans from real context.
+	digest := e.reconDigest(ctx)
+	task := buildPlanTask(opts.TargetHint, digest)
 	res, err := aiagent.Run(ctx, tc, e.executor(), planSystem, task, planTools, e.planBudget(opts), e.d.Clock)
 	if err != nil {
 		e.addTokens(res.Tokens)
@@ -171,6 +174,17 @@ func (e *Engine) planPhase(ctx context.Context, runID int64, opts StartOpts) (Pl
 	}
 	e.addTokens(res.Tokens)
 	plan := parsePlan(res.FinalText)
+	if len(plan.Steps) == 0 {
+		// A zero-step plan means nothing will be executed or verified. Surface it
+		// loudly (not a silent "done"): usually the model returned no structured
+		// steps, or there is no in-scope history to plan over.
+		e.emit(store.Activity{
+			Tool: "autopwn", OK: false,
+			Summary: "planning produced 0 steps — no in-scope history, or the model returned no structured plan",
+			Intent:  "planning diagnostic",
+		}, map[string]any{"type": updateType, "runId": runID, "phase": StatusPlanning, "steps": 0})
+		return plan, nil
+	}
 	e.emit(store.Activity{
 		Tool: "autopwn", Summary: fmt.Sprintf("plan: %d step(s)", len(plan.Steps)), OK: true,
 		Intent: "recon: history → prioritized attack plan",

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Autopilot produced empty plans on providers that don't emit tool calls.** The planning phase relied entirely on the model calling read-only recon tools (`list_flows`, `host_stats`, …) to discover captured history. Many OpenAI-compatible endpoints (and some models — e.g. Grok via a reseller proxy) never emit `tool_calls`; they return prose instead, even with `tool_choice:"required"`. The planning agent therefore called nothing, hallucinated "no in-scope history available", and returned a **zero-step plan**, so every run finished immediately having done nothing. The plan phase now builds a **deterministic recon digest** (scope rules + per-host traffic + a bounded endpoint sample) directly over the in-process tool bus and injects it into the planning prompt, so planning no longer depends on the model choosing to call tools — tool-capable models still get the tools to dig deeper. A zero-step plan now also emits a loud Activity diagnostic instead of silently finishing. Verified end-to-end against a live project: the model now produces a populated multi-step plan with zero tool calls. (`internal/autopwn/recon.go`, `planPhase`.)
+- **Agent-mode replies were capped at the terse prose limit (768 tokens).** The tool-calling planning/verification turns and the final synthesis reused the assistant's short-answer `max_tokens`, which could truncate a multi-step JSON plan or verdict mid-object and fail the caller's parse. Agent turns now use a dedicated, larger ceiling (`agentMaxTokens`). (`internal/aiassist`.)
+
 ## [0.28.0] - 2026-07-05
 
 ### Added

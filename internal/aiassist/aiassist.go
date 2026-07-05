@@ -44,6 +44,11 @@ const (
 	// maxTokens caps the reply length. Kept modest so answers stay fast and tight —
 	// the assistant is told to be brief, and this is the hard ceiling.
 	maxTokens = 768
+	// agentMaxTokens is the ceiling for agent-mode turns (tool-calling planning and
+	// verification, plus the final synthesis). These must emit structured JSON —
+	// e.g. a multi-step attack plan — that easily exceeds the terse prose cap, so a
+	// too-small ceiling truncates the JSON mid-object and the caller's parse fails.
+	agentMaxTokens = 4096
 )
 
 // Message is one turn in a multi-message completion (user or assistant).

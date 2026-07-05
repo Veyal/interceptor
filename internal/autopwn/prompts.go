@@ -38,11 +38,17 @@ var planTools = []aiagent.ToolSpec{
 	{Name: "diff_flows", Description: "Diff two captured flows.", Schema: objSchema},
 }
 
-// buildPlanTask renders the planning task, weaving in the operator's target hint.
-func buildPlanTask(hint string) string {
+// buildPlanTask renders the planning task, weaving in a deterministic recon
+// digest (so planning does not depend on the model calling tools) and the
+// operator's target hint.
+func buildPlanTask(hint, digest string) string {
 	var b strings.Builder
-	b.WriteString("Read the captured in-scope history and produce a prioritized attack plan ")
-	b.WriteString("(targets x vuln classes x tools). Reply with the strict JSON plan object.")
+	if strings.TrimSpace(digest) != "" {
+		b.WriteString(digest)
+		b.WriteString("\n")
+	}
+	b.WriteString("Using the recon context above, produce a prioritized attack plan ")
+	b.WriteString("(targets x vuln classes x tools). Reply with ONLY the strict JSON plan object.")
 	if strings.TrimSpace(hint) != "" {
 		fmt.Fprintf(&b, "\nOperator focus hint: %s", strings.TrimSpace(hint))
 	}
