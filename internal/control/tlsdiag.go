@@ -40,6 +40,13 @@ var tlsBypassHints = []string{
 	"Rooted device + Magisk + LSPosed modules, or a dedicated pentest device image",
 }
 
+// buildTLSDiagnosis stays on authzAPI (not metaAPI) purely so it shares a receiver
+// with buildReadiness in readiness.go, which calls h.buildTLSDiagnosis("") directly
+// to populate the "tls_intercept" checklist row. buildTLSDiagnosis itself has no
+// authz-specific dependency (it only reads h.st flow/TLS-failure data) — if
+// readiness.go's authzIdentities() coupling is ever removed, this can move to
+// metaAPI alongside it. See readiness.go for the fuller rationale on why
+// /api/readiness and /api/tls-diagnosis are colocated with authz for now.
 func (h *authzAPI) buildTLSDiagnosis(hostFilter string) tlsDiagnosisReport {
 	hostFilter = strings.TrimSpace(hostFilter)
 	rep := tlsDiagnosisReport{Verdict: "ok", CanBypass: false, BypassHints: tlsBypassHints}

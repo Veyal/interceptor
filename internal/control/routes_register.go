@@ -198,6 +198,15 @@ func (h *Hub) registerOobRoutes(oob *oobAPI) {
 	h.mux.HandleFunc("DELETE /api/oob/interactions", oob.oobClear)
 }
 
+// registerAuthzRoutes also carries /api/readiness and /api/tls-diagnosis even
+// though neither is about role-based authz replay: buildReadiness (readiness.go)
+// calls h.authzIdentities() to populate its "auth_identities" check, and
+// buildTLSDiagnosis (tlsdiag.go) is colocated on the same authzAPI receiver only
+// because buildReadiness calls it directly. See the doc comments on
+// buildReadiness/buildTLSDiagnosis for the full rationale — moving them to a
+// neutral receiver (e.g. metaAPI) would require either duplicating
+// authzIdentities() or introducing a cross-group call, which isn't worth it for a
+// cosmetic regroup.
 func (h *Hub) registerAuthzRoutes(az *authzAPI) {
 	h.mux.HandleFunc("GET /api/authz", az.getAuthz)
 	h.mux.HandleFunc("POST /api/authz", az.setAuthz)

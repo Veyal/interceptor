@@ -21,6 +21,13 @@ type readinessReport struct {
 	Blockers []string         `json:"blockers"`
 }
 
+// buildReadiness stays on authzAPI (not metaAPI, despite /api/readiness being a
+// general pre-flight endpoint): it calls h.authzIdentities() to populate the
+// "auth_identities" checklist row, and authzIdentities is core authz-domain logic
+// (also used by getAuthz/authzRun/authzPromoteFromFlow in authz.go) — pulling it
+// out onto a neutral receiver would mean either duplicating that logic or adding a
+// cross-group call, which is more invasive than the cosmetic grouping fix is worth.
+// The route itself is still registered in registerAuthzRoutes for the same reason.
 func (h *authzAPI) buildReadiness() readinessReport {
 	var rep readinessReport
 	add := func(id string, ok bool, detail, fix string) {

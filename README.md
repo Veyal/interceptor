@@ -63,7 +63,7 @@ tester's direction and **entirely on the local machine**.
 - **BYO-key AI assist** — explain a request, suggest payloads, or summarize findings via your own
   **Anthropic** or **OpenRouter** key (off until you set one; the exchange is sent only on request).
 - **API & MCP** — a REST control API + SSE event stream and a full **Model Context Protocol** server
-  (49 tools, stdio **and** Streamable-HTTP) so an agent or script drives the same core as the UI.
+  (84 tools, stdio **and** Streamable-HTTP) so an agent or script drives the same core as the UI.
 
 ## Install
 
@@ -172,15 +172,15 @@ the same capabilities as the UI. Run the app, then connect your MCP client one o
 **Streamable-HTTP** (hosted/remote agents) — `POST` JSON-RPC to `http://127.0.0.1:9966/mcp`
 (stateless; no subprocess needed).
 
-Both expose the same **49 tools** — reading flows (`list_flows`, `get_flow`, `analyze_flow`,
+Both expose the same **84 tools** — reading flows (`list_flows`, `get_flow`, `analyze_flow`,
 `flow_as_curl`), replaying/fuzzing (`send_request`, `start_intruder`, `ws_send`), scanning
 (`run_scanner`, `scan_report`), intercept/rules/scope control, and `set_session` — with bounded
-results so large bodies don't blow the agent's context. The UI's **API → MCP** tab shows a
-copy-paste config and the live tool list.
+results so large bodies don't blow the agent's context. The **Settings → API & MCP** section shows
+a copy-paste config and the live tool list.
 
 ## Control API
 
-The full REST surface is documented at runtime: `GET /api/reference` (or the **API → REST** tab).
+The full REST surface is documented at runtime: `GET /api/reference` (or the **Settings → API & MCP** section).
 Live updates stream over Server-Sent Events at `GET /api/events`. Highlights: `/api/flows`,
 `/api/repeater/send`, `/api/intruder/start`, `/api/scanner/run`, `/api/scope`, `/api/session`,
 `/api/ws/send`, `/api/export/{har,project}`, `/api/settings`.
