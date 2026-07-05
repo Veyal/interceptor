@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Autonomous AI pentester ("Autopilot") design.** Added [docs/AUTONOMOUS-PENTEST.md](docs/AUTONOMOUS-PENTEST.md), the architecture + phased build plan for an AI agent that reads captured history, autonomously runs active security testing using Interceptor's own tools (in-process access to all MCP tools), tracks every step in the Activity feed with every request visible in History, and files **only machine-verified true-positive findings** via a 4-gate verifier (differential reproduction → adversarial verifier agent → out-of-band proof for blind classes → human confirm for Critical/High). Grounded in a two-pass read-only audit of the existing AI-agent, MCP, active-scan, findings, OOB, and sender machinery. Implementation lands over Phases 0-4 on `feat/autonomous-pentest`.
 - **Ask AI on findings.** An "Ask AI" button has been added to the Findings view. When clicked, the AI is pre-loaded with the finding's context (title, severity, description blocks, impact) and any linked PoC flows, allowing seamless AI analysis of vulnerabilities.
 - **Settings search.** A search box atop the Settings nav filters sections by label or body text, so options are discoverable without knowing which group they live in (Esc clears).
 - **Danger zone.** Destructive/irreversible settings (Data & Retention deletes, purge, GC) now render in a red-bordered card, visually separated from ordinary configuration.
