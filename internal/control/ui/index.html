@@ -480,15 +480,24 @@ Content-Type: application/json
       <nav class="settings-nav" id="setNav">
         <input id="setSearch" type="search" class="settings-search" placeholder="Search settings…" aria-label="Search settings" spellcheck="false" autocomplete="off">
         <div id="setNavEmpty" class="settings-nav-empty" hidden>No matching settings</div>
-        <button class="on" data-sec="proxy">Proxy &amp; network</button>
-        <button data-sec="tls">TLS / CA</button>
-        <button data-sec="devices">Mobile devices</button>
-        <button data-sec="scope">Target scope</button>
-        <button data-sec="ai">AI assist</button>
-        <button data-sec="scanner">Scanner</button>
-        <button data-sec="session">Session / auth</button>
-        <button data-sec="project">Project &amp; data</button>
-        <button data-sec="api">API &amp; MCP</button>
+        <div class="settings-nav-group" data-nav-group="network">
+          <div class="settings-nav-group-label">Network</div>
+          <button class="on" data-sec="proxy">Proxy &amp; network</button>
+          <button data-sec="tls">TLS / CA</button>
+          <button data-sec="devices">Mobile devices</button>
+        </div>
+        <div class="settings-nav-group" data-nav-group="testing">
+          <div class="settings-nav-group-label">Testing</div>
+          <button data-sec="scope">Target scope</button>
+          <button data-sec="scanner">Scanner</button>
+          <button data-sec="session">Session / auth</button>
+        </div>
+        <div class="settings-nav-group" data-nav-group="system">
+          <div class="settings-nav-group-label">System</div>
+          <button data-sec="ai">AI assist</button>
+          <button data-sec="project">Project &amp; data</button>
+          <button data-sec="api">API &amp; MCP</button>
+        </div>
       </nav>
       <div class="settings-body">
         <section class="set-sec" data-sec="proxy">
@@ -530,22 +539,22 @@ Content-Type: application/json
           <div class="section" id="sysProxySection">
             <h3>SYSTEM PROXY</h3>
             <p class="hint" style="margin-bottom:10px">Route this machine's traffic through Interceptor (macOS only).</p>
-            <div class="row" style="gap:12px"><button class="toggle" id="sysProxyToggle">System proxy is off</button><span id="sysProxyHint" class="hint"></span></div>
+            <div class="row" style="gap:12px"><button class="uisw" id="sysProxyToggle">System proxy is off</button><span id="sysProxyHint" class="hint"></span></div>
           </div>
           <div class="section">
             <h3>CAPTURE POLICY</h3>
             <p class="hint" style="margin-bottom:10px">Store only <b>in-scope</b> traffic. Out-of-scope requests are still forwarded.</p>
-            <div class="row" style="gap:12px"><button class="toggle" id="capScopeToggle">Saving all traffic</button></div>
+            <div class="row" style="gap:12px"><button class="uisw" id="capScopeToggle">Saving all traffic</button></div>
           </div>
           <div class="section">
             <h3>BROWSER TELEMETRY</h3>
             <p class="hint" style="margin-bottom:10px">Suppresses Safe Browsing, update pings, crash reports, and captive-portal probes from capture.</p>
-            <div class="row" style="gap:12px"><button class="toggle on" id="suppressTelemetryToggle">Suppressing</button></div>
+            <div class="row" style="gap:12px"><button class="uisw on" id="suppressTelemetryToggle">Suppressing</button></div>
           </div>
           <div class="section">
             <h3>INVISIBLE PROXY</h3>
             <p class="hint" style="margin-bottom:10px">Accept traffic from clients that aren't proxy-configured (e.g. redirected via iptables/pf, DNS spoofing, or port forwarding). Origin-form requests are forwarded to their <b>Host</b> header. <b>Off</b> by default.</p>
-            <div class="row" style="gap:12px"><button class="toggle" id="invisibleProxyToggle">Invisible proxy is off</button></div>
+            <div class="row" style="gap:12px"><button class="uisw" id="invisibleProxyToggle">Invisible proxy is off</button></div>
           </div>
         </section>
         <section class="set-sec" data-sec="tls" hidden>
@@ -557,9 +566,66 @@ Content-Type: application/json
           <div class="section" id="tlsBypassSection">
             <h3>TLS PASSTHROUGH · SSL PINNING</h3>
             <p class="hint" style="margin-bottom:10px">Domains listed here are tunneled straight through <b>without interception</b>, so pinned apps keep working while you focus on the domains you <i>can</i> intercept. One host per line — exact (<code>api.example.com</code>) or wildcard (<code>*.example.com</code>).</p>
-            <div class="row" style="gap:12px;margin-bottom:10px"><button class="toggle" id="autoBypassToggle">Auto-bypass on pinning failure is off</button><span class="hint">Adds a domain here automatically the first time its TLS handshake fails (pinning).</span></div>
+            <div class="row" style="gap:12px;margin-bottom:10px"><button class="uisw" id="autoBypassToggle">Auto-bypass on pinning failure is off</button><span class="hint">Adds a domain here automatically the first time its TLS handshake fails (pinning).</span></div>
             <textarea id="tlsBypassList" spellcheck="false" placeholder="api.pinned-app.com&#10;*.analytics.example.com" style="width:100%;min-height:96px;font-family:var(--mono);font-size:11.5px;line-height:1.6;padding:8px 12px;background:var(--bg3);color:var(--fg);border:1px solid var(--line);border-radius:8px;resize:vertical"></textarea>
             <div class="row" style="gap:8px;margin-top:8px"><button class="btn accent" id="tlsBypassSave">Save passthrough list</button><span class="hint" id="tlsBypassCount"></span></div>
+          </div>
+          <div class="section" id="tlsPinningSection">
+            <h3>SSL PINNING &amp; MISSING TRAFFIC</h3>
+            <p class="hint" style="margin-bottom:10px">Interceptor decrypts HTTPS only when the client trusts the CA. It does <b>not</b> bypass SSL pinning.</p>
+            <div id="tlsDiagPanel" class="tls-diag-panel hint" style="margin-bottom:12px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg2);line-height:1.6">Checking traffic…</div>
+            <label class="hint" style="display:flex;align-items:center;gap:8px;margin-bottom:10px;cursor:pointer"><input type="checkbox" id="tlsShowBanner" checked> Show TLS blocked banner in Proxy History</label>
+            <details class="ca-how" open><summary>Verdicts</summary>
+              <ul style="margin:8px 0 4px;padding-left:20px;color:var(--fg2);line-height:1.7">
+                <li><b style="color:var(--red)">TLS blocked</b> — the app sent CONNECT but rejected the MITM cert (<b>pinning or untrusted CA</b>). Look for red <b>PIN</b> rows in History.</li>
+                <li><b style="color:var(--amber)">No traffic</b> — nothing reached the proxy. Check proxy settings, <code>adb reverse</code>, or whether the app ignores the system proxy.</li>
+                <li><b style="color:var(--amber)">No HTTPS</b> — only cleartext HTTP captured, or HTTPS never went through the proxy.</li>
+                <li><b style="color:var(--accent)">OK</b> — HTTPS interception is working.</li>
+              </ul>
+            </details>
+            <details class="ca-how"><summary>Bypass pinning (on device)</summary>
+              <ul style="margin:8px 0 4px;padding-left:20px;color:var(--fg2);line-height:1.7">
+                <li><b>Frida / objection</b> — runtime hooks for OkHttp, custom TrustManagers, Flutter/Dart HTTP</li>
+                <li><b>Patched APK</b> — repack with <code>network_security_config</code> or smali-patch pinning</li>
+                <li><b>Emulator + system CA</b> — enough for apps that trust system CAs but don't pin</li>
+                <li><b>Root + Magisk / LSPosed</b> — persistent bypass modules</li>
+              </ul>
+            </details>
+          </div>
+          <div class="section">
+            <div style="margin-top:0;display:flex;flex-direction:column;gap:6px">
+              <div style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3)">HOW TO TRUST IT</div>
+              <details class="ca-how"><summary>macOS</summary><ol>
+                <li>Open the downloaded <code>interceptor-ca.crt</code> — Keychain Access opens.</li>
+                <li>Add it to the <b>System</b> (or login) keychain.</li>
+                <li>Double-click the <b>Interceptor</b> CA → expand <b>Trust</b> → set <b>When using this certificate</b> to <b>Always Trust</b>.</li>
+              </ol></details>
+              <details class="ca-how"><summary>Windows</summary><ol>
+                <li>Double-click the <code>.crt</code> → <b>Install Certificate</b>.</li>
+                <li>Store location <b>Current User</b> → <b>Place all certificates in the following store</b>.</li>
+                <li>Choose <b>Trusted Root Certification Authorities</b> → Next → Finish.</li>
+              </ol></details>
+              <details class="ca-how"><summary>Firefox (uses its own store)</summary><ol>
+                <li>Settings → <b>Privacy &amp; Security</b> → <b>Certificates</b> → <b>View Certificates</b>.</li>
+                <li><b>Authorities</b> tab → <b>Import</b> → pick the <code>.crt</code>.</li>
+                <li>Check <b>Trust this CA to identify websites</b> → OK.</li>
+              </ol></details>
+              <details class="ca-how"><summary>iOS</summary><ol>
+                <li>Use the <b>Mobile devices</b> tab (iOS) — <b>Setup all</b> for Simulator, or download the profile for a physical iPhone.</li>
+                <li>Settings → <b>General</b> → <b>VPN &amp; Device Management</b> → install the Interceptor profile.</li>
+                <li>Settings → <b>General</b> → <b>About</b> → <b>Certificate Trust Settings</b> → enable full trust for the Interceptor CA.</li>
+              </ol></details>
+              <details class="ca-how"><summary>Android</summary><ol>
+                <li>If <code>adb</code> is installed, use the <b>Mobile devices</b> tab (Android) for one-click proxy and CA install.</li>
+                <li>Manual: Settings → <b>Security</b> → <b>Encryption &amp; credentials</b> → <b>Install a certificate</b> → <b>CA certificate</b>.</li>
+                <li>Note: user CAs are not trusted by most apps on Android 7+; testing app traffic may need a rooted device or a network-security-config.</li>
+              </ol></details>
+              <details class="ca-how"><summary>Linux (system / CLI)</summary><ol>
+                <li><b>Debian/Ubuntu:</b> copy to <code>/usr/local/share/ca-certificates/interceptor.crt</code> → run <code>sudo update-ca-certificates</code>.</li>
+                <li><b>Fedora/RHEL:</b> copy to <code>/etc/pki/ca-trust/source/anchors/</code> → run <code>sudo update-ca-trust</code>.</li>
+                <li><b>curl/wget one-off:</b> <code>curl --cacert ~/.interceptor/ca/ca.crt -x http://127.0.0.1:8080 https://…</code>. Many tools also honour <code>SSL_CERT_FILE</code>/<code>REQUESTS_CA_BUNDLE</code> pointing at the CA.</li>
+              </ol></details>
+            </div>
           </div>
         </section>
         <section class="set-sec" data-sec="devices" hidden>
@@ -678,64 +744,6 @@ Content-Type: application/json
             <p class="hint" id="iosSshHint"></p>
             <p class="hint" style="margin-top:6px">Requires OpenSSH on the device. Profile includes global HTTP proxy — Interceptor must bind <code>0.0.0.0</code>.</p>
           </div>
-        </section>
-        <section class="set-sec" data-sec="tls" hidden>
-          <div class="section" id="tlsPinningSection">
-            <h3>SSL PINNING &amp; MISSING TRAFFIC</h3>
-            <p class="hint" style="margin-bottom:10px">Interceptor decrypts HTTPS only when the client trusts the CA. It does <b>not</b> bypass SSL pinning.</p>
-            <div id="tlsDiagPanel" class="tls-diag-panel hint" style="margin-bottom:12px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg2);line-height:1.6">Checking traffic…</div>
-            <label class="hint" style="display:flex;align-items:center;gap:8px;margin-bottom:10px;cursor:pointer"><input type="checkbox" id="tlsShowBanner" checked> Show TLS blocked banner in Proxy History</label>
-            <details class="ca-how" open><summary>Verdicts</summary>
-              <ul style="margin:8px 0 4px;padding-left:20px;color:var(--fg2);line-height:1.7">
-                <li><b style="color:var(--red)">TLS blocked</b> — the app sent CONNECT but rejected the MITM cert (<b>pinning or untrusted CA</b>). Look for red <b>PIN</b> rows in History.</li>
-                <li><b style="color:var(--amber)">No traffic</b> — nothing reached the proxy. Check proxy settings, <code>adb reverse</code>, or whether the app ignores the system proxy.</li>
-                <li><b style="color:var(--amber)">No HTTPS</b> — only cleartext HTTP captured, or HTTPS never went through the proxy.</li>
-                <li><b style="color:var(--accent)">OK</b> — HTTPS interception is working.</li>
-              </ul>
-            </details>
-            <details class="ca-how"><summary>Bypass pinning (on device)</summary>
-              <ul style="margin:8px 0 4px;padding-left:20px;color:var(--fg2);line-height:1.7">
-                <li><b>Frida / objection</b> — runtime hooks for OkHttp, custom TrustManagers, Flutter/Dart HTTP</li>
-                <li><b>Patched APK</b> — repack with <code>network_security_config</code> or smali-patch pinning</li>
-                <li><b>Emulator + system CA</b> — enough for apps that trust system CAs but don't pin</li>
-                <li><b>Root + Magisk / LSPosed</b> — persistent bypass modules</li>
-              </ul>
-            </details>
-          </div>
-          <div class="section">
-            <div style="margin-top:0;display:flex;flex-direction:column;gap:6px">
-              <div style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3)">HOW TO TRUST IT</div>
-              <details class="ca-how"><summary>macOS</summary><ol>
-                <li>Open the downloaded <code>interceptor-ca.crt</code> — Keychain Access opens.</li>
-                <li>Add it to the <b>System</b> (or login) keychain.</li>
-                <li>Double-click the <b>Interceptor</b> CA → expand <b>Trust</b> → set <b>When using this certificate</b> to <b>Always Trust</b>.</li>
-              </ol></details>
-              <details class="ca-how"><summary>Windows</summary><ol>
-                <li>Double-click the <code>.crt</code> → <b>Install Certificate</b>.</li>
-                <li>Store location <b>Current User</b> → <b>Place all certificates in the following store</b>.</li>
-                <li>Choose <b>Trusted Root Certification Authorities</b> → Next → Finish.</li>
-              </ol></details>
-              <details class="ca-how"><summary>Firefox (uses its own store)</summary><ol>
-                <li>Settings → <b>Privacy &amp; Security</b> → <b>Certificates</b> → <b>View Certificates</b>.</li>
-                <li><b>Authorities</b> tab → <b>Import</b> → pick the <code>.crt</code>.</li>
-                <li>Check <b>Trust this CA to identify websites</b> → OK.</li>
-              </ol></details>
-              <details class="ca-how"><summary>iOS</summary><ol>
-                <li>Use the <b>Mobile devices</b> tab (iOS) — <b>Setup all</b> for Simulator, or download the profile for a physical iPhone.</li>
-                <li>Settings → <b>General</b> → <b>VPN &amp; Device Management</b> → install the Interceptor profile.</li>
-                <li>Settings → <b>General</b> → <b>About</b> → <b>Certificate Trust Settings</b> → enable full trust for the Interceptor CA.</li>
-              </ol></details>
-              <details class="ca-how"><summary>Android</summary><ol>
-                <li>If <code>adb</code> is installed, use the <b>Mobile devices</b> tab (Android) for one-click proxy and CA install.</li>
-                <li>Manual: Settings → <b>Security</b> → <b>Encryption &amp; credentials</b> → <b>Install a certificate</b> → <b>CA certificate</b>.</li>
-                <li>Note: user CAs are not trusted by most apps on Android 7+; testing app traffic may need a rooted device or a network-security-config.</li>
-              </ol></details>
-              <details class="ca-how"><summary>Linux (system / CLI)</summary><ol>
-                <li><b>Debian/Ubuntu:</b> copy to <code>/usr/local/share/ca-certificates/interceptor.crt</code> → run <code>sudo update-ca-certificates</code>.</li>
-                <li><b>Fedora/RHEL:</b> copy to <code>/etc/pki/ca-trust/source/anchors/</code> → run <code>sudo update-ca-trust</code>.</li>
-                <li><b>curl/wget one-off:</b> <code>curl --cacert ~/.interceptor/ca/ca.crt -x http://127.0.0.1:8080 https://…</code>. Many tools also honour <code>SSL_CERT_FILE</code>/<code>REQUESTS_CA_BUNDLE</code> pointing at the CA.</li>
-              </ol></details>
-            </div>
         </section>
         <section class="set-sec" data-sec="scope" hidden>
           <div class="section">

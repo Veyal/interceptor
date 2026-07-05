@@ -277,6 +277,7 @@ $$('#setNav button').forEach(b=>b.onclick=()=>{
     const sec=document.querySelector('.set-sec[data-sec="'+b.dataset.sec+'"]');
     return {btn:b,text:((b.textContent||'')+' '+(sec?sec.textContent||'':'')).toLowerCase()};
   });
+  const groups=$$('#setNav .settings-nav-group');
   box.oninput=()=>{
     const q=box.value.trim().toLowerCase();
     let firstVisible=null,anyHidden=false,visibleCount=0;
@@ -285,6 +286,10 @@ $$('#setNav button').forEach(b=>b.onclick=()=>{
       e.btn.hidden=!hit;
       if(hit){visibleCount++; if(!firstVisible)firstVisible=e.btn;} else anyHidden=true;
     });
+    // Hide a group's eyebrow label too when every button in that group is
+    // filtered out — otherwise an orphaned "NETWORK"-style label with no
+    // buttons under it would linger during a search.
+    groups.forEach(g=>{g.hidden=!g.querySelector('button[data-sec]:not([hidden])');});
     if(empty)empty.hidden=visibleCount>0;
     // If the query hid the active section, jump to the first remaining match.
     if(q&&anyHidden&&firstVisible&&!$$('#setNav button.on').some(b=>!b.hidden))firstVisible.click();
