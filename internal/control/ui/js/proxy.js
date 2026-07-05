@@ -352,7 +352,18 @@ function queueFullWindowRebuild(){
   // same frame collapses to one rebuild (same behavior as before this change).
   if(liveRenderQueued)return;
   liveRenderQueued=true;
-  requestAnimationFrame(()=>{liveRenderQueued=false;renderRows();});
+  const fire=()=>{liveRenderQueued=false;renderRows();};
+  // rAF is suspended outright (not just throttled) for a backgrounded/hidden
+  // tab in every major browser — Interceptor's control UI is routinely left
+  // in a background tab while the operator works in the app under test, so
+  // waiting on rAF here would silently freeze the visible row set (and the
+  // top-of-history rows specifically) while flowStore/state.flows keeps
+  // growing underneath — the flow count updates but new rows never appear
+  // until something else happens to force a render. Fall back to a plain
+  // timer while hidden; the visibilitychange listener below also forces one
+  // definitive catch-up render the moment the tab regains visibility, as a
+  // backstop against any edge case in this queuing.
+  if(document.hidden)setTimeout(fire,0);else requestAnimationFrame(fire);
 }
 // flowRowLiveUpdate is the keyed-reconciliation entry point for a live SSE flow
 // event (new or updated) once it's already been accepted into flowStore/state.flows.
@@ -446,6 +457,12 @@ export function syncInspectorVisibility(){
 // windowing math the hand-rolled version used (start/end/topPad/bottomPad),
 // just centralized in core.js so future panels can share it.
 const flowVirt=createVirtualList({container:$('#rows'),itemHeight:ROW_H,threshold:VIRT_MIN,buffer:VIRT_BUF,onScroll:renderRows});
+// Backstop for queueFullWindowRebuild's hidden-tab fallback above: force one
+// definitive re-render the moment the tab regains visibility, regardless of
+// whether a rebuild was already queued — cheap (renderRows() just rebuilds
+// from the current in-memory state.flows) and guarantees the visible window
+// can never stay stale after a background period.
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&flowVirt.isActive())renderRows();});
 export function renderRows(){
   syncInspectorVisibility();
   const box=$('#rows');
