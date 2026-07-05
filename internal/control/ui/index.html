@@ -437,13 +437,16 @@ Content-Type: application/json
   <div class="panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" data-panel="settings">
     <div class="settings-wrap">
       <nav class="settings-nav" id="setNav">
+        <input id="setSearch" type="search" class="settings-search" placeholder="Search settings…" aria-label="Search settings" spellcheck="false" autocomplete="off">
+        <div id="setNavEmpty" class="settings-nav-empty" hidden>No matching settings</div>
         <button class="on" data-sec="proxy">Proxy &amp; network</button>
-        <button data-sec="project">Project &amp; data</button>
-        <button data-sec="scope">Target scope</button>
-        <button data-sec="session">Session / auth</button>
         <button data-sec="tls">TLS / CA</button>
-        <button data-sec="scanner">Scanner</button>
+        <button data-sec="devices">Mobile devices</button>
+        <button data-sec="scope">Target scope</button>
         <button data-sec="ai">AI assist</button>
+        <button data-sec="scanner">Scanner</button>
+        <button data-sec="session">Session / auth</button>
+        <button data-sec="project">Project &amp; data</button>
         <button data-sec="api">API &amp; MCP</button>
       </nav>
       <div class="settings-body">
@@ -517,6 +520,8 @@ Content-Type: application/json
             <textarea id="tlsBypassList" spellcheck="false" placeholder="api.pinned-app.com&#10;*.analytics.example.com" style="width:100%;min-height:96px;font-family:var(--mono);font-size:11.5px;line-height:1.6;padding:8px 12px;background:var(--bg3);color:var(--fg);border:1px solid var(--line);border-radius:8px;resize:vertical"></textarea>
             <div class="row" style="gap:8px;margin-top:8px"><button class="btn accent" id="tlsBypassSave">Save passthrough list</button><span class="hint" id="tlsBypassCount"></span></div>
           </div>
+        </section>
+        <section class="set-sec" data-sec="devices" hidden>
           <div class="section" id="androidAdbSection" style="display:none">
             <h3>ANDROID (ADB)</h3>
             <p class="hint" style="margin-bottom:10px"><code>adb</code> must be on PATH. <b>USB</b> uses <code>adb reverse</code>. <b>Wi-Fi</b> needs <code>0.0.0.0:PORT</code> binding.</p>
@@ -632,6 +637,8 @@ Content-Type: application/json
             <p class="hint" id="iosSshHint"></p>
             <p class="hint" style="margin-top:6px">Requires OpenSSH on the device. Profile includes global HTTP proxy — Interceptor must bind <code>0.0.0.0</code>.</p>
           </div>
+        </section>
+        <section class="set-sec" data-sec="tls" hidden>
           <div class="section" id="tlsPinningSection">
             <h3>SSL PINNING &amp; MISSING TRAFFIC</h3>
             <p class="hint" style="margin-bottom:10px">Interceptor decrypts HTTPS only when the client trusts the CA. It does <b>not</b> bypass SSL pinning.</p>
@@ -673,12 +680,12 @@ Content-Type: application/json
                 <li>Check <b>Trust this CA to identify websites</b> → OK.</li>
               </ol></details>
               <details class="ca-how"><summary>iOS</summary><ol>
-                <li>Use the <b>iOS (Simulator &amp; Device)</b> section above — <b>Setup all</b> for Simulator, or download the profile for a physical iPhone.</li>
+                <li>Use the <b>Mobile devices</b> tab (iOS) — <b>Setup all</b> for Simulator, or download the profile for a physical iPhone.</li>
                 <li>Settings → <b>General</b> → <b>VPN &amp; Device Management</b> → install the Interceptor profile.</li>
                 <li>Settings → <b>General</b> → <b>About</b> → <b>Certificate Trust Settings</b> → enable full trust for the Interceptor CA.</li>
               </ol></details>
               <details class="ca-how"><summary>Android</summary><ol>
-                <li>If <code>adb</code> is installed, use the <b>Android (ADB)</b> section above for one-click proxy and CA install.</li>
+                <li>If <code>adb</code> is installed, use the <b>Mobile devices</b> tab (Android) for one-click proxy and CA install.</li>
                 <li>Manual: Settings → <b>Security</b> → <b>Encryption &amp; credentials</b> → <b>Install a certificate</b> → <b>CA certificate</b>.</li>
                 <li>Note: user CAs are not trusted by most apps on Android 7+; testing app traffic may need a rooted device or a network-security-config.</li>
               </ol></details>
@@ -715,7 +722,7 @@ Content-Type: application/json
             <p id="aiDisabledHint" class="hint" style="display:none;margin-bottom:12px;color:var(--amber)">AI is off — assist, MCP, Activity, and AI paths in Discover are hidden. Uncheck above to re-enable.</p>
             <div id="aiSettingsFields">
             <p class="hint" style="margin-bottom:10px">Bring-your-own-key. Data goes to your provider only when you ask. <b id="aiKeyState"></b></p>
-            <div class="field"><label>Provider</label><select id="setAiProvider"><option value="anthropic">Anthropic (native API)</option><option value="glm">GLM Coding Plan (Zhipu / z.ai)</option><option value="openrouter">OpenRouter (many models)</option></select></div>
+            <div class="field"><label>Provider</label><select id="setAiProvider"><option value="anthropic">Anthropic (native API)</option><option value="glm">GLM Coding Plan (Zhipu / z.ai)</option><option value="openrouter">OpenRouter (many models)</option><option value="openai">OpenAI (ChatGPT)</option></select></div>
             <div class="field"><label>API key</label><input id="setAiKey" type="password" placeholder="sk-ant-…"></div>
             <div class="field" id="setAiModelField">
               <label>Model <span class="hint" id="setAiModelHint">(optional)</span></label>
@@ -723,6 +730,10 @@ Content-Type: application/json
               <select id="setAiModelSelect" style="display:none;width:100%;background:var(--bg3);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-family:var(--mono);font-size:12px">
                 <option value="">— load models with your API key —</option>
               </select>
+            </div>
+            <div class="field" id="setAiEndpointField">
+              <label>Custom Endpoint URL <span class="hint">(optional)</span></label>
+              <input id="setAiEndpoint" placeholder="e.g. https://api.openai.com/v1/chat/completions">
             </div>
             <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
               <button class="btn" id="loadAiModelsBtn" style="display:none" title="Fetch models from OpenRouter (validates your API key)">↻ Load models</button>
@@ -784,7 +795,7 @@ Content-Type: application/json
             <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;cursor:pointer;color:var(--fg2)"><input type="checkbox" id="macroOn"> Run token macro before each send</label>
             <div class="field" style="max-width:none"><label>Refresh request <span class="hint">(raw HTTP — request line + headers)</span></label><textarea id="macroReq" rows="4" placeholder="GET /login HTTP/1.1&#10;Host: app.example.com&#10;Cookie: session=…" style="font-family:var(--mono);width:100%;resize:vertical"></textarea></div>
             <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:10px">
-              <input id="macroReq" class="btn" style="flex:1;min-width:200px;background:var(--bg3);font-family:var(--mono)" aria-label="Token macro — target URL" placeholder="https://app.example.com" spellcheck="false">
+              <input id="macroTarget" class="btn" style="flex:1;min-width:200px;background:var(--bg3);font-family:var(--mono)" aria-label="Token macro — target URL" placeholder="https://app.example.com" spellcheck="false">
               <input id="macroExtract" class="btn" style="flex:1;min-width:200px;background:var(--bg3);font-family:var(--mono)" aria-label="Token macro — extract regex" placeholder="extract regex, 1 group e.g. name=&quot;csrf&quot; value=&quot;([^&quot;]+)&quot;" spellcheck="false">
             </div>
             <div class="row" style="gap:8px;flex-wrap:wrap">
@@ -845,7 +856,7 @@ Content-Type: application/json
               <input type="file" id="importFullFile" accept=".zip,application/zip" style="display:none">
             </div>
           </div>
-          <div class="section" id="retentionSection">
+          <div class="section danger-zone" id="retentionSection">
             <h3>DATA &amp; RETENTION</h3>
             <p class="hint" style="margin-bottom:12px">Purge noisy hosts to keep the database small. <b style="color:var(--red)">Deletion is permanent.</b></p>
             <div id="retentionTotals" style="margin-bottom:12px;font-size:12px;color:var(--fg2)"></div>

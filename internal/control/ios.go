@@ -28,12 +28,15 @@ func (h *iosAPI) getIOSStatus(w http.ResponseWriter, r *http.Request) {
 	if ep := h.resolveDeviceEndpoint(); ep.SuggestedLAN != "" {
 		rep["lanHost"] = ep.SuggestedLAN
 	}
-	devs, err := ios.AllDevices()
-	if err != nil {
-		httpErr(w, http.StatusBadRequest, err.Error())
-		return
+	// Degrade gracefully: on a host with no iOS tooling (or a transient enumeration
+	// error) AllDevices errors, but the status endpoint should still report
+	// availability flags and endpoints with an empty device list — not fail the
+	// whole page with a 400.
+	if devs, err := ios.AllDevices(); err != nil {
+		rep["deviceError"] = err.Error()
+	} else {
+		rep["devices"] = devs
 	}
-	rep["devices"] = devs
 	writeJSON(w, http.StatusOK, rep)
 }
 

@@ -1,4 +1,5 @@
 import { $, esc, escAttr, state, toast, api, openModal, closeModal, renderMD, wireRowKey, saveFile, uiPrompt, methodColor, statusColor } from './core.js';
+import { openAi } from './ai.js';
 import { flowPopup } from './flowmodal.js';
 
 // Findings tab: the human reviews/curates the project's vulnerability findings.
@@ -398,6 +399,7 @@ function renderFindingDetail() {
           <input id="findCvss" class="find-cvss-inline" type="text" value="${escAttr(f.cvss || '')}" placeholder="e.g. 7.5">
         </div>
         <div class="spacer"></div>
+        <button class="btn accent" id="findAskAi" data-ai-ui title="Ask AI about this finding">✨ Ask AI</button>
         <button class="btn danger xs" id="findDelete">Delete</button>
       </div>
     </header>
@@ -447,6 +449,9 @@ function renderFindingDetail() {
     try { await api('/api/findings/' + f.id, { method: 'DELETE' }); selFinding = null; toast('finding deleted'); loadFindings(); }
     catch (err) { toast(err.message); }
   };
+  $('#findAskAi') && ($('#findAskAi').onclick = () => {
+    openAi({ findingId: f.id });
+  });
   $('#findAddText').onclick = () => {
     bodyBlocks.push({ type: 'text', md: '' });
     setFindDetailView('report');

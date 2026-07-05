@@ -62,12 +62,20 @@ function resetAiChat() {
   renderAiChat();
 }
 
-// openAi opens the assist panel for the given flow(s) (or the current selection),
+// openAi opens the assist panel for the given flow(s), finding, or current selection,
 // ready for a free-text question — no preset mode is run; the user asks.
-export function openAi(ids) {
+export function openAi(opts) {
   if (state.aiDisabled) { toast('AI features are disabled — enable in Settings → AI assist'); return; }
-  state.aiIds = (ids && ids.length) ? ids.slice() : (state.selId != null ? [state.selId] : []);
-  if (!state.aiIds.length) { toast('select a flow first'); return; }
+  state.aiIds = [];
+  state.aiFindingId = null;
+  if (opts && opts.findingId) {
+    state.aiFindingId = opts.findingId;
+  } else if (opts && opts.ids) {
+    state.aiIds = opts.ids.slice();
+  } else if (state.selId != null) {
+    state.aiIds = [state.selId];
+  }
+  if (!state.aiIds.length && !state.aiFindingId) { toast('select a flow or finding first'); return; }
   abortAi();
   resetAiChat();
   setStatus('');
@@ -113,7 +121,10 @@ function scheduleAiRender(seq) {
 
 function assistBody(kind) {
   const ids = state.aiIds;
-  const body = ids.length > 1 ? { flowIds: ids, kind } : { flowId: ids[0], kind };
+  const body = { kind };
+  if (state.aiFindingId) body.findingId = state.aiFindingId;
+  else if (ids.length > 1) body.flowIds = ids;
+  else if (ids.length === 1) body.flowId = ids[0];
   if (kind === 'ask') {
     body.question = aiQuestion;
     const hist = aiHistory.slice(0, -1).filter(t => t.role === 'user' || t.role === 'assistant');
@@ -132,7 +143,8 @@ async function streamAi(kind, seq) {
   const body = assistBody(kind);
   const ctrl = new AbortController(); aiAbort = ctrl;
   $('#aiStop').style.display = '';
-  setStatus(ids.length > 1 ? `Analyzing ${ids.length} flows…` : (aiHistory.length > 1 ? 'Thinking…' : 'Thinking…'));
+  const isFinding = !!state.aiFindingId;
+  setStatus(isFinding ? 'Analyzing finding…' : (ids.length > 1 ? `Analyzing ${ids.length} flows…` : (aiHistory.length > 1 ? 'Thinking…' : 'Thinking…')));
   let acc = '';
   try {
     const r = await fetch('/api/ai/assist/stream', {

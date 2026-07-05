@@ -27,14 +27,17 @@ const (
 	ProviderAnthropic  = "anthropic"
 	ProviderOpenRouter = "openrouter"
 	ProviderGLM        = "glm"
+	ProviderOpenAI    = "openai"
 )
 
 const (
 	defaultAnthropicModel  = "claude-haiku-4-5-20251001"
 	defaultOpenRouterModel = "anthropic/claude-3.5-haiku"
 	defaultGLMModel        = "glm-5-turbo"
+	defaultOpenAIModel     = "gpt-3.5-turbo"
 	anthropicEndpoint      = "https://api.anthropic.com/v1/messages"
 	openRouterEndpoint     = "https://openrouter.ai/api/v1/chat/completions"
+	openAIEndpoint         = "https://api.openai.com/v1/chat/completions"
 	// GLM Coding Plan's Anthropic-compatible endpoint. Same wire format as the
 	// native Messages API; authenticated with a Bearer token instead of x-api-key.
 	glmEndpoint = "https://api.z.ai/api/anthropic/v1/messages"
@@ -60,7 +63,7 @@ type Client struct {
 
 // New returns a client for the given provider (defaults to Anthropic for an
 // unknown/empty value). An empty model uses that provider's default.
-func New(provider, key, model string) *Client {
+func New(provider, key, model string, endpoint ...string) *Client {
 	c := &Client{provider: provider, key: key, model: model, cl: &http.Client{Timeout: 60 * time.Second}}
 	switch provider {
 	case ProviderOpenRouter:
@@ -74,12 +77,21 @@ func New(provider, key, model string) *Client {
 		if c.model == "" {
 			c.model = defaultGLMModel
 		}
+	case ProviderOpenAI:
+		c.provider = ProviderOpenAI
+		c.endpoint = openAIEndpoint
+		if c.model == "" {
+			c.model = defaultOpenAIModel
+		}
 	default:
 		c.provider = ProviderAnthropic
 		c.endpoint = anthropicEndpoint
 		if c.model == "" {
 			c.model = defaultAnthropicModel
 		}
+	}
+	if len(endpoint) > 0 && endpoint[0] != "" {
+		c.endpoint = endpoint[0]
 	}
 	return c
 }
@@ -88,7 +100,7 @@ func New(provider, key, model string) *Client {
 // wire format. GLM's compatible endpoint wants a Bearer token; Anthropic's native
 // API wants x-api-key.
 func (c *Client) setAnthropicAuth(req *http.Request) {
-	if c.provider == ProviderGLM {
+	if c.provider == ProviderGLM || c.provider == ProviderOpenAI {
 		req.Header.Set("Authorization", "Bearer "+c.key)
 	} else {
 		req.Header.Set("x-api-key", c.key)
@@ -107,7 +119,7 @@ func (c *Client) CompleteMessages(system string, messages []Message) (string, er
 	if c.key == "" {
 		return "", fmt.Errorf("no API key configured")
 	}
-	if c.provider == ProviderOpenRouter {
+	if c.provider == ProviderOpenRouter || c.provider == ProviderOpenAI {
 		return c.completeOpenRouterMessages(system, messages)
 	}
 	return c.completeAnthropicMessages(system, messages)
@@ -230,7 +242,7 @@ func (c *Client) CompleteStreamMessages(ctx context.Context, system string, mess
 	if c.key == "" {
 		return fmt.Errorf("no API key configured")
 	}
-	if c.provider == ProviderOpenRouter {
+	if c.provider == ProviderOpenRouter || c.provider == ProviderOpenAI {
 		return c.streamOpenRouterMessages(ctx, system, messages, onDelta)
 	}
 	return c.streamAnthropicMessages(ctx, system, messages, onDelta)

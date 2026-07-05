@@ -98,7 +98,7 @@ func (h *aiAPI) aiNotesOrganize(w http.ResponseWriter, r *http.Request) {
 	if h.denyIfAIDisabled(w) {
 		return
 	}
-	provider, key, ok := h.aiCreds()
+	provider, key, endpoint, ok := h.aiCreds()
 	if !ok {
 		httpErr(w, http.StatusBadRequest, aiNoKeyMsg)
 		return
@@ -114,7 +114,7 @@ func (h *aiAPI) aiNotesOrganize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	model, _, _ := h.st.GetSetting("ai.model")
-	text, err := aiassist.New(provider, key, model).Complete(notesOrganizeSystem, notesOrganizePrompt(notes))
+	text, err := aiassist.New(provider, key, model, endpoint).Complete(notesOrganizeSystem, notesOrganizePrompt(notes))
 	if err != nil {
 		httpErr(w, http.StatusBadGateway, err.Error())
 		return
@@ -127,7 +127,7 @@ func (h *aiAPI) aiNotesOrganizeStream(w http.ResponseWriter, r *http.Request) {
 	if h.denyIfAIDisabled(w) {
 		return
 	}
-	provider, key, ok := h.aiCreds()
+	provider, key, endpoint, ok := h.aiCreds()
 	if !ok {
 		httpErr(w, http.StatusBadRequest, aiNoKeyMsg)
 		return
@@ -154,7 +154,7 @@ func (h *aiAPI) aiNotesOrganizeStream(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	model, _, _ := h.st.GetSetting("ai.model")
-	err = aiassist.New(provider, key, model).CompleteStream(r.Context(), notesOrganizeSystem, notesOrganizePrompt(notes), func(delta string) {
+	err = aiassist.New(provider, key, model, endpoint).CompleteStream(r.Context(), notesOrganizeSystem, notesOrganizePrompt(notes), func(delta string) {
 		b, _ := json.Marshal(delta)
 		fmt.Fprintf(w, "data: %s\n\n", b)
 		flusher.Flush()

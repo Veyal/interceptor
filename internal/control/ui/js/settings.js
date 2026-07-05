@@ -262,9 +262,37 @@ $$('#setNav button').forEach(b=>b.onclick=()=>{
   try{localStorage.setItem('setSec',b.dataset.sec);}catch(e){}
   // lazy-load retention stats the first time the project section is opened
   if(b.dataset.sec==='project'&&!retentionLoaded){retentionLoaded=true;loadRetention();}
-  if(b.dataset.sec==='tls'){import('./tlsdiag.js').then(m=>m.loadTrafficDiagnosis());loadIOS();loadIOSSsh();}
+  if(b.dataset.sec==='tls'){import('./tlsdiag.js').then(m=>m.loadTrafficDiagnosis());}
+  if(b.dataset.sec==='devices'){loadAndroid();loadIOS();loadIOSSsh();}
   if(b.dataset.sec==='api'&&!apiLoaded){apiLoaded=true;import('./apipanel.js').then(m=>{m.loadApiKeys();m.loadReference();m.loadMCP();});}
 });
+
+// Settings search — filter the left nav to sections whose label or body text
+// matches the query, so options are discoverable without knowing which group
+// they live in. Read-only: it never mutates section markup.
+(function wireSettingsSearch(){
+  const box=$('#setSearch'); if(!box) return;
+  const empty=$('#setNavEmpty');
+  // Cache each nav button's searchable haystack (label + its section's text).
+  const entries=$$('#setNav button').map(b=>{
+    const sec=document.querySelector('.set-sec[data-sec="'+b.dataset.sec+'"]');
+    return {btn:b,text:((b.textContent||'')+' '+(sec?sec.textContent||'':'')).toLowerCase()};
+  });
+  box.oninput=()=>{
+    const q=box.value.trim().toLowerCase();
+    let firstVisible=null,anyHidden=false,visibleCount=0;
+    entries.forEach(e=>{
+      const hit=!q||e.text.includes(q);
+      e.btn.hidden=!hit;
+      if(hit){visibleCount++; if(!firstVisible)firstVisible=e.btn;} else anyHidden=true;
+    });
+    if(empty)empty.hidden=visibleCount>0;
+    // If the query hid the active section, jump to the first remaining match.
+    if(q&&anyHidden&&firstVisible&&!$$('#setNav button.on').some(b=>!b.hidden))firstVisible.click();
+  };
+  // Escape clears the filter.
+  box.onkeydown=e=>{if(e.key==='Escape'){box.value='';box.oninput();box.blur();}};
+})();
 
 /* ---- settings ---- */
 let savedAiModel='';
@@ -290,6 +318,7 @@ export async function loadSettings(){try{const s=await api('/api/settings');stat
   if($('#setAiProvider'))$('#setAiProvider').value=s.aiProvider||'anthropic';
   savedAiModel=s.aiModel||'';
   if($('#setAiModel'))$('#setAiModel').value=savedAiModel;
+  if($('#setAiEndpoint'))$('#setAiEndpoint').value=s.aiEndpoint||'';
   if($('#aiKeyState'))$('#aiKeyState').textContent=s.aiHasKey?'Key configured ✓':'No key set.';
   if($('#capScopeToggle'))setCapScope(!!s.captureScopeOnly);
   if($('#suppressTelemetryToggle'))setSuppressTelemetry(s.suppressBrowserTelemetry!==false);
@@ -353,6 +382,7 @@ $('#setAiDisabled')&&($('#setAiDisabled').onchange=async()=>{
 function aiProviderVal(){return ($('#setAiProvider')||{}).value;}
 function aiIsOpenRouter(){return aiProviderVal()==='openrouter';}
 function aiIsGLM(){return aiProviderVal()==='glm';}
+function aiIsOpenAI(){return aiProviderVal()==='openai';}
 // Providers whose model is chosen from a dropdown (vs. a free-text field).
 function aiUsesModelList(){return aiIsOpenRouter()||aiIsGLM();}
 
@@ -389,18 +419,20 @@ function populateGlmModels(){
 
 export function aiSyncProviderUI(){
   if(!$('#setAiProvider'))return;
-  const or=aiIsOpenRouter(),glm=aiIsGLM(),usesList=or||glm;
+  const or=aiIsOpenRouter(),glm=aiIsGLM(),openai=aiIsOpenAI(),usesList=or||glm;
   const inp=$('#setAiModel'),sel=$('#setAiModelSelect'),loadBtn=$('#loadAiModelsBtn'),hint=$('#setAiModelHint');
+  const epField=$('#setAiEndpointField');
+  if(epField)epField.style.display=(openai||or||glm)?'':'none';
   if(inp)inp.style.display=usesList?'none':'';
   if(sel){sel.style.display=usesList?'':'none';syncUiSelectStyles(sel);}
   if(loadBtn)loadBtn.style.display=or?'':'none'; // only OpenRouter fetches its list
   if(hint)hint.textContent=usesList?'(pick from list)':'(optional)';
   // Agent mode (let-AI-send-requests) needs the Anthropic tool-use format, which
-  // OpenRouter's chat API doesn't expose — disable it there so it isn't a silent
+  // OpenRouter and OpenAI's chat API don't expose — disable it there so it isn't a silent
   // no-op. GLM speaks the Anthropic format, so agent mode stays available.
   const agent=$('#aiAgentToggle');
   if(agent){
-    const supported=!or;
+    const supported=!(or||openai);
     if(!supported&&agent.checked)agent.checked=false;
     agent.disabled=!supported;
   }
@@ -440,6 +472,7 @@ export function aiPlaceholders(){if(!$('#setAiProvider'))return;
   const p=$('#setAiProvider').value;
   if(p==='openrouter'){$('#setAiKey').placeholder='sk-or-…';}
   else if(p==='glm'){$('#setAiKey').placeholder='your GLM Coding Plan key';$('#setAiModel').placeholder='glm-4.6';}
+  else if(p==='openai'){$('#setAiKey').placeholder='sk-…';$('#setAiModel').placeholder='gpt-3.5-turbo';}
   else{$('#setAiKey').placeholder='sk-ant-…';$('#setAiModel').placeholder='claude-haiku-4-5-20251001';}}
 if($('#setAiProvider'))$('#setAiProvider').onchange=aiSyncProviderUI;
 if($('#loadAiModelsBtn'))$('#loadAiModelsBtn').onclick=()=>loadOpenRouterModels(true);
@@ -486,6 +519,7 @@ $('#saveAiBtn').onclick=async()=>{
   const provider=$('#setAiProvider').value;
   const body={aiProvider:provider};
   if($('#setAiKey').value)body.aiApiKey=$('#setAiKey').value;
+  if($('#setAiEndpoint'))body.aiEndpoint=$('#setAiEndpoint').value.trim();
   if(provider==='openrouter'||provider==='glm'){
     const model=($('#setAiModelSelect')||{}).value;
     if(!model){toast('Select a '+(provider==='glm'?'GLM':'OpenRouter')+' model from the list');return;}

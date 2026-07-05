@@ -27,3 +27,8 @@ docs/SPEC-agent-pentest*.md
 *.har
 
 # CI workflows live in .github/workflows/ (commit with git add -f if needed).
+
+# Plugin artifacts
+.harness-memory/
+.opencode/node_modules/
+.opencode/package-lock.json

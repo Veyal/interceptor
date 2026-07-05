@@ -728,6 +728,10 @@ export function renderMD(src){
   });
   s=s.replace(/^---+\s*$/gm,'<hr class="md-hr">');
   s=s.replace(/^######\s?(.*)$/gm,'<h6>$1</h6>').replace(/^#####\s?(.*)$/gm,'<h5>$1</h5>').replace(/^####\s?(.*)$/gm,'<h4>$1</h4>').replace(/^###\s?(.*)$/gm,'<h3>$1</h3>').replace(/^##\s?(.*)$/gm,'<h2>$1</h2>').replace(/^#\s?(.*)$/gm,'<h1>$1</h1>');
+  s=s.replace(/<(think|thought|reasoning)>\r?\n?([\s\S]*?)<\/\1>/gi,(m,tag,inner)=>{
+    const title = tag.charAt(0).toUpperCase() + tag.slice(1).toLowerCase();
+    return '<details class="md-think"><summary>'+title+'</summary><div class="md-think-body">'+inner.trim()+'</div></details>';
+  });
   s=s.replace(/(?:^|\n)((?:\|[^\n]+\|\r?\n)+)/g,(m,block)=>{
     const lines=block.trim().split(/\r?\n/).filter(l=>l.trim());
     if(lines.length<2||!/^\|[\s:|-]+\|$/.test(lines[1]))return m;

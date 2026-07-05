@@ -1,7 +1,9 @@
 package control
 
 import (
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -42,6 +44,42 @@ func TestSecurityGuardHostAndOrigin(t *testing.T) {
 	}
 	if c := code("127.0.0.1:9966", "null"); c != http.StatusForbidden {
 		t.Fatalf("opaque 'null' Origin must be blocked, got %d", c)
+	}
+}
+
+// The loopback guard must not be defeatable by a spoofed Host header when the
+// connection actually arrived on a non-loopback local interface (i.e. the
+// control plane is bound to a routable address). The connection's server-side
+// local address, unlike Host, cannot be spoofed by a remote client.
+func TestSecurityGuardRejectsSpoofedHostOnNonLoopbackConn(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	g := (&Hub{}).securityGuard(next)
+
+	codeWithLocalAddr := func(host, localAddr string) int {
+		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9966/api/settings", nil)
+		req.Host = host
+		if localAddr != "" {
+			ctx := context.WithValue(req.Context(), http.LocalAddrContextKey,
+				&net.TCPAddr{IP: net.ParseIP(strings.Split(localAddr, ":")[0]), Port: 9966})
+			req = req.WithContext(ctx)
+		}
+		rec := httptest.NewRecorder()
+		g.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	// Spoofed loopback Host, but the connection landed on a routable local
+	// address → rejected (this is the bypass the fix closes).
+	if c := codeWithLocalAddr("127.0.0.1:9966", "192.168.1.10:9966"); c != http.StatusForbidden {
+		t.Fatalf("spoofed Host on non-loopback local addr must be blocked, got %d", c)
+	}
+	if c := codeWithLocalAddr("localhost:9966", "10.0.0.5:9966"); c != http.StatusForbidden {
+		t.Fatalf("spoofed localhost Host on LAN local addr must be blocked, got %d", c)
+	}
+
+	// Genuine loopback connection with loopback Host → allowed (UI keeps working).
+	if c := codeWithLocalAddr("127.0.0.1:9966", "127.0.0.1:9966"); c != http.StatusNoContent {
+		t.Fatalf("genuine loopback connection must pass, got %d", c)
 	}
 }
 

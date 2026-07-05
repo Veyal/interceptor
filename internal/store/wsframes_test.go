@@ -30,3 +30,33 @@ func TestSaveWSFrameCapsPerFlow(t *testing.T) {
 		t.Fatalf("flow 2 should be unaffected (1 frame), got %d", len(g2))
 	}
 }
+
+// SaveWSFrame propagates a failed retention DELETE instead of silently
+// swallowing it — otherwise ws_frames could grow without bound undetected. A
+// BEFORE DELETE trigger forces the prune to fail while the INSERT still commits.
+func TestSaveWSFramePropagatesPruneError(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	old := wsFramesPerFlow
+	wsFramesPerFlow = 1
+	defer func() { wsFramesPerFlow = old }()
+
+	if _, err := s.db.Exec(
+		`CREATE TRIGGER ws_frames_no_delete BEFORE DELETE ON ws_frames
+		 BEGIN SELECT RAISE(FAIL, 'prune blocked'); END`); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	// First frame: nothing to prune yet (count <= limit), so no error.
+	if err := s.SaveWSFrame(&WSFrame{FlowID: 1, Dir: "send", Opcode: 1, Length: 1, Preview: "a"}); err != nil {
+		t.Fatalf("first frame should not prune: %v", err)
+	}
+	// Second frame trips the retention DELETE, which the trigger fails.
+	if err := s.SaveWSFrame(&WSFrame{FlowID: 1, Dir: "send", Opcode: 1, Length: 1, Preview: "b"}); err == nil {
+		t.Fatal("expected retention DELETE error to propagate, got nil")
+	}
+}

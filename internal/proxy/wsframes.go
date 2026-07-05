@@ -107,7 +107,17 @@ func (s *Server) recordWSFrame(flowID int64, dir string, opcode byte, length uin
 	}
 	if s.events != nil {
 		if e, ok := s.events.(interface{ WSFramed(int64) }); ok {
-			e.WSFramed(flowID)
+			// The notifier is external code (SSE fan-out); a panic there must not
+			// crash the proxy or abort the relay. Recover and log — capture is
+			// best-effort and off the hot forwarding path.
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("proxy: ws frame notifier panic: %v", r)
+					}
+				}()
+				e.WSFramed(flowID)
+			}()
 		}
 	}
 }

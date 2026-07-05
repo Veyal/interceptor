@@ -43,7 +43,9 @@ var leafCacheMax = 2048
 // LoadOrCreate loads the CA from dir if present, otherwise generates a new one
 // and persists ca.crt + ca.key under dir.
 func LoadOrCreate(dir string) (*CA, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	// 0o700: the CA private key lives here — only the owner should traverse the dir
+	// (defense in depth; ca.key itself is already 0o600).
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
 	crtPath := filepath.Join(dir, "ca.crt")

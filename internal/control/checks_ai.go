@@ -118,7 +118,7 @@ func (h *aiAPI) aiChecksGenerate(w http.ResponseWriter, r *http.Request) {
 	if h.denyIfAIDisabled(w) {
 		return
 	}
-	provider, key, ok := h.aiCreds()
+	provider, key, endpoint, ok := h.aiCreds()
 	if !ok {
 		httpErr(w, http.StatusBadRequest, aiNoKeyMsg)
 		return
@@ -143,7 +143,7 @@ func (h *aiAPI) aiChecksGenerate(w http.ResponseWriter, r *http.Request) {
 		f = flows[0]
 	}
 	model, _, _ := h.st.GetSetting("ai.model")
-	ai := aiassist.New(provider, key, model)
+	ai := aiassist.New(provider, key, model, endpoint)
 	prompt := checksGeneratePrompt(desc, in.Source, f)
 	raw, err := ai.Complete(checksGenerateSystem, prompt)
 	if err != nil {

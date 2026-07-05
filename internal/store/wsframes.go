@@ -29,10 +29,15 @@ func (s *Store) SaveWSFrame(f *WSFrame) error {
 		return err
 	}
 	f.ID, _ = res.LastInsertId()
-	_, _ = s.db.Exec(
+	// Propagate a failed retention DELETE: silently swallowing it lets ws_frames
+	// grow without bound if pruning starts failing. The insert already committed,
+	// so f.ID stays set alongside the error.
+	if _, err := s.db.Exec(
 		`DELETE FROM ws_frames WHERE flow_id=? AND id NOT IN (
 		   SELECT id FROM ws_frames WHERE flow_id=? ORDER BY id DESC LIMIT ?)`,
-		f.FlowID, f.FlowID, wsFramesPerFlow)
+		f.FlowID, f.FlowID, wsFramesPerFlow); err != nil {
+		return err
+	}
 	return nil
 }
 

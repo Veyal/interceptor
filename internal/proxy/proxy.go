@@ -421,11 +421,29 @@ func (s *Server) tunnelUpgrade(clientConn net.Conn, clientReader *bufio.Reader, 
 	}
 
 	// Frame-aware relay: capture each WebSocket frame while forwarding verbatim.
+	// Each relay closes its write side and signals done from a defer, so a panic
+	// in the capture/record path (e.g. a store or notifier callback) can never
+	// leak the goroutine or wedge the parent on <-done — the connection is torn
+	// down and the wait is released regardless.
 	done := make(chan struct{}, 2)
-	go func() { s.relayWSFrames(flow.ID, "send", clientReader, up); up.Close(); done <- struct{}{} }()
-	go func() { s.relayWSFrames(flow.ID, "recv", upReader, clientConn); clientConn.Close(); done <- struct{}{} }()
+	go s.relayWS(flow.ID, "send", clientReader, up, up, done)
+	go s.relayWS(flow.ID, "recv", upReader, clientConn, clientConn, done)
 	<-done
 	<-done
+}
+
+// relayWS runs one direction of the WebSocket splice. It always closes closer
+// and sends on done, even if the relay panics — recovering here keeps a capture
+// bug from crashing the whole proxy or hanging tunnelUpgrade.
+func (s *Server) relayWS(flowID int64, dir string, src *bufio.Reader, dst net.Conn, closer net.Conn, done chan<- struct{}) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("proxy: ws relay %s panic: %v", dir, r)
+		}
+		closer.Close()
+		done <- struct{}{}
+	}()
+	s.relayWSFrames(flowID, dir, src, dst)
 }
 
 func (s *Server) recordUpgradeError(clientConn net.Conn, flow *store.Flow, msg string) {

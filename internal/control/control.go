@@ -108,6 +108,9 @@ type Hub struct {
 	GlobalDir     string
 	SwitchProject func(target string) error
 
+	switchMu    sync.Mutex  // guards switchTimer
+	switchTimer *time.Timer // pending delayed project switch; reset per request so only the latest fires
+
 	mcpMu       sync.Mutex
 	mcpSrv      *mcp.Server // lazily built streamable-HTTP MCP front end (POST /mcp)
 	mcpKeysSeen atomic.Bool // last-known "API keys exist" — mcpAuthorized fails closed on a store error once true
@@ -257,6 +260,7 @@ type settingsJSON struct {
 	UpstreamProxy            string `json:"upstreamProxy"`
 	AiProvider               string `json:"aiProvider"`
 	AiModel                  string `json:"aiModel"`
+	AiEndpoint               string `json:"aiEndpoint"`
 	AiHasKey                 bool   `json:"aiHasKey"` // never returns the key itself
 	AiDisabled               bool   `json:"aiDisabled"`
 	OobEnabled               bool   `json:"oobEnabled"`
@@ -1236,6 +1240,7 @@ func (h *settingsAPI) getSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	aiKey, _, _ := h.st.GetSetting("ai.apiKey")
 	aiModel, _, _ := h.st.GetSetting("ai.model")
+	aiEndpoint, _, _ := h.st.GetSetting("ai.endpoint")
 	envKey := os.Getenv("ANTHROPIC_API_KEY")
 	switch aiProvider {
 	case "openrouter":
@@ -1265,6 +1270,7 @@ func (h *settingsAPI) getSettings(w http.ResponseWriter, r *http.Request) {
 		UpstreamProxy:            up,
 		AiProvider:               aiProvider,
 		AiModel:                  aiModel,
+		AiEndpoint:               aiEndpoint,
 		AiHasKey:                 !h.aiDisabled() && (aiKey != "" || envKey != ""),
 		AiDisabled:               aiDisabled == "1",
 		OobEnabled:               h.oobEnabled(),
@@ -1303,6 +1309,7 @@ func (h *settingsAPI) putSettings(w http.ResponseWriter, r *http.Request) {
 		AiProvider               *string `json:"aiProvider"`
 		AiApiKey                 *string `json:"aiApiKey"`
 		AiModel                  *string `json:"aiModel"`
+		AiEndpoint               *string `json:"aiEndpoint"`
 		AiDisabled               *bool   `json:"aiDisabled"`
 		OobEnabled               *bool   `json:"oobEnabled"`
 		CaptureScopeOnly         *bool   `json:"captureScopeOnly"`
@@ -1357,6 +1364,11 @@ func (h *settingsAPI) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.AiModel != nil {
 		if !h.persistSetting(w, "ai.model", *in.AiModel) {
+			return
+		}
+	}
+	if in.AiEndpoint != nil {
+		if !h.persistSetting(w, "ai.endpoint", *in.AiEndpoint) {
 			return
 		}
 	}

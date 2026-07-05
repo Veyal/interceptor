@@ -13,8 +13,9 @@ type Activity struct {
 	Intent  string `json:"intent,omitempty"` // the AI's stated "why" for a consequential action
 }
 
-// activityKeep bounds how many activity rows are retained per project.
-const activityKeep = 5000
+// activityKeep bounds how many activity rows are retained per project. A var so
+// tests can lower it.
+var activityKeep int64 = 5000
 
 // InsertActivity persists an AI tool-call record (a.TS set by the caller) and
 // sets a.ID. Rows older than the most recent activityKeep are pruned so the log
@@ -28,7 +29,12 @@ func (s *Store) InsertActivity(a *Activity) (int64, error) {
 	}
 	id, _ := res.LastInsertId()
 	a.ID = id
-	_, _ = s.db.Exec(`DELETE FROM activity WHERE id <= ?`, id-activityKeep)
+	// Propagate a failed retention DELETE: silently swallowing it lets the table
+	// grow without bound if pruning starts failing. The insert already committed,
+	// so the caller still sees the assigned id alongside the error.
+	if _, err := s.db.Exec(`DELETE FROM activity WHERE id <= ?`, id-activityKeep); err != nil {
+		return id, err
+	}
 	return id, nil
 }
 

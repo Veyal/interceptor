@@ -123,7 +123,7 @@ func (h *discoveryAPI) aiDiscoveryPaths(host string, seeds []string) ([]string, 
 	if h.aiDisabled() {
 		return nil, "AI disabled in Settings"
 	}
-	provider, key, ok := h.aiCreds()
+	provider, key, endpoint, ok := h.aiCreds()
 	if !ok {
 		return nil, "no AI key — returning history seeds only"
 	}
@@ -134,7 +134,7 @@ func (h *discoveryAPI) aiDiscoveryPaths(host string, seeds []string) ([]string, 
 	prompt := "Host: " + host + "\nPaths already seen in captured traffic:\n" + strings.Join(sample, "\n") +
 		"\n\nSuggest up to 20 additional URL path segments (one per line, no leading slash) a pentester should brute-force on this host — admin panels, APIs, backups, dev paths. Return ONLY a JSON array of strings."
 	model, _, _ := h.st.GetSetting("ai.model")
-	text, err := aiassist.New(provider, key, model).Complete(
+	text, err := aiassist.New(provider, key, model, endpoint).Complete(
 		"Return only valid JSON. No prose.", prompt)
 	if err != nil {
 		return nil, err.Error()

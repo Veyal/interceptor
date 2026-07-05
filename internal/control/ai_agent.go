@@ -58,8 +58,8 @@ var agentTools = []aiassist.Tool{
 
 // aiAssistAgentStream runs the tool-use loop, emits tool SSE events, then streams
 // the final answer.
-func (h *aiAPI) aiAssistAgentStream(w http.ResponseWriter, r *http.Request, in aiAssistReq, flows []assistFlow, provider, key, model string, flusher http.Flusher) {
-	client := aiassist.New(provider, key, model)
+func (h *aiAPI) aiAssistAgentStream(w http.ResponseWriter, r *http.Request, in aiAssistReq, flows []assistFlow, provider, key, model, endpoint string, flusher http.Flusher) {
+	client := aiassist.New(provider, key, model, endpoint)
 	if !client.SupportsAgentTools() {
 		b, _ := json.Marshal("agent mode requires Anthropic provider — switch in Settings → AI assist")
 		fmt.Fprintf(w, "event: error\ndata: %s\n\n", b)

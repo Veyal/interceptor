@@ -20,9 +20,9 @@ const aiNoKeyMsg = "no AI API key — set one in Settings → AI assist (or the 
 
 // aiCreds resolves the provider and key from Settings, falling back to the
 // provider's env var. ok is false when no key is available (assist is disabled).
-func (h *Hub) aiCreds() (provider, key string, ok bool) {
+func (h *Hub) aiCreds() (provider, key, endpoint string, ok bool) {
 	if h.aiDisabled() {
-		return "", "", false
+		return "", "", "", false
 	}
 	provider, _, _ = h.st.GetSetting("ai.provider")
 	if provider == "" {
@@ -41,18 +41,20 @@ func (h *Hub) aiCreds() (provider, key string, ok bool) {
 			key = os.Getenv("ANTHROPIC_API_KEY")
 		}
 	}
-	return provider, key, key != ""
+	endpoint, _, _ = h.st.GetSetting("ai.endpoint")
+	return provider, key, endpoint, key != ""
 }
 
 // aiAssistReq is the JSON body shared by the assist endpoints: a single flow
 // (back-compat) or a selection, plus the kind (explain/suggest/summarize).
 type aiAssistReq struct {
-	FlowID   int64          `json:"flowId"`
-	FlowIDs  []int64        `json:"flowIds"`
-	Kind     string         `json:"kind"`
-	Question string         `json:"question"` // free-text question (kind == "ask")
-	History  []aiAssistTurn `json:"history"`  // prior user/assistant turns (kind == "ask" follow-ups)
-	Agent    bool           `json:"agent"`    // opt-in: let the model send requests (kind == "ask")
+	FlowID    int64          `json:"flowId"`
+	FlowIDs   []int64        `json:"flowIds"`
+	FindingID int64          `json:"findingId"`
+	Kind      string         `json:"kind"`
+	Question  string         `json:"question"` // free-text question (kind == "ask")
+	History   []aiAssistTurn `json:"history"`  // prior user/assistant turns (kind == "ask" follow-ups)
+	Agent     bool           `json:"agent"`    // opt-in: let the model send requests (kind == "ask")
 }
 
 // aiAssistTurn is one message in an Ask AI follow-up thread.
@@ -104,15 +106,13 @@ func (h *aiAPI) collectAssistFlows(ids []int64, kind string) []assistFlow {
 	return flows
 }
 
-// aiAssist asks a bring-your-own-key LLM to explain a flow, suggest payloads, or
-// summarize findings (non-streaming; used as the fallback when the browser can't
-// consume the SSE stream). Disabled unless an API key is configured. The exchange
-// is sent to the provider only here, on an explicit request.
+// aiAssist processes one non-streaming AI prompt Turn. Captured flows are only
+// sent if explicitly selected in the UI.
 func (h *aiAPI) aiAssist(w http.ResponseWriter, r *http.Request) {
 	if h.denyIfAIDisabled(w) {
 		return
 	}
-	provider, key, ok := h.aiCreds()
+	provider, key, endpoint, ok := h.aiCreds()
 	if !ok {
 		httpErr(w, http.StatusBadRequest, aiNoKeyMsg)
 		return
@@ -122,19 +122,51 @@ func (h *aiAPI) aiAssist(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "bad json")
 		return
 	}
-	ids := in.ids()
-	if len(ids) == 0 {
-		httpErr(w, http.StatusBadRequest, "no flow selected")
-		return
-	}
-	flows := h.collectAssistFlows(ids, in.Kind)
-	if len(flows) == 0 {
-		httpErr(w, http.StatusNotFound, "flow not found")
-		return
+	var flows []assistFlow
+	if in.FindingID != 0 {
+		f, err := h.st.GetFinding(in.FindingID)
+		if err != nil {
+			httpErr(w, http.StatusNotFound, "finding not found")
+			return
+		}
+		var fIds []int64
+		for _, b := range f.Blocks {
+			if b.Type == "flow" && b.FlowID != 0 {
+				fIds = append(fIds, b.FlowID)
+			}
+		}
+		flows = h.collectAssistFlows(fIds, in.Kind)
+
+		var fb strings.Builder
+		fmt.Fprintf(&fb, "Title: %s\nSeverity: %s\nStatus: %s\n\n", f.Title, f.Severity, f.Status)
+		for _, b := range f.Blocks {
+			if b.Type == "text" && b.MD != "" {
+				fmt.Fprintf(&fb, "%s\n\n", b.MD)
+			}
+		}
+		if f.Impact != "" {
+			fmt.Fprintf(&fb, "Impact:\n%s\n", f.Impact)
+		}
+		
+		flows = append([]assistFlow{{
+			Label: fmt.Sprintf("Finding #%d: %s", f.ID, f.Title),
+			Req:   fb.String(),
+		}}, flows...)
+	} else {
+		ids := in.ids()
+		if len(ids) == 0 {
+			httpErr(w, http.StatusBadRequest, "no flow or finding selected")
+			return
+		}
+		flows = h.collectAssistFlows(ids, in.Kind)
+		if len(flows) == 0 {
+			httpErr(w, http.StatusNotFound, "flow not found")
+			return
+		}
 	}
 	model, _, _ := h.st.GetSetting("ai.model")
 	msgs := assistMessages(in.Kind, flows, in.Question, in.History)
-	text, err := aiassist.New(provider, key, model).CompleteMessages(assistSystem, msgs)
+	text, err := aiassist.New(provider, key, model, endpoint).CompleteMessages(assistSystem, msgs)
 	if err != nil {
 		httpErr(w, http.StatusBadGateway, err.Error())
 		return
@@ -143,14 +175,12 @@ func (h *aiAPI) aiAssist(w http.ResponseWriter, r *http.Request) {
 }
 
 // aiAssistStream is the streaming variant of aiAssist: it relays the model's reply
-// to the browser token-by-token as Server-Sent Events (`data:` text chunks, then a
-// terminal `event: done` or `event: error`). This is the primary path — it makes
-// the assistant feel responsive instead of stalling on a full completion.
+// token-by-token over Server-Sent Events, showing thoughts live.
 func (h *aiAPI) aiAssistStream(w http.ResponseWriter, r *http.Request) {
 	if h.denyIfAIDisabled(w) {
 		return
 	}
-	provider, key, ok := h.aiCreds()
+	provider, key, endpoint, ok := h.aiCreds()
 	if !ok {
 		httpErr(w, http.StatusBadRequest, aiNoKeyMsg)
 		return
@@ -160,15 +190,47 @@ func (h *aiAPI) aiAssistStream(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "bad json")
 		return
 	}
-	ids := in.ids()
-	if len(ids) == 0 {
-		httpErr(w, http.StatusBadRequest, "no flow selected")
-		return
-	}
-	flows := h.collectAssistFlows(ids, in.Kind)
-	if len(flows) == 0 {
-		httpErr(w, http.StatusNotFound, "flow not found")
-		return
+	var flows []assistFlow
+	if in.FindingID != 0 {
+		f, err := h.st.GetFinding(in.FindingID)
+		if err != nil {
+			httpErr(w, http.StatusNotFound, "finding not found")
+			return
+		}
+		var fIds []int64
+		for _, b := range f.Blocks {
+			if b.Type == "flow" && b.FlowID != 0 {
+				fIds = append(fIds, b.FlowID)
+			}
+		}
+		flows = h.collectAssistFlows(fIds, in.Kind)
+
+		var fb strings.Builder
+		fmt.Fprintf(&fb, "Title: %s\nSeverity: %s\nStatus: %s\n\n", f.Title, f.Severity, f.Status)
+		for _, b := range f.Blocks {
+			if b.Type == "text" && b.MD != "" {
+				fmt.Fprintf(&fb, "%s\n\n", b.MD)
+			}
+		}
+		if f.Impact != "" {
+			fmt.Fprintf(&fb, "Impact:\n%s\n", f.Impact)
+		}
+		
+		flows = append([]assistFlow{{
+			Label: fmt.Sprintf("Finding #%d: %s", f.ID, f.Title),
+			Req:   fb.String(),
+		}}, flows...)
+	} else {
+		ids := in.ids()
+		if len(ids) == 0 {
+			httpErr(w, http.StatusBadRequest, "no flow or finding selected")
+			return
+		}
+		flows = h.collectAssistFlows(ids, in.Kind)
+		if len(flows) == 0 {
+			httpErr(w, http.StatusNotFound, "flow not found")
+			return
+		}
 	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -183,12 +245,12 @@ func (h *aiAPI) aiAssistStream(w http.ResponseWriter, r *http.Request) {
 
 	model, _, _ := h.st.GetSetting("ai.model")
 	if in.Agent && in.Kind == "ask" {
-		h.aiAssistAgentStream(w, r, in, flows, provider, key, model, flusher)
+		h.aiAssistAgentStream(w, r, in, flows, provider, key, model, endpoint, flusher)
 		return
 	}
 
 	msgs := assistMessages(in.Kind, flows, in.Question, in.History)
-	err := aiassist.New(provider, key, model).CompleteStreamMessages(r.Context(), assistSystem, msgs, func(delta string) {
+	err := aiassist.New(provider, key, model, endpoint).CompleteStreamMessages(r.Context(), assistSystem, msgs, func(delta string) {
 		b, _ := json.Marshal(delta) // JSON-encode so newlines/quotes survive the SSE framing
 		fmt.Fprintf(w, "data: %s\n\n", b)
 		flusher.Flush()
@@ -224,7 +286,7 @@ func (h *aiAPI) aiActions(w http.ResponseWriter, r *http.Request) {
 	if h.denyIfAIDisabled(w) {
 		return
 	}
-	provider, key, ok := h.aiCreds()
+	provider, key, endpoint, ok := h.aiCreds()
 	if !ok {
 		httpErr(w, http.StatusBadRequest, aiNoKeyMsg)
 		return
@@ -251,7 +313,7 @@ func (h *aiAPI) aiActions(w http.ResponseWriter, r *http.Request) {
 		"(auth/authz bypass, a specific IDOR value, an SSRF probe, a logic test), or \"intruder\" when the point should be fuzzed or enumerated over many values (wordlists, brute force, ID ranges, injection fuzzing). " +
 		"Request:\n\n" + req
 	model, _, _ := h.st.GetSetting("ai.model")
-	text, err := aiassist.New(provider, key, model).Complete(actionsSystem, prompt)
+	text, err := aiassist.New(provider, key, model, endpoint).Complete(actionsSystem, prompt)
 	if err != nil {
 		httpErr(w, http.StatusBadGateway, err.Error())
 		return

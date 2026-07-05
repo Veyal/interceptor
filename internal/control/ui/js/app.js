@@ -3,13 +3,13 @@
 // the command palette, global keyboard shortcuts, the live SSE event stream,
 // theme, the version badge, and the boot sequence that kicks everything off.
 import { $, $$, esc, state, api, toast, MODAL_IDS, openModal, closeModal } from './core.js';
-import { selectFlow, renderChips, loadFlows, loadScope, loadViews, scheduleReload, renderWSFrames, clearAllFilters, walkFlowNav, toggleSelectAllShown, handleFlowNew, handleFlowUpdate } from './proxy.js';
+import { selectFlow, renderChips, loadFlows, loadScope, loadViews, scheduleReload, renderWSFrames, clearAllFilters, walkFlowNav, toggleSelectAllShown, handleFlowNew, handleFlowUpdate, openCompare, copyCurl } from './proxy.js';
 import { renderIntercept, toggleIntercept, loadRules } from './intercept.js';
 import { repInit, repSend, sendToRepeater, sendToIntruder, scheduleIntr } from './tools.js';
 import { loadIssues, runScan, loadScanTargets, openActive, openDecoder, openChecks, loadActive, loadChecksList, loadOob, renderAsScopePanel } from './scanner.js';
 import { loadEndpoints } from './map.js';
 import { loadDiscovery, refreshDiscovery } from './discovery.js';
-import { loadSettings, loadSysProxy, loadAndroid, loadIOS, loadIOSSsh, loadSession, loadProject, openProjectModal, applyAiDisabledUI, applyOobDisabledUI } from './settings.js';
+import { loadSettings, loadSysProxy, loadAndroid, loadIOS, loadIOSSsh, loadSession, loadProject, openProjectModal, applyAiDisabledUI, applyOobDisabledUI, loadDeviceProxyEndpoint } from './settings.js';
 import { loadNotes, flushNotesSave, focusNotes, organizeNotes } from './notes.js';
 import { renderActivity, onActivity, loadActivity, clearActSeen } from './activity.js';
 import { loadFindings } from './findings.js';
@@ -19,7 +19,7 @@ import './flowmodal.js'; // side-effect: flow inspect popup + modal handlers
 import './ai.js'; // side-effect: wires the AI assist modal (its openAi is also imported by proxy.js)
 import './authz.js'; // side-effect: wires authz modal buttons
 import { openAuthz, renderAuthzScopePanel } from './authz.js';
-import { maybeShowSetup } from './setup.js';
+import { maybeShowSetup, openSetup } from './setup.js';
 import { loadTrafficDiagnosis, syncTlsBannerSetting, setTlsBannerHidden } from './tlsdiag.js';
 
 /* ---- tabs ---- */
@@ -155,7 +155,7 @@ function connectEvents(){
     else if(m.type==='activescan.update'){if($('#activeModal')&&$('#activeModal').style.display==='flex')loadActive();}
     else if(m.type==='oob.update'){if($('#oobModal')&&$('#oobModal').style.display==='flex')loadOob();}
     else if(m.type==='discovery.update'){if(document.querySelector('.tab[data-tab="discover"]').classList.contains('active'))refreshDiscovery();}
-    else if(m.type==='settings.update'){loadSettings();applyAiDisabledUI();applyOobDisabledUI();}
+    else if(m.type==='settings.update'){loadSettings();loadVersion(false);loadSysProxy();loadDeviceProxyEndpoint();loadAndroid();loadIOS();loadIOSSsh();applyAiDisabledUI();applyOobDisabledUI();}
     else if(m.type==='notes.update')loadNotes();
     else if(m.type==='findings.update')loadFindings();
     else if(m.type==='tags.update')loadTags();
@@ -184,15 +184,17 @@ function cmdkBuild(){
     else if(e.key==='Escape'){e.preventDefault();cmdkClose();}
   };
 }
-// The palette only NAVIGATES — it jumps to a tab, a Settings subsection, or a tool
-// screen. It deliberately never performs a mutating action (run a scan, toggle
-// intercept, export, send a request) so a mis-typed Enter can't do anything
-// destructive; you act from the screen it takes you to. `kw` adds search aliases.
+// The palette NAVIGATES — it jumps to a tab, a Settings subsection, or a tool
+// screen — plus a few non-destructive conveniences (toggle theme, copy the
+// selected flow as cURL). It deliberately never performs a mutating/irreversible
+// action (run a scan, toggle intercept, export, send/delete a request) so a
+// mis-typed Enter can't do anything destructive; you act from the screen it takes
+// you to. `kw` adds search aliases.
 function cmdkCommands(){
   const go=name=>()=>document.querySelector('.tab[data-tab="'+name+'"]').click();
   const goSet=sec=>()=>{document.querySelector('.tab[data-tab="settings"]').click();const b=document.querySelector('#setNav button[data-sec="'+sec+'"]');if(b)b.click();};
   return [
-    {t:'Go to Proxy History',kw:'proxy history flows requests traffic inspect captured',run:go('proxy')},
+    {t:'Go to Proxy',kw:'proxy history flows requests traffic inspect captured',run:go('proxy')},
     {t:'Go to Intercept',kw:'hold forward drop match replace rules',run:go('intercept')},
     {t:'Go to Repeater',kw:'resend craft edit request',run:go('repeater')},
     {t:'Go to Intruder',kw:'fuzz brute force payloads enumerate',run:go('intruder')},
@@ -208,19 +210,23 @@ function cmdkCommands(){
     {t:'Open Authz test',kw:'authorization access control roles identity',run:()=>{const f=selectedFlow();if(f)openAuthz(f.id);else toast('select a flow in History first');}},
     {t:'Send selected flow to Repeater',kw:'resend craft edit request history',run:()=>{const f=selectedFlow();if(f)sendToRepeater(f);else toast('select a flow in History first');}},
     {t:'Send selected flow to Intruder',kw:'fuzz brute force payloads enumerate',run:()=>{const f=selectedFlow();if(f)sendToIntruder(f);else toast('select a flow in History first');}},
+    {t:'Open Decoder (base64 / url / jwt / hex…)',kw:'encode decode smart',run:()=>openDecoder()},
+    {t:'Compare selected flows (diff)',kw:'compare diff two flows responses side by side',run:()=>openCompare()},
+    {t:'Copy selected flow as cURL',kw:'curl copy clipboard request reproduce',run:()=>{const f=selectedFlow();if(f)copyCurl(f);else toast('select a flow in History first');}},
     ...(state.aiDisabled?[]:[{t:'Go to Activity',kw:'ai mcp glass box agent log',run:go('activity')}]),
     {t:'Switch or create project',kw:'projects workspace engagement open new default',run:openProjectModal},
+    {t:'Run setup wizard',kw:'setup wizard onboarding first run guide proxy ca scope',run:openSetup},
     {t:'Toggle theme (dark / light)',kw:'dark mode light appearance ui color scheme',run:toggleTheme},
-    {t:'Settings: API & MCP',kw:'keys tokens rest mcp reference',run:goSet('api')},
-    {t:'Settings: Proxy & network',kw:'listener bind port upstream system proxy capture browser telemetry',run:goSet('proxy')},
-    {t:'Settings: TLS / CA — download CA certificate',kw:'https certificate cert trust install ca download mitm ssl pinning mobile android',run:goSet('tls')},
+    {t:'Settings: Proxy & network',kw:'listener bind port upstream system proxy capture browser telemetry invisible',run:goSet('proxy')},
+    {t:'Settings: TLS / CA — download CA certificate',kw:'https certificate cert trust install ca download mitm ssl pinning diagnosis passthrough bypass',run:goSet('tls')},
+    {t:'Settings: Mobile devices — Android / iOS',kw:'android ios adb simulator device jailbreak ssh proxy install ca mobile phone',run:goSet('devices')},
     {t:'Settings: Target scope',kw:'include exclude host path in scope',run:goSet('scope')},
     {t:'Settings: AI assist — provider & API key',kw:'anthropic openrouter model api key llm',run:goSet('ai')},
-    {t:'Settings: Session / auth headers',kw:'cookie token authorization bearer login',run:goSet('session')},
     {t:'Settings: Scanner & OOB',kw:'scanner oob passive active checks enable',run:goSet('scanner')},
+    {t:'Settings: Session / auth headers',kw:'cookie token authorization bearer login macro',run:goSet('session')},
     {t:'Settings: Project & data — export, import, retention',kw:'export import har json switch project data retention delete purge gc reclaim space',run:goSet('project')},
-    {t:'Open Decoder (base64 / url / jwt / hex…)',kw:'encode decode smart',run:()=>openDecoder()},
-    {t:'Keyboard shortcuts',kw:'help cheatsheet keys hotkeys',run:()=>openModal($('#shortcutsModal'))},
+    {t:'Settings: API & MCP',kw:'keys tokens rest mcp reference',run:goSet('api')},
+    {t:'Shortcuts',kw:'help cheatsheet keys hotkeys',run:()=>openModal($('#shortcutsModal'))},
   ];
 }
 function cmdkRender(){

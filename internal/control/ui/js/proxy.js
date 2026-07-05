@@ -51,6 +51,7 @@ const FLOW_FETCH=FLOW_PAGE+FLOW_BUFFER;
 const ROW_H=28;                 // virtualized row height (px)
 const VIRT_MIN=120;             // virtualize when more rows than this
 const VIRT_BUF=40;
+const MAX_LIVE_FLOWS=5000;      // cap the in-memory live list so long capture sessions don't grow unbounded (older rows stay on the server, reachable via scroll paging)
 let flowHasMore=false;         // the server may have older flows past what's loaded
 let loadingMore=false;         // a scroll-triggered page fetch is in flight
 let virtScrollBound=false;
@@ -307,6 +308,13 @@ export function upsertFlow(f){
     state.flows.unshift(f);
     flowMap.set(f.id,f);
     if(f.method && !seenMethods.has(f.method)){ seenMethods.add(f.method); methodsDirty=true; }
+    // Bound memory on long live sessions: drop the oldest rows past the cap.
+    // They remain on the server and reload when the user scrolls to the bottom.
+    if(state.flows.length>MAX_LIVE_FLOWS){
+      const dropped=state.flows.splice(MAX_LIVE_FLOWS);
+      dropped.forEach(d=>{flowMap.delete(d.id); if(state.selected)state.selected.delete(d.id);});
+      flowHasMore=true;
+    }
   } else { scheduleReload(); return; }
   $('#rowCount').textContent=state.flows.length;
 }
@@ -474,11 +482,7 @@ export function toggleSelectAllShown(){
   if(all)state.selected.clear();else list.forEach(f=>state.selected.add(f.id));
   updateSelBar();renderRows();
 }
-function updateSearchNoteBanner(){
-  const el=$('#flowSearchNote');if(!el)return;
-  if(state.flowSearchNote){el.style.display='';el.textContent=state.flowSearchNote;}
-  else el.style.display='none';
-}
+function updateSearchNoteBanner(){}
 // buildFlowParams encodes the active filters into a query (without limit/cursor),
 // shared by the initial load and the scroll-triggered page loads.
 function buildFlowParams(){
@@ -1024,7 +1028,7 @@ function flowGlobalSection(f,head){
   ];
   if(!state.aiDisabled){
     items.push({sep:true},
-      {label:'✨ Ask AI',act:()=>openAi([f.id])});
+      {label:'✨ Ask AI',act:()=>openAi({ids: [f.id]})});
   }
   items.push({sep:true},
     {label:'🔍 Scan this host',val:f.host,act:()=>prefillScanner(f.host, (f.path||'').split('?')[0])},
@@ -1220,7 +1224,7 @@ function compareLineDiff(a,b){
   }
   return rows.join('')+(n>300?'<div class="hint">…line diff truncated</div>':'');
 }
-async function openCompare(){
+export async function openCompare(){
   const ids=[...state.selected].sort((a,b)=>a-b);
   if(ids.length!==2){toast('select exactly 2 flows');return;}
   openModal($('#compareModal'));
@@ -1249,7 +1253,7 @@ async function openCompare(){
 if($('#selCompare'))$('#selCompare').onclick=openCompare;
 if($('#compareClose'))$('#compareClose').onclick=()=>closeModal($('#compareModal'));
 $('#selClear').onclick=()=>{state.selected.clear();state.lastSelIdx=-1;renderRows();updateSelBar();};
-$('#selAsk').onclick=()=>{const ids=[...state.selected];if(ids.length)openAi(ids);};
+$('#selAsk').onclick=()=>{const ids=[...state.selected];if(ids.length)openAi({ids});};
 $('#selScope').onclick=async()=>{
   const hosts=[...new Set([...state.selected].map(id=>{const f=flowMap.get(id);return f&&f.host;}).filter(Boolean))];
   if(!hosts.length)return;

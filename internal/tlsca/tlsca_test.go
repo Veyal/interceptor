@@ -129,3 +129,19 @@ func TestTLSConfigUsesSNI(t *testing.T) {
 		t.Fatalf("expected SAN host.test, got %v", x.DNSNames)
 	}
 }
+
+// LoadOrCreate must create the CA dir 0o700: it holds the CA private key, so
+// only the owner should be able to traverse it (defense in depth).
+func TestLoadOrCreateDirPerms(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ca")
+	if _, err := LoadOrCreate(dir); err != nil {
+		t.Fatalf("LoadOrCreate: %v", err)
+	}
+	fi, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := fi.Mode().Perm(); perm != 0o700 {
+		t.Fatalf("CA dir perms = %o, want 700", perm)
+	}
+}

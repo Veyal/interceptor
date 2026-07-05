@@ -39,6 +39,17 @@ func (h *Hub) securityGuard(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// Primary defense: the connection's SERVER-SIDE local address. A remote
+		// client can spoof any Host header, but it cannot make its packets arrive on
+		// our loopback interface — so if the connection landed on a non-loopback
+		// local address, reject regardless of Host. This closes a spoofed-Host bypass
+		// when the control plane is bound to a routable interface. When the local
+		// address is unavailable (unusual transports/tests) we fall back to the Host
+		// check alone, preserving existing loopback-bind behavior.
+		if la, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr); ok && !isLoopbackAddr(la) {
+			httpErr(w, http.StatusForbidden, "the control plane only accepts loopback requests (non-loopback connection)")
+			return
+		}
 		if !isLoopbackHost(r.Host) {
 			httpErr(w, http.StatusForbidden, "the control plane only accepts loopback requests (rejected Host)")
 			return
@@ -111,6 +122,18 @@ func isLoopbackHost(host string) bool {
 		return true
 	}
 	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
+}
+
+// isLoopbackAddr reports whether a net.Addr (the connection's server-side local
+// address) names the loopback interface. Unlike the Host header this is set by
+// the kernel from the accepting socket, so a remote client cannot spoof it.
+func isLoopbackAddr(a net.Addr) bool {
+	host, _, err := net.SplitHostPort(a.String())
+	if err != nil {
+		host = a.String()
+	}
+	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
 }
 

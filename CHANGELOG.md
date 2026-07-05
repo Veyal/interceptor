@@ -1,4 +1,4 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to **Interceptor** are recorded here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 > **Archive:** Release notes for 0.11.0 and earlier live in [CHANGELOG/archive/pre-0.12.md](CHANGELOG/archive/pre-0.12.md).
 
-## [Unreleased]
-
 ## [0.27.1] - 2026-07-03
 
 ### Changed
@@ -16,6 +14,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - **Adding a second proxy listener failed with "address already in use" on the port already bound.** Adding `127.0.0.1:8083` while `127.0.0.1:8080` was running errored, because the rebind re-bound the *entire* desired address set — including the port the live listener still held (listeners are opened before the old ones close, so the existing port could not be re-bound). The rebind now reconciles against the running set: it binds only newly added addresses, keeps existing listeners untouched, and drains only removed ones. A bad address in the new set still leaves the live listeners intact.
+
+## [Unreleased]
+
+### Added
+- **Ask AI on findings.** An "Ask AI" button has been added to the Findings view. When clicked, the AI is pre-loaded with the finding's context (title, severity, description blocks, impact) and any linked PoC flows, allowing seamless AI analysis of vulnerabilities.
+- **Settings search.** A search box atop the Settings nav filters sections by label or body text, so options are discoverable without knowing which group they live in (Esc clears).
+- **Danger zone.** Destructive/irreversible settings (Data & Retention deletes, purge, GC) now render in a red-bordered card, visually separated from ordinary configuration.
+- **Mobile devices settings tab.** Android (ADB), iOS (Simulator & Device), and iOS jailbroken (SSH) moved out of TLS / CA into their own **Mobile devices** section, so TLS / CA now holds only the CA download, SSL-pinning diagnosis, and trust guide.
+- **Command palette coverage.** Added Ctrl+K entries for Mobile devices settings, Compare selected flows, Copy selected flow as cURL, Switch/create project, Run setup wizard, and Toggle theme — closing gaps where screens weren't reachable from the palette.
+
+### Changed
+- Consolidated `CLAUDE.md` + `CONTRIBUTING.md` into single `AGENTS.md` with symlinks to `CLAUDE.md`, `.cursorrules`, `.opencode/rules.md`.
+- Added `orchestrator` skill for subagent delegation (architect, backend, frontend, reviewer, tester).
+- Proxy/Settings live refresh: a `settings.update` SSE event now also reloads the version badge, system proxy, device-proxy endpoint, and Android/iOS status panels (previously only reloaded core settings).
+- Command palette labels shortened ("Go to Proxy", "Shortcuts").
+- **UI density/readability pass.** Introduced a proportional `--ui` font for chrome/labels/prose (mono retained for HTTP dumps and data); raised the base font to 13px and floored secondary text (hints, settings labels/inputs, section headers) to more readable sizes; added breathing room to Settings sections.
+- **Enriched Aesthetics.** Upgraded the global UI with modern typography (Inter and JetBrains Mono), glassmorphism (blurred toolbars/headers), smooth hover transitions, and a refined HSL dark/light palette with subtle gradients.
+- **AI Reasoning Rendering.** Markdown parsing now intercepts `<think>`, `<thought>`, and `<reasoning>` tags emitted by advanced reasoning models, automatically formatting them into clean, collapsible "Thinking process" blocks to keep chat output neat.
+- `.gitignore`: ignore plugin artifacts (`.harness-memory/`, `.opencode/node_modules/`, `.opencode/package-lock.json`).
+
+### Fixed
+- **Token macro settings save.** The token-macro target-URL input carried a duplicate `id="macroReq"` (shared with the refresh-request textarea) and no `#macroTarget` element existed, so saving the session threw a `TypeError` and silently failed. Renamed the input to `id="macroTarget"`.
+- **Proxy history memory.** The in-memory live flow list is now capped (5000 rows) so long capture sessions no longer grow unbounded; older rows remain on the server and reload on scroll.
+
+### Removed
+- Proxy History flow search-note banner (`updateSearchNoteBanner` is now a no-op).
 
 ## [0.27.0] - 2026-07-03
 

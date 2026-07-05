@@ -245,10 +245,21 @@ func (h *projectAPI) switchProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"switching": target})
-	go func() {
-		time.Sleep(300 * time.Millisecond)
+	h.scheduleProjectSwitch(target, 300*time.Millisecond)
+}
+
+// scheduleProjectSwitch arms a delayed switch to target after d, canceling any
+// pending switch first so rapid repeated requests don't stack delayed re-execs —
+// only the latest target actually fires. Guarded by switchMu.
+func (h *Hub) scheduleProjectSwitch(target string, d time.Duration) {
+	h.switchMu.Lock()
+	defer h.switchMu.Unlock()
+	if h.switchTimer != nil {
+		h.switchTimer.Stop()
+	}
+	h.switchTimer = time.AfterFunc(d, func() {
 		if err := h.SwitchProject(target); err != nil {
 			log.Printf("control: project switch to %q failed: %v", target, err)
 		}
-	}()
+	})
 }
