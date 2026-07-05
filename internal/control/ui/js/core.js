@@ -51,6 +51,88 @@ export function setSeg(btn,on){
   btn.setAttribute('aria-pressed',on?'true':'false');
 }
 
+// createTabManager — generic "tabs with localStorage persistence" pattern,
+// extracted from Repeater's and Intruder's independently-reimplemented copies
+// (docs/UI-REDESIGN-ROADMAP.md §4 consolidation targets). Each panel keeps its
+// own tab shape (fields differ between Repeater/Intruder) and its own editor
+// wiring — the manager only owns the array/active-id/seq bookkeeping, the
+// localStorage round-trip, and the `.rep-tab` bar markup, via hooks:
+//   storageKey  — localStorage key (unchanged from before: 'rep.tabs'/'intr.tabs')
+//   blank(seq)  — create a new tab object (receives the next tid)
+//   title(tab)  — label text for the tab bar / tooltip
+//   onSave()    — snapshot the live editor DOM into the (about to be inactive
+//                 or about to be persisted) active tab; called before switching,
+//                 closing, adding or persisting
+//   onLoad(tab) — paint `tab` into the editor DOM; called after switching,
+//                 closing, adding, or on init
+//   normalize(raw) — rehydrate one persisted tab object from localStorage into
+//                 the shape the panel expects (defaults + type coercion)
+//   serialize(tab) — transform a tab before it's written to localStorage
+//                 (defaults to identity; Intruder uses this to drop huge
+//                 payload arrays down to a truncated/counted form)
+//   labelStyle(tab,isActive) — optional inline `style="…"` attribute value
+//                 for a tab's `.rt-label` span (Repeater colors it by method;
+//                 omit to leave the span unstyled)
+// Returns {tabs,cur,add,switchTo,close,persist,persistDebounced,render,init}.
+export function createTabManager(opts){
+  const {storageKey,blank,title,onSave,onLoad,normalize,serialize=(t=>t),labelStyle}=opts;
+  const mgr={tabs:[],active:null,seq:1,persistT:null};
+  mgr.cur=()=>mgr.tabs.find(t=>t.tid===mgr.active)||null;
+  mgr.persist=function(){
+    try{localStorage.setItem(storageKey,JSON.stringify({seq:mgr.seq,active:mgr.active,tabs:mgr.tabs.map(serialize)}));}catch(e){}
+  };
+  mgr.persistDebounced=function(){clearTimeout(mgr.persistT);mgr.persistT=setTimeout(mgr.persist,400);};
+  mgr.render=function(barSel){
+    const bar=$(barSel);if(!bar)return;
+    bar.innerHTML=mgr.tabs.map(t=>{
+      const active=t.tid===mgr.active;
+      const style=labelStyle?labelStyle(t,active):'';
+      return `<div class="rep-tab${active?' on':''}" data-tid="${t.tid}" title="${escAttr(title(t))}">
+    <span class="rt-label"${style?` style="${escAttr(style)}"`:''}>${esc(title(t))}</span>
+    <button type="button" class="rt-close" data-close="${t.tid}" aria-label="close tab" title="close tab">✕</button></div>`;
+    }).join('')+`<button class="rep-tab-add" id="${bar.id}Add" title="New tab">＋</button>`;
+    bar.querySelectorAll('.rep-tab').forEach(el=>{el.onclick=e=>{if(e.target.dataset.close!=null)return;mgr.switchTo(Number(el.dataset.tid));};wireRowKey(el,()=>mgr.switchTo(Number(el.dataset.tid)));});
+    bar.querySelectorAll('[data-close]').forEach(x=>x.onclick=e=>{e.stopPropagation();mgr.close(Number(x.dataset.close));});
+    const addBtn=$('#'+bar.id+'Add');
+    if(addBtn)addBtn.onclick=()=>{
+      onSave();mgr.tabs.push(blank(mgr.seq++));mgr.active=mgr.tabs[mgr.tabs.length-1].tid;
+      mgr.render(barSel);onLoad(mgr.cur());mgr.persist();
+    };
+  };
+  mgr.switchTo=function(tid){if(tid===mgr.active)return;onSave();mgr.active=tid;mgr._rerender();onLoad(mgr.cur());mgr.persist();};
+  mgr.close=function(tid){
+    const i=mgr.tabs.findIndex(t=>t.tid===tid);if(i<0)return;
+    const wasActive=tid===mgr.active;
+    mgr.tabs.splice(i,1);
+    if(!mgr.tabs.length)mgr.tabs.push(blank(mgr.seq++));
+    if(wasActive)mgr.active=mgr.tabs[Math.min(i,mgr.tabs.length-1)].tid;
+    mgr._rerender();
+    if(wasActive)onLoad(mgr.cur());
+    mgr.persist();
+  };
+  // init loads persisted tabs (or seeds one blank tab), wires the bar, and
+  // paints the editor. barSel is stored so switchTo/close/add can re-render
+  // the same bar without every caller having to pass it again.
+  mgr.init=function(barSel){
+    mgr._rerender=()=>mgr.render(barSel);
+    let ok=false;
+    try{
+      const d=JSON.parse(localStorage.getItem(storageKey)||'null');
+      if(d&&d.tabs&&d.tabs.length){
+        mgr.tabs=d.tabs.map(normalize);
+        mgr.active=(d.active&&mgr.tabs.find(x=>x.tid===d.active))?d.active:mgr.tabs[0].tid;
+        const fin=mgr.tabs.map(t=>t.tid).filter(Number.isFinite);
+        mgr.seq=Math.max(d.seq||0,(fin.length?Math.max(...fin):0)+1);
+        ok=true;
+      }
+    }catch(e){}
+    if(!ok){mgr.tabs=[blank(mgr.seq++)];mgr.active=mgr.tabs[0].tid;}
+    mgr._rerender();
+    onLoad(mgr.cur());
+  };
+  return mgr;
+}
+
 // ui-select — themed dropdowns that replace the OS-native select menu. The native
 // <select> stays in the DOM (hidden) so existing .value / .onchange / innerHTML
 // code keeps working; we mirror options into a custom menu and dispatch change.

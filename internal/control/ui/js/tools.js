@@ -1,14 +1,17 @@
-import { $, esc, escAttr, toast, api, methodColor, statusColor, statusText, highlightHTTP, highlightHeaderLines, highlightBodyText, prettify, beautifyBody, fmtDur, fmtSize, openCtxMenu, DEC_OPS, contentTypeFromRaw, pickTextFile, normalizeListText, parseListLines, previewListLines, LIST_PREVIEW_LINES, wireRowKey, uiPrompt } from './core.js';
+import { $, esc, escAttr, toast, api, methodColor, statusColor, statusText, highlightHTTP, highlightHeaderLines, highlightBodyText, prettify, beautifyBody, fmtDur, fmtSize, openCtxMenu, DEC_OPS, contentTypeFromRaw, pickTextFile, normalizeListText, parseListLines, previewListLines, LIST_PREVIEW_LINES, wireRowKey, uiPrompt, createTabManager } from './core.js';
 
 // repStatusLine builds a rich response summary: "200 OK · 142 ms · 4.1 KB".
 function repStatusLine(f){
   const head=f.status?f.status+' '+statusText(f.status):(f.error||'sent');
   return head+(f.durationMs?' · '+fmtDur(f.durationMs):'')+(f.resLen!=null?' · '+fmtSize(f.resLen):'');
 }
+// REP_RES_EMPTY — the response pane's placeholder before any send. #repResView
+// is a <pre> (it renders raw/highlighted HTTP once a response arrives), so the
+// shared .state-empty block is nested inside it rather than replacing the tag.
+const REP_RES_EMPTY='<div class="state-empty"><div class="state-empty-icon">▸</div><div class="state-empty-title">No response yet</div><p class="state-empty-hint">Send a request to see the response.</p></div>';
 
 /* ---- repeater (multi-tab; each tab = an endpoint with its own history) ---- */
-export let repSeq=1, repTabs=[], repActive=null;
-export function repBlank(){return {tid:repSeq++,title:'new tab',method:'GET',url:'',headers:'',body:'',reqView:'pretty',resId:null,resView:'pretty',status:'',color:''};}
+export function repBlank(seq){return {tid:seq,title:'new tab',method:'GET',url:'',headers:'',body:'',reqView:'pretty',resId:null,resView:'pretty',status:'',color:''};}
 // repReqContentType reads Content-Type from the editable headers pane so the body
 // overlay highlights with the right syntax (JSON/markup/CSS) even before a send.
 function repReqContentType(){const h=$('#repHeaders');if(!h)return'';const m=(h.value||'').match(/^content-type:\s*(\S.*?)(?:\s*;|\s*$)/im);return m?m[1].trim():'';}
@@ -20,7 +23,6 @@ export function repRefreshHL(){
   if(h)h.innerHTML=highlightHeaderLines(($('#repHeaders').value)||'')+'\n';
   if(b)b.innerHTML=highlightBodyText(($('#repBody').value)||'',repReqContentType())+'\n';
 }
-export function repCur(){return repTabs.find(t=>t.tid===repActive)||null;}
 export function repTitle(t){if(!t.url)return 'new tab';try{const u=new URL(t.url);return t.method+' '+u.host+u.pathname;}catch(e){return t.method+' '+t.url.slice(0,46);}}
 export function repTabEndpoint(t){if(!t||!t.url)return null;try{const u=new URL(t.url);return u.host+u.pathname;}catch(e){return null;}}
 export function repFlowEndpoint(f){return f.host+String(f.path||'').split('?')[0];}
@@ -40,27 +42,27 @@ function repSyncReqSeg(view){
   seg.querySelectorAll('button').forEach(x=>{const on=x.dataset.view===view;x.classList.toggle('on',on);x.setAttribute('aria-pressed',on?'true':'false');});
 }
 
-export function renderRepTabs(){
-  const bar=$('#repTabs');if(!bar)return;
-  bar.innerHTML=repTabs.map(t=>`<div class="rep-tab${t.tid===repActive?' on':''}" data-tid="${t.tid}" title="${escAttr(t.title||'new tab')}">
-    <span class="rt-label" style="color:${t.tid===repActive?methodColor(t.method):'inherit'}">${esc(t.title||'new tab')}</span>
-    <button type="button" class="rt-close" data-close="${t.tid}" aria-label="close tab" title="close tab">✕</button></div>`).join('')
-    +`<button class="rep-tab-add" id="repTabAdd" title="New tab">＋</button>`;
-  bar.querySelectorAll('.rep-tab').forEach(el=>{el.onclick=e=>{if(e.target.dataset.close!=null)return;repSwitch(Number(el.dataset.tid));};wireRowKey(el,()=>repSwitch(Number(el.dataset.tid)));});
-  bar.querySelectorAll('[data-close]').forEach(x=>x.onclick=e=>{e.stopPropagation();repCloseTab(Number(x.dataset.close));});
-  $('#repTabAdd').onclick=()=>{repSaveEditor();repTabs.push(repBlank());repActive=repTabs[repTabs.length-1].tid;renderRepTabs();repLoadEditor();repPersist();};
-}
-export function repSwitch(tid){if(tid===repActive)return;repSaveEditor();repActive=tid;renderRepTabs();repLoadEditor();repPersist();}
-export function repCloseTab(tid){
-  const i=repTabs.findIndex(t=>t.tid===tid);if(i<0)return;
-  const wasActive=tid===repActive;
-  repTabs.splice(i,1);
-  if(!repTabs.length)repTabs.push(repBlank());
-  if(wasActive)repActive=repTabs[Math.min(i,repTabs.length-1)].tid;
-  renderRepTabs();repLoadEditor();repPersist();
-}
+// repTabs — shared tab-manager instance (docs/UI-REDESIGN-ROADMAP.md §4). The
+// localStorage key ('rep.tabs') and persisted shape are unchanged from before
+// the extraction so existing users' saved tabs keep loading.
+export const repTabs=createTabManager({
+  storageKey:'rep.tabs',
+  blank:repBlank,
+  title:repTitle,
+  onSave:()=>repSaveEditor(),
+  onLoad:()=>repLoadEditor(),
+  normalize:t=>({tid:t.tid,method:t.method||'GET',url:t.url||'',headers:t.headers||'',body:t.body||'',reqView:t.reqView||'pretty',resView:t.resView||'pretty',resId:null,status:'',color:'',title:''}),
+  serialize:t=>({tid:t.tid,method:t.method,url:t.url,headers:t.headers,body:t.body,reqView:t.reqView||'pretty',resView:t.resView}),
+  labelStyle:(t,active)=>`color:${active?methodColor(t.method):'inherit'}`,
+});
+export function repCur(){return repTabs.cur();}
+export function renderRepTabs(){repTabs.render('#repTabs');}
+export function repSwitch(tid){repTabs.switchTo(tid);}
+export function repCloseTab(tid){repTabs.close(tid);}
+export function repPersist(){repTabs.persist();}
+export function repPersistDebounced(){repTabs.persistDebounced();}
 export function repSaveEditor(){const t=repCur();if(!t)return;t.method=$('#repMethod').value;t.url=$('#repUrl').value;t.headers=$('#repHeaders').value;t.body=$('#repBody').value;t.title=repTitle(t);}
-export function repNewTab(){repSaveEditor();const t=repBlank();repTabs.push(t);repActive=t.tid;renderRepTabs();return t;}
+export function repNewTab(){repSaveEditor();const t=repBlank(repTabs.seq++);repTabs.tabs.push(t);repTabs.active=t.tid;renderRepTabs();return t;}
 export function repLoadEditor(){
   const t=repCur();if(!t)return;
   $('#repMethod').value=t.method||'GET';$('#repUrl').value=t.url||'';$('#repHeaders').value=t.headers||'';
@@ -70,7 +72,7 @@ export function repLoadEditor(){
   repRefreshHL();
   $('#repResSeg').querySelectorAll('button').forEach(x=>{const on=x.dataset.view===(t.resView||'pretty');x.classList.toggle('on',on);x.setAttribute('aria-pressed',on?'true':'false');});
   if(t.resId){$('#repStatus').textContent=t.status||'';$('#repStatus').style.color=t.color||'var(--fg3)';renderRepResponse();}
-  else{$('#repStatus').textContent='';$('#repResView').innerHTML='<span style="color:var(--fg3)">Send a request to see the response.</span>';}
+  else{$('#repStatus').textContent='';$('#repResView').innerHTML=REP_RES_EMPTY;}
   loadRepHistory();
 }
 export async function repSend(){
@@ -136,9 +138,9 @@ export async function sendToRepeater(f){
   document.querySelector('.tab[data-tab="repeater"]').click();
   repSaveEditor();
   const fep=repFlowEndpoint(f);
-  let t=repTabs.find(x=>repTabEndpoint(x)===fep);
-  if(!t){t=repBlank();repTabs.push(t);}
-  repActive=t.tid;
+  let t=repTabs.tabs.find(x=>repTabEndpoint(x)===fep);
+  if(!t){t=repBlank(repTabs.seq++);repTabs.tabs.push(t);}
+  repTabs.active=t.tid;
   try{
     const d=await api('/api/flows/'+f.id);
     const def=(d.scheme==='https'&&d.port===443)||(d.scheme==='http'&&d.port===80);
@@ -149,27 +151,15 @@ export async function sendToRepeater(f){
     toast('loaded #'+f.id+' into Repeater');
   }catch(e){toast(e.message);}
 }
-export function repPersist(){try{localStorage.setItem('rep.tabs',JSON.stringify({seq:repSeq,active:repActive,tabs:repTabs.map(t=>({tid:t.tid,method:t.method,url:t.url,headers:t.headers,body:t.body,reqView:t.reqView||'pretty',resView:t.resView}))}));}catch(e){}}
-export let repPersistT=null;export function repPersistDebounced(){clearTimeout(repPersistT);repPersistT=setTimeout(repPersist,400);}
 export function repInit(){
-  let ok=false;
-  try{const d=JSON.parse(localStorage.getItem('rep.tabs')||'null');
-    if(d&&d.tabs&&d.tabs.length){
-      repTabs=d.tabs.map(t=>({tid:t.tid,method:t.method||'GET',url:t.url||'',headers:t.headers||'',body:t.body||'',reqView:t.reqView||'pretty',resView:t.resView||'pretty',resId:null,status:'',color:'',title:''}));
-      repTabs.forEach(t=>t.title=repTitle(t));
-      repActive=(d.active&&repTabs.find(x=>x.tid===d.active))?d.active:repTabs[0].tid;
-      {const fin=repTabs.map(t=>t.tid).filter(Number.isFinite);repSeq=Math.max(d.seq||0,(fin.length?Math.max(...fin):0)+1);}ok=true;
-    }
-  }catch(e){}
-  if(!ok){repTabs=[repBlank()];repActive=repTabs[0].tid;}
-  renderRepTabs();repLoadEditor();
+  repTabs.init('#repTabs');
   ['#repMethod','#repUrl'].forEach(s=>{const el=$(s);if(el)el.addEventListener('input',()=>{
     repSaveEditor();
     // Typing in method/url only changes the active tab's label — don't rebuild the
     // whole tab bar (and re-wire every tab) on every keystroke. Update the label.
     const t=repCur(); if(t){
       const lbl=document.querySelector('#repTabs .rep-tab.on .rt-label');
-      if(lbl){lbl.textContent=t.title||'new tab'; lbl.style.color=t.tid===repActive?methodColor(t.method):'inherit';}
+      if(lbl){lbl.textContent=t.title||'new tab'; lbl.style.color=t.tid===repTabs.active?methodColor(t.method):'inherit';}
       const tab=document.querySelector('#repTabs .rep-tab.on'); if(tab)tab.title=t.title||'new tab';
     }
     repPersistDebounced();
@@ -229,6 +219,8 @@ const POS_COLORS=['var(--accent)','var(--blue)','var(--amber)','var(--violet)','
 const INTR_TPL='POST /login HTTP/1.1\nHost: example.com\nContent-Type: application/json\n\n{"user":"§admin§","pass":"§password§"}';
 const INTR_SNIPER="admin\nadministrator\nroot\n' OR 1=1--\n../../../etc/passwd";
 const INTR_POS=["admin\nadministrator\nroot","password\n123456\nchangeme"];
+// INTR_RESULTS_EMPTY — the idle state of #intrResults before the first attack.
+const INTR_RESULTS_EMPTY='<div class="state-empty"><div class="state-empty-icon">🎯</div><div class="state-empty-title">No results yet</div><p class="state-empty-hint">Set a target, mark <b>§</b> injection points, add payloads, then <b>Start</b>.</p></div>';
 // Live editing mirror of the active tab's mode + payload lists (the other fields —
 // target/template/threads/delay/repeat — live in the DOM and are snapshotted to tabs).
 export const intrState={type:'sniper',sniper:INTR_SNIPER,pos:INTR_POS.slice(),sniperLines:null,posLines:[],sniperFile:null,posFiles:[]};
@@ -274,9 +266,7 @@ function intrClearPayloadLines(slot){
 function intrMarkers(){return (($('#intrTemplate').value||'').match(/§[^§]*§/g)||[]).map(s=>s.slice(1,-1));}
 
 /* ---- intruder tabs: each is a full saved attack config (mirrors Repeater) ---- */
-let intrSeq=1, intrTabs=[], intrActive=null, intrPersistT=null;
-function intrBlank(){return {tid:intrSeq++,target:'',template:INTR_TPL,type:'sniper',threads:1,delay:0,repeat:20,sniper:INTR_SNIPER,pos:INTR_POS.slice(),sniperLines:null,posLines:[],sniperFile:null,posFiles:[],grep:'',extract:'',proc:''};}
-function intrCur(){return intrTabs.find(t=>t.tid===intrActive)||null;}
+function intrBlank(seq){return {tid:seq,target:'',template:INTR_TPL,type:'sniper',threads:1,delay:0,repeat:20,sniper:INTR_SNIPER,pos:INTR_POS.slice(),sniperLines:null,posLines:[],sniperFile:null,posFiles:[],grep:'',extract:'',proc:''};}
 function intrTypeLabel(t){return t==='repeat'?'repeat':(t||'sniper');}
 function intrTitle(t){if(!t)return 'new attack';let h='';try{h=new URL(t.target).host;}catch(e){h=(t.target||'').replace(/^https?:\/\//,'');}return intrTypeLabel(t.type)+(h?' · '+h:' attack');}
 function intrReadEditor(){return {target:$('#intrTarget').value,template:$('#intrTemplate').value,
@@ -284,7 +274,7 @@ function intrReadEditor(){return {target:$('#intrTarget').value,template:$('#int
   grep:$('#intrGrep').value,extract:$('#intrExtract').value,proc:$('#intrProc').value,
   type:intrState.type,sniper:intrState.sniper,pos:intrState.pos.slice(),
   sniperLines:intrState.sniperLines,posLines:intrState.posLines?.slice()||[],sniperFile:intrState.sniperFile,posFiles:intrState.posFiles?.slice()||[]};}
-function intrSaveCur(){const t=intrCur();if(t)Object.assign(t,intrReadEditor());}
+function intrSaveCur(){const t=intrTabs.cur();if(t)Object.assign(t,intrReadEditor());}
 function intrApply(t){if(!t)return;
   $('#intrTarget').value=t.target||'';$('#intrTemplate').value=t.template||'';
   $('#intrThreads').value=t.threads||1;$('#intrDelay').value=t.delay||0;$('#intrRepeat').value=t.repeat||20;
@@ -302,28 +292,24 @@ function intrTabForStorage(t){
   }
   return o;
 }
-function intrPersist(){try{localStorage.setItem('intr.tabs',JSON.stringify({seq:intrSeq,active:intrActive,tabs:intrTabs.map(intrTabForStorage)}));}catch(e){}}
-function intrPersistDebounced(){clearTimeout(intrPersistT);intrPersistT=setTimeout(intrPersist,400);}
-function intrTouch(){intrSaveCur();renderIntrTabs();intrPersistDebounced();} // save editor → active tab
-function renderIntrTabs(){
-  const bar=$('#intrTabs');if(!bar)return;
-  bar.innerHTML=intrTabs.map(t=>`<div class="rep-tab${t.tid===intrActive?' on':''}" data-tid="${t.tid}" title="${escAttr(intrTitle(t))}"><span class="rt-label">${esc(intrTitle(t))}</span><button type="button" class="rt-close" data-close="${t.tid}" aria-label="close tab" title="close tab">✕</button></div>`).join('')+`<button class="rep-tab-add" id="intrTabAdd" title="New attack">＋</button>`;
-  bar.querySelectorAll('.rep-tab').forEach(el=>{el.onclick=e=>{if(e.target.dataset.close!=null)return;intrSwitch(Number(el.dataset.tid));};wireRowKey(el,()=>intrSwitch(Number(el.dataset.tid)));});
-  bar.querySelectorAll('[data-close]').forEach(x=>x.onclick=e=>{e.stopPropagation();intrCloseTab(Number(x.dataset.close));});
-  $('#intrTabAdd').onclick=()=>{intrSaveCur();intrTabs.push(intrBlank());intrActive=intrTabs[intrTabs.length-1].tid;renderIntrTabs();intrApply(intrCur());intrPersist();};
-}
-function intrSwitch(tid){if(tid===intrActive)return;intrSaveCur();intrActive=tid;renderIntrTabs();intrApply(intrCur());intrPersist();}
-function intrCloseTab(tid){const i=intrTabs.findIndex(t=>t.tid===tid);if(i<0)return;const wasActive=tid===intrActive;intrTabs.splice(i,1);if(!intrTabs.length)intrTabs.push(intrBlank());if(wasActive)intrActive=intrTabs[Math.min(i,intrTabs.length-1)].tid;renderIntrTabs();if(wasActive)intrApply(intrCur());intrPersist();}
+// intrTabs — shared tab-manager instance (docs/UI-REDESIGN-ROADMAP.md §4). The
+// localStorage key ('intr.tabs') and persisted shape (including the
+// sniperLarge/sniperCount/posCounts truncation fields) are unchanged from
+// before the extraction so existing users' saved attacks keep loading.
+const intrTabs=createTabManager({
+  storageKey:'intr.tabs',
+  blank:intrBlank,
+  title:intrTitle,
+  onSave:()=>intrSaveCur(),
+  onLoad:t=>intrApply(t),
+  normalize:t=>({tid:t.tid,target:t.target||'',template:t.template||INTR_TPL,type:t.type||'sniper',threads:t.threads||1,delay:t.delay||0,repeat:t.repeat||20,sniper:t.sniper||'',pos:Array.isArray(t.pos)?t.pos:[],sniperLines:t.sniperLines||null,posLines:Array.isArray(t.posLines)?t.posLines:[],sniperFile:t.sniperFile||null,posFiles:Array.isArray(t.posFiles)?t.posFiles:[],sniperLarge:!!t.sniperLarge,sniperCount:t.sniperCount||0,posCounts:Array.isArray(t.posCounts)?t.posCounts:[],grep:t.grep||'',extract:t.extract||'',proc:t.proc||''}),
+  serialize:intrTabForStorage,
+});
+function intrTouch(){intrSaveCur();renderIntrTabs();intrTabs.persistDebounced();} // save editor → active tab
+function renderIntrTabs(){intrTabs.render('#intrTabs');}
 export function intrInit(){
-  let ok=false;
-  try{const d=JSON.parse(localStorage.getItem('intr.tabs')||'null');
-    if(d&&d.tabs&&d.tabs.length){
-      intrTabs=d.tabs.map(t=>({tid:t.tid,target:t.target||'',template:t.template||INTR_TPL,type:t.type||'sniper',threads:t.threads||1,delay:t.delay||0,repeat:t.repeat||20,sniper:t.sniper||'',pos:Array.isArray(t.pos)?t.pos:[],sniperLines:t.sniperLines||null,posLines:Array.isArray(t.posLines)?t.posLines:[],sniperFile:t.sniperFile||null,posFiles:Array.isArray(t.posFiles)?t.posFiles:[],sniperLarge:!!t.sniperLarge,sniperCount:t.sniperCount||0,posCounts:Array.isArray(t.posCounts)?t.posCounts:[],grep:t.grep||'',extract:t.extract||'',proc:t.proc||''}));
-      intrActive=(d.active&&intrTabs.find(x=>x.tid===d.active))?d.active:intrTabs[0].tid;
-      {const fin=intrTabs.map(t=>t.tid).filter(Number.isFinite);intrSeq=Math.max(d.seq||0,(fin.length?Math.max(...fin):0)+1);}ok=true;}
-  }catch(e){}
-  if(!ok){intrTabs=[intrBlank()];intrActive=intrTabs[0].tid;}
-  renderIntrTabs();intrApply(intrCur());renderIntrHistory();loadIntrPresets();
+  intrTabs.init('#intrTabs');
+  renderIntrHistory();loadIntrPresets();
   $('#intrTarget')&&$('#intrTarget').addEventListener('input',intrTouch);
   $('#intrTemplate')&&$('#intrTemplate').addEventListener('input',()=>{intrTemplateChanged();intrTouch();});
   ['#intrThreads','#intrDelay','#intrRepeat'].forEach(s=>{const el=$(s);if(el)el.addEventListener('input',()=>{if(intrState.type==='repeat')renderPayloadInputs();else updateIntrCount();intrTouch();});});
@@ -415,7 +401,7 @@ function renderPayloadInputs(){
     const note=ta.closest('.intr-pl')?.querySelector('.intr-pl-note');
     if(note){
       note.textContent=intrPayloadNote(p);
-      const tab=intrCur();
+      const tab=intrTabs.cur();
       if(p==='s'&&tab?.sniperLarge&&!intrState.sniperLines){
         note.textContent=(tab.sniperCount?tab.sniperCount.toLocaleString()+' payloads were':'Large payload list was')+' not restored after reload — load the file again with 📂.';
       }else if(p!=='s'&&tab?.posCounts?.[Number(p)]&&!intrState.posLines?.[Number(p)]){
@@ -586,8 +572,11 @@ export function renderIntr(st){
   }
   if(running)scheduleIntr(); // self-poll until the attack converges (robust to event/POST races)
   const box=$('#intrResults');
-  if(st.error){box.innerHTML='<div class="hint" style="padding:12px;color:var(--red)">'+esc(st.error)+'</div>';return;}
-  if(!res.length){box.innerHTML='<div class="hint" style="padding:12px">'+(running?'sending…':'Set a target, mark § injection points in the template, add payloads, then Start.')+'</div>';return;}
+  if(st.error){box.innerHTML='<div class="state-error"><div class="state-error-icon">⚠</div><div class="state-error-msg">'+esc(st.error)+'</div></div>';return;}
+  if(!res.length){
+    box.innerHTML=running?'<div class="hint" style="padding:12px">sending…</div>':INTR_RESULTS_EMPTY;
+    return;
+  }
   if(res.length>=INTR_VIRT_MIN) renderIntrVirtual(box,res);
   else box.innerHTML=res.map(intrRowHTML).join('');
 }
@@ -632,10 +621,10 @@ export async function sendToIntruder(f){
   // and capture the active attack tab before any await so a sub-tab switch during
   // the fetch can't make intrTouch() save the request into the wrong tab.
   document.querySelector('.tab[data-tab="intruder"]').click();
-  const target=intrCur();
+  const target=intrTabs.cur();
   try{
     const [d,raw]=await Promise.all([api('/api/flows/'+f.id),api('/api/flows/'+f.id+'/raw?side=req')]);
-    if(intrCur()!==target)return;
+    if(intrTabs.cur()!==target)return;
     const def=(d.scheme==='https'&&d.port===443)||(d.scheme==='http'&&d.port===80);
     $('#intrTarget').value=`${d.scheme}://${d.host}${def?'':':'+d.port}`;
     $('#intrTemplate').value=raw.replace(/\r\n/g,'\n');

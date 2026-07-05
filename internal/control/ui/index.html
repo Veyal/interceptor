@@ -131,8 +131,8 @@
   <div class="panel" id="panel-intercept" role="tabpanel" aria-labelledby="tab-intercept" data-panel="intercept">
     <!-- control strip: the on/off switches + conditional filter -->
     <div class="icpt-bar">
-      <button class="icpt-sw" id="interceptToggle" aria-pressed="false" title="Hold matching requests before they leave"><span class="icpt-led"></span>Requests <b id="icptReqState">Off</b></button>
-      <button class="icpt-sw" id="respInterceptToggle" aria-pressed="false" title="Hold responses before they reach the client"><span class="icpt-led"></span>Responses <b id="icptResState">Off</b></button>
+      <button class="uisw" id="interceptToggle" aria-pressed="false" title="Hold matching requests before they leave"><span class="uisw-led"></span>Requests <b id="icptReqState">Off</b></button>
+      <button class="uisw" id="respInterceptToggle" aria-pressed="false" title="Hold responses before they reach the client"><span class="uisw-led"></span>Responses <b id="icptResState">Off</b></button>
       <div class="icpt-cond">
         <label class="icpt-chk"><input type="checkbox" id="interceptFilterOn"> Only hold when</label>
         <select id="interceptFilterTarget" class="btn"><option value="any">anything</option><option value="url">URL</option><option value="header">headers</option><option value="body">body</option><option value="method">method</option></select>
@@ -154,10 +154,10 @@
           <button class="btn danger" id="dropBtn" title="Drop (Ctrl+D)">✕ Drop</button>
         </div>
         <textarea class="icpt-raw" id="heldRaw" spellcheck="false" style="display:none" aria-label="Held message — edit the raw HTTP before forwarding"></textarea>
-        <div class="icpt-empty" id="heldEmpty">
-          <div class="icpt-empty-i">⏸</div>
-          <div class="icpt-empty-t">Nothing on hold</div>
-          <p class="hint">Turn <b>Requests</b> on to pause matching traffic here — edit, then <b>Forward</b> or <b>Drop</b>.</p>
+        <div class="state-empty" id="heldEmpty">
+          <div class="state-empty-icon">⏸</div>
+          <div class="state-empty-title">Nothing on hold</div>
+          <p class="state-empty-hint">Turn <b>Requests</b> on to pause matching traffic here — edit, then <b>Forward</b> or <b>Drop</b>.</p>
         </div>
       </section>
     </div>
@@ -187,7 +187,7 @@
       <select id="repMethod" class="rep-method" aria-label="HTTP method"><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option></select>
       <input id="repUrl" class="repurl" aria-label="Request URL" placeholder="https://api.example.com/v1/resource" spellcheck="false">
       <button class="btn" id="repHistToggle" title="Show/hide this tab's send history">⟲ History</button>
-      <button class="btn accent" id="repSend">Send ▸<span class="kbd">Ctrl+Space</span></button>
+      <button class="btn btn-primary" id="repSend">Send ▸<span class="kbd">Ctrl+Space</span></button>
     </div>
     <div class="rep-work">
       <aside id="repHistory" class="rep-hist" style="display:none"></aside>
@@ -211,7 +211,7 @@
           <div class="spacer"></div>
           <div class="seg" id="repResSeg"><button data-view="raw">Raw</button><button class="on" data-view="pretty">Pretty</button></div>
         </div>
-        <pre id="repResView"><span class="hint" style="padding:14px;display:block;line-height:1.7">Send a request to see the response.</span></pre>
+        <pre id="repResView"><div class="state-empty"><div class="state-empty-icon">▸</div><div class="state-empty-title">No response yet</div><p class="state-empty-hint">Send a request to see the response.</p></div></pre>
       </section>
     </div>
   </div>
@@ -224,25 +224,25 @@
       <input id="intrTarget" class="repurl" style="flex:1 1 240px;min-width:200px;max-width:420px" aria-label="Intruder target URL" placeholder="https://api.example.com" spellcheck="false">
       <span class="intr-sep" aria-hidden="true"></span>
       <div class="seg" id="intrType"><button class="on" data-t="sniper" aria-pressed="true">Sniper</button><button data-t="__lists__" aria-pressed="false" title="One payload list per § marker">Lists ▾</button><button data-t="repeat" aria-pressed="false" title="Resend the same request N times (no payloads)">Repeat</button></div>
-      <select id="intrListMode" class="btn" style="display:none;background:var(--bg3)" title="How the per-marker lists combine"><option value="battering">Battering (same value, all positions)</option><option value="pitchfork">Pitchfork (zip positions)</option><option value="cluster" selected>Cluster (all combinations)</option></select>
+      <select id="intrListMode" class="btn btn-field" style="display:none" title="How the per-marker lists combine"><option value="battering">Battering (same value, all positions)</option><option value="pitchfork">Pitchfork (zip positions)</option><option value="cluster" selected>Cluster (all combinations)</option></select>
       <span class="intr-sep" aria-hidden="true"></span>
       <label class="intr-num" title="Max requests in flight at once"><span>⇉</span><input id="intrThreads" type="number" min="1" max="64" value="1">threads</label>
       <label class="intr-num" title="Delay between each request in milliseconds (throttle)"><span>⏱</span><input id="intrDelay" type="number" min="0" step="50" value="0">ms</label>
       <label class="intr-num" id="intrRepeatWrap" style="display:none" title="How many times to send the same request (Repeat mode — no payloads)"><span>×</span><input id="intrRepeat" type="number" min="1" max="2000" value="20">sends</label>
       <div class="spacer"></div>
       <span id="intrCount" class="hint"></span>
-      <button class="btn accent" id="intrStart">Start ▸</button>
+      <button class="btn btn-primary" id="intrStart">Start ▸</button>
     </div>
     <div class="intr-explain" id="intrHint"></div>
     <details class="intr-opts-disc">
       <summary>Options — flags, extract, process, presets</summary>
       <div class="intr-opts-row">
         <label class="hint" for="intrGrep">Flag</label>
-        <input id="intrGrep" class="btn" style="flex:1;min-width:140px;background:var(--bg3);font-family:var(--mono)" aria-label="Grep — flag responses matching" placeholder="flag if response matches (regex/text)" spellcheck="false">
+        <input id="intrGrep" class="btn btn-field" style="flex:1;min-width:140px;font-family:var(--mono)" aria-label="Grep — flag responses matching" placeholder="flag if response matches (regex/text)" spellcheck="false">
         <label class="hint" for="intrExtract">Extract</label>
-        <input id="intrExtract" class="btn" style="flex:1;min-width:140px;background:var(--bg3);font-family:var(--mono)" aria-label="Extract from response (regex group 1)" placeholder="extract from response (regex group 1)" spellcheck="false">
+        <input id="intrExtract" class="btn btn-field" style="flex:1;min-width:140px;font-family:var(--mono)" aria-label="Extract from response (regex group 1)" placeholder="extract from response (regex group 1)" spellcheck="false">
         <label class="hint" for="intrProc">Process</label>
-        <input id="intrProc" class="btn" style="flex:1;min-width:140px;background:var(--bg3);font-family:var(--mono)" aria-label="Payload processing pipeline" placeholder="payload processing e.g. urlencode, base64, prefix:id=" spellcheck="false" title="comma-separated, applied in order: urlencode · base64 · upper · lower · prefix:X · suffix:X">
+        <input id="intrProc" class="btn btn-field" style="flex:1;min-width:140px;font-family:var(--mono)" aria-label="Payload processing pipeline" placeholder="payload processing e.g. urlencode, base64, prefix:id=" spellcheck="false" title="comma-separated, applied in order: urlencode · base64 · upper · lower · prefix:X · suffix:X">
         <span class="intr-sep" aria-hidden="true"></span>
         <select id="intrPreset" class="btn" title="Load a saved attack preset"><option value="">presets…</option></select>
         <button class="btn" id="intrPresetSave" title="Save current attack setup as a preset">💾 Save</button>
@@ -264,7 +264,7 @@ Content-Type: application/json
         <div class="pane-head"><span class="lbl">RESULTS</span><span id="intrProgress" class="count"></span><div class="spacer"></div><span id="intrStats" class="hint"></span><button class="btn" id="intrHistToggle" title="Show/hide past attacks (this session)">⟲ History</button></div>
         <div class="intr-progbar" id="intrProgBar" style="display:none"><div id="intrProgFill"></div></div>
         <div class="intr-head"><div>#</div><div>Payload</div><div style="text-align:center">St</div><div style="text-align:right">Len</div><div style="text-align:right">Time</div></div>
-        <div id="intrResults" class="scroll"><div class="hint" style="padding:12px">Set a target, mark <b>§</b> injection points, add payloads, then <b>Start</b>.</div></div>
+        <div id="intrResults" class="scroll"><div class="state-empty"><div class="state-empty-icon">🎯</div><div class="state-empty-title">No results yet</div><p class="state-empty-hint">Set a target, mark <b>§</b> injection points, add payloads, then <b>Start</b>.</p></div></div>
       </section>
     </div>
   </div>

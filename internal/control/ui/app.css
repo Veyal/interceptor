@@ -217,13 +217,6 @@ textarea.raw{width:100%;height:200px;resize:vertical;background:var(--bg);color:
 
 /* intercept workspace */
 .icpt-bar{flex:none;display:flex;align-items:center;flex-wrap:nowrap;gap:10px;padding:9px 14px;border-bottom:1px solid var(--line);background:var(--bg1);overflow-x:auto;scrollbar-width:thin}
-.icpt-sw{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--fg2);background:var(--bg3);border:1px solid var(--line);border-radius:8px;padding:7px 13px}
-.icpt-sw:hover{color:var(--fg)}
-.icpt-sw b{color:var(--fg3);font-weight:700}
-.icpt-sw .icpt-led{width:9px;height:9px;border-radius:50%;background:var(--line2);flex:none;transition:background .15s}
-.icpt-sw.on{color:var(--fg);border-color:var(--accent);background:var(--accentDim)}
-.icpt-sw.on b{color:var(--accent)}
-.icpt-sw.on .icpt-led{background:var(--accent);box-shadow:0 0 8px var(--accent);animation:pulse 1.4s ease-in-out infinite}
 .icpt-cond{display:flex;align-items:center;gap:8px;flex:1;min-width:300px}
 .icpt-cond .icpt-chk{display:flex;gap:6px;align-items:center;cursor:pointer;white-space:nowrap;color:var(--fg2);font-size:12px}
 .icpt-work{flex:1;display:flex;min-height:0}
@@ -243,24 +236,21 @@ textarea.raw{width:100%;height:200px;resize:vertical;background:var(--bg);color:
 .icpt-edtitle{font-family:var(--mono);font-size:12px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;min-width:0}
 .icpt-edtitle .u{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .icpt-raw{flex:1;width:100%;resize:none;background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:11.5px;line-height:1.7;padding:12px 14px;border:none;outline:none}
-.icpt-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:30px;gap:8px}
-.icpt-empty-i{font-size:34px;opacity:.45;line-height:1}
-.icpt-empty-t{font-size:14px;font-weight:700;color:var(--fg2)}
-.icpt-empty p{max-width:440px;margin:0}
 .icpt-mr{flex:none;border-top:1px solid var(--line);background:var(--bg1)}
 .icpt-mr>summary{cursor:pointer;padding:9px 14px;font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--fg2);list-style:none}
 .icpt-mr>summary::-webkit-details-marker{display:none}
 
 /* -------------------------------------------------------------------------
-   Shared component primitives (Phase 1 foundation — additive only).
-   These generalize patterns already proven in Intercept (.icpt-sw/.icpt-led,
-   .icpt-empty) into panel-agnostic classes any panel can adopt later. No
-   existing markup is rewired to use these yet. */
+   Shared component primitives (Phase 1 foundation).
+   These generalize patterns originally proven in Intercept (formerly
+   .icpt-sw/.icpt-led and .icpt-empty, migrated onto these shared classes in
+   Phase 2 batch A3 — see docs/UI-REDESIGN-ROADMAP.md) into panel-agnostic
+   classes any panel can adopt. */
 
-/* .uisw / .uisw-led — unified LED-dot toggle switch, same visual language as
-   .icpt-sw/.icpt-led above, usable outside the Intercept panel. Named "uisw"
-   (not "sw") because tools.js already uses a bare .sw class for the Intruder
-   payload-position legend dots — do not rename this back to .sw. */
+/* .uisw / .uisw-led — unified LED-dot toggle switch (Intercept's Requests/
+   Responses switches use this). Named "uisw" (not "sw") because tools.js
+   already uses a bare .sw class for the Intruder payload-position legend
+   dots — do not rename this back to .sw. */
 .uisw{font-family:var(--ui);display:inline-flex;align-items:center;gap:var(--sp-2);font-size:var(--fs-body);font-weight:600;color:var(--fg2);background:var(--bg3);border:1px solid var(--line);border-radius:var(--r-lg);padding:7px 13px;cursor:pointer}
 .uisw:hover{color:var(--fg)}
 .uisw b{color:var(--fg3);font-weight:700}
@@ -270,15 +260,15 @@ textarea.raw{width:100%;height:200px;resize:vertical;background:var(--bg);color:
 .uisw.on .uisw-led{background:var(--state-on);box-shadow:0 0 8px var(--state-on);animation:pulse 1.4s ease-in-out infinite}
 
 /* .state-empty — shared empty-state component (icon + title + one-line hint
-   + optional action), modeled on .icpt-empty above. */
-.state-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:var(--sp-6);gap:var(--sp-2)}
+   + optional action), modeled on Intercept's former .icpt-empty. */
+.state-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:var(--sp-6);gap:var(--sp-2);font-family:var(--ui);white-space:normal}
 .state-empty-icon{font-size:34px;opacity:.45;line-height:1}
 .state-empty-title{font-size:var(--fs-lg);font-weight:700;color:var(--fg2)}
 .state-empty-hint{max-width:440px;margin:0;color:var(--fg3);font-size:var(--fs-body);line-height:var(--lh-normal)}
 
 /* .state-error — shared error-state component (icon + message + optional
    retry button), red-tinted. Replaces hand-rolled inline red innerHTML. */
-.state-error{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:var(--sp-5);gap:var(--sp-2);color:var(--state-danger)}
+.state-error{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:var(--sp-5);gap:var(--sp-2);color:var(--state-danger);font-family:var(--ui);white-space:normal}
 .state-error-icon{font-size:28px;opacity:.55;line-height:1}
 .state-error-msg{font-size:var(--fs-body);color:var(--state-danger);line-height:var(--lh-normal);max-width:440px}
 .state-error .btn{margin-top:var(--sp-1)}
