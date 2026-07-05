@@ -61,7 +61,7 @@ var agentTools = []aiassist.Tool{
 func (h *aiAPI) aiAssistAgentStream(w http.ResponseWriter, r *http.Request, in aiAssistReq, flows []assistFlow, provider, key, model, endpoint string, flusher http.Flusher) {
 	client := aiassist.New(provider, key, model, endpoint)
 	if !client.SupportsAgentTools() {
-		b, _ := json.Marshal("agent mode requires Anthropic provider — switch in Settings → AI assist")
+		b, _ := json.Marshal("agent mode needs a tool-calling provider (Anthropic, GLM, OpenAI, or OpenRouter) — set one in Settings → AI assist")
 		fmt.Fprintf(w, "event: error\ndata: %s\n\n", b)
 		flusher.Flush()
 		return
