@@ -351,4 +351,3 @@ renderChips();loadSettings();loadSysProxy();loadAndroid();loadIOS();loadIOSSsh()
 // user already completed/skipped it or already has captured traffic.
 setTimeout(()=>{ if(state.flows && !state.flows.length) maybeShowSetup(); }, 600);
 {const cb=$('#cmdkBtn');if(cb)cb.onclick=()=>cmdkOpen();}
-{const hb=$('#helpBtn');if(hb)hb.onclick=()=>openModal($('#shortcutsModal'));}

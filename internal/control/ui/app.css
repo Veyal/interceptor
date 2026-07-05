@@ -10,6 +10,29 @@
   --ui:'Inter',system-ui,-apple-system,sans-serif;
   --grad-bg:linear-gradient(135deg, #0b0f19 0%, #111827 100%);
   --grad-accent:linear-gradient(135deg, #10b981 0%, #059669 100%);
+
+  /* Spacing (8px base, 4px half-step) */
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px;
+  --sp-5:24px; --sp-6:32px; --sp-7:48px; --sp-8:64px;
+  /* Radii */
+  --r-sm:4px; --r-md:7px; --r-lg:10px; --r-xl:14px; --r-pill:999px;
+  /* Type scale */
+  --fs-caption:10px; --fs-micro:11px; --fs-body:12.5px; --fs-base:13px;
+  --fs-lg:15px; --fs-xl:20px;
+  --lh-tight:1.35; --lh-normal:1.6; --lh-loose:1.7;
+  /* Elevation */
+  --elev-1:0 2px 6px var(--shadow);
+  --elev-2:0 8px 24px var(--shadow);
+  --elev-3:0 16px 48px var(--shadow);
+  /* Semantic color roles */
+  --sev-critical:#ef4444; --sev-high:#f97316; --sev-medium:#f59e0b;
+  --sev-low:#3b82f6; --sev-info:var(--fg3);
+  --state-on:var(--accent); --state-off:var(--fg3);
+  --state-pending:var(--amber); --state-danger:var(--red);
+  --content-note:var(--violet);
+  /* Layout constants */
+  --nav-rail-w:180px; --side-panel-w:280px;
+  --topbar-h:38px; --ctxbar-h:40px;
 }
 :root[data-theme="light"]{
   --bg:#f8fafc;--bg1:rgba(241, 245, 249, 0.8);--bg2:rgba(226, 232, 240, 0.9);--bg3:#cbd5e1;
@@ -70,6 +93,13 @@ button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit
 .btn.accent:hover{filter:brightness(1.15);transform:translateY(-1px) scale(1.02);box-shadow:0 4px 12px var(--accentDim)}
 .btn.danger{background:var(--redDim);color:var(--red)}
 .btn.danger:hover{background:var(--red);color:#fff}
+/* additive modifier aliases: same rules as .btn.accent / .btn.danger, named per the
+   design-system convention (one .btn-primary per toolbar, .btn-danger for destructive actions).
+   Not wired into markup yet — existing .btn.accent/.btn.danger call sites are untouched. */
+.btn-primary{color:var(--onAccent);background:var(--grad-accent);border:1px solid rgba(255,255,255,0.1);text-shadow:0 1px 2px rgba(0,0,0,0.2)}
+.btn-primary:hover{filter:brightness(1.15);transform:translateY(-1px) scale(1.02);box-shadow:0 4px 12px var(--accentDim)}
+.btn-danger{background:var(--redDim);color:var(--red)}
+.btn-danger:hover{background:var(--red);color:#fff}
 .count{font-size:11px;color:var(--fg2)}
 
 /* history table */
@@ -211,6 +241,49 @@ textarea.raw{width:100%;height:200px;resize:vertical;background:var(--bg);color:
 .icpt-mr{flex:none;border-top:1px solid var(--line);background:var(--bg1)}
 .icpt-mr>summary{cursor:pointer;padding:9px 14px;font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--fg2);list-style:none}
 .icpt-mr>summary::-webkit-details-marker{display:none}
+
+/* -------------------------------------------------------------------------
+   Shared component primitives (Phase 1 foundation — additive only).
+   These generalize patterns already proven in Intercept (.icpt-sw/.icpt-led,
+   .icpt-empty) into panel-agnostic classes any panel can adopt later. No
+   existing markup is rewired to use these yet. */
+
+/* .uisw / .uisw-led — unified LED-dot toggle switch, same visual language as
+   .icpt-sw/.icpt-led above, usable outside the Intercept panel. Named "uisw"
+   (not "sw") because tools.js already uses a bare .sw class for the Intruder
+   payload-position legend dots — do not rename this back to .sw. */
+.uisw{font-family:var(--ui);display:inline-flex;align-items:center;gap:var(--sp-2);font-size:var(--fs-body);font-weight:600;color:var(--fg2);background:var(--bg3);border:1px solid var(--line);border-radius:var(--r-lg);padding:7px 13px;cursor:pointer}
+.uisw:hover{color:var(--fg)}
+.uisw b{color:var(--fg3);font-weight:700}
+.uisw .uisw-led{width:9px;height:9px;border-radius:50%;background:var(--line2);flex:none;transition:background .15s}
+.uisw.on{color:var(--fg);border-color:var(--state-on);background:var(--accentDim)}
+.uisw.on b{color:var(--state-on)}
+.uisw.on .uisw-led{background:var(--state-on);box-shadow:0 0 8px var(--state-on);animation:pulse 1.4s ease-in-out infinite}
+
+/* .state-empty — shared empty-state component (icon + title + one-line hint
+   + optional action), modeled on .icpt-empty above. */
+.state-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:var(--sp-6);gap:var(--sp-2)}
+.state-empty-icon{font-size:34px;opacity:.45;line-height:1}
+.state-empty-title{font-size:var(--fs-lg);font-weight:700;color:var(--fg2)}
+.state-empty-hint{max-width:440px;margin:0;color:var(--fg3);font-size:var(--fs-body);line-height:var(--lh-normal)}
+
+/* .state-error — shared error-state component (icon + message + optional
+   retry button), red-tinted. Replaces hand-rolled inline red innerHTML. */
+.state-error{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:var(--sp-5);gap:var(--sp-2);color:var(--state-danger)}
+.state-error-icon{font-size:28px;opacity:.55;line-height:1}
+.state-error-msg{font-size:var(--fs-body);color:var(--state-danger);line-height:var(--lh-normal);max-width:440px}
+.state-error .btn{margin-top:var(--sp-1)}
+
+/* .modal-shell — minimal shared dialog shell (header/body/footer regions).
+   Existing modals (#flowModal, #aiModal, .sc-dialog, .checks-dialog,
+   .notes-ai-dialog, etc.) already converge on the same background/border/
+   radius/shadow recipe via duplicated inline styles or per-modal classes;
+   this codifies that recipe as a reusable base without touching them yet. */
+.modal-shell{background:var(--bg2);border:1px solid var(--line2);border-radius:var(--r-lg);box-shadow:var(--elev-3);display:flex;flex-direction:column;overflow:hidden}
+.modal-shell-head{flex:none;display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-3) var(--sp-4);border-bottom:1px solid var(--line)}
+.modal-shell-title{font-weight:700;color:var(--accent);flex:1}
+.modal-shell-body{flex:1;overflow:auto;padding:var(--sp-4)}
+.modal-shell-foot{flex:none;display:flex;align-items:center;justify-content:flex-end;gap:var(--sp-2);padding:var(--sp-3) var(--sp-4);border-top:1px solid var(--line)}
 .icpt-mr>summary::before{content:'▸';color:var(--fg3);margin-right:7px;font-size:10px}
 .icpt-mr[open]>summary::before{content:'▾'}
 .icpt-mr-body{padding:0 14px 14px;max-height:240px;overflow:auto}

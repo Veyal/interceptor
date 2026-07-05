@@ -1,9 +1,7 @@
-import { $, api, toast, renderMD, accordionize, openModal, closeModal, state, copyText, uiConfirm } from './core.js';
+import { $, api, toast, renderMD, accordionize, openModal, closeModal, state, copyText, uiConfirm, createAutosave } from './core.js';
 
 /* ---- project notes (auto-saved markdown notebook) ---- */
 export const notesState={loaded:'',mode:'edit'};
-let notesSaveTimer=null;
-let notesSaving=false;
 let notesOrganizedText='';
 let notesOrganizeAbort=null;
 let notesOrganizeSeq=0;
@@ -24,10 +22,20 @@ function setNotesStatus(kind){
   }
 }
 
+const notesAutosave=createAutosave({
+  delay:800,
+  onStatus:setNotesStatus,
+  save:async v=>{
+    await api('/api/notes',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({notes:v})});
+    notesState.loaded=v;
+  },
+});
+
 export async function loadNotes(){
   try{
     const d=await api('/api/notes');
     notesState.loaded=d.notes||'';
+    notesAutosave.setBaseline(notesState.loaded);
     if(document.activeElement!==$('#notesEdit'))$('#notesEdit').value=notesState.loaded;
     setNotesStatus('');
     if(notesState.mode==='preview')showNotesPreview();
@@ -36,39 +44,21 @@ export async function loadNotes(){
 
 export function scheduleNotesSave(){
   const v=$('#notesEdit').value;
-  if(v===notesState.loaded){
-    clearTimeout(notesSaveTimer);
-    notesSaveTimer=null;
-    return;
-  }
-  notesPreviewCache={src:'',html:''};
-  setNotesStatus('dirty');
-  clearTimeout(notesSaveTimer);
-  notesSaveTimer=setTimeout(()=>{saveNotes();},800);
+  if(v!==notesState.loaded)notesPreviewCache={src:'',html:''};
+  notesAutosave.schedule(v);
 }
 
 export async function flushNotesSave(){
-  clearTimeout(notesSaveTimer);
-  notesSaveTimer=null;
-  await saveNotes();
+  try{await notesAutosave.flush();}
+  catch(e){toast('notes: '+e.message);}
 }
 
+// saveNotes reads the textarea directly (rather than relying on whatever value
+// was last passed to scheduleNotesSave) so callers that set ta.value programmatically
+// and then immediately save (applyOrganizedNotes) don't flush a stale value.
 export async function saveNotes(){
-  const v=$('#notesEdit').value;
-  if(v===notesState.loaded)return;
-  if(notesSaving)return;
-  notesSaving=true;
-  setNotesStatus('saving');
-  try{
-    await api('/api/notes',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({notes:v})});
-    notesState.loaded=v;
-    setNotesStatus('saved');
-  }catch(e){
-    setNotesStatus('dirty');
-    toast('notes: '+e.message);
-  }finally{
-    notesSaving=false;
-  }
+  notesAutosave.schedule($('#notesEdit').value);
+  await flushNotesSave();
 }
 
 export function focusNotes(){

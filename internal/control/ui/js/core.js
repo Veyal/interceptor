@@ -290,6 +290,142 @@ export const fmtBytes=n=>{if(!n||n<0)return '0 B';if(n<1024)return n+' B';if(n<1
 export const fmtTime=ms=>{const d=new Date(ms);return d.toLocaleTimeString('en-GB',{hour12:false});};
 export const fmtDur=ms=>ms<1000?ms+' ms':(ms/1000).toFixed(ms<10000?2:1)+' s';
 
+/* ---- flowStore: normalized flow list, shared by Proxy history and (future)
+   panels that need id -> flow lookup alongside the display-ordered array.
+   `order` is a plain array (the same array a caller keeps as e.g. state.flows —
+   pass it in once, then always mutate through these helpers so byId stays in
+   sync); `byId` is a Map for O(1) lookup during live SSE updates instead of an
+   O(N) findIndex over `order`. Callers that only ever read the ordered list
+   (map.js, tlsdiag.js, setup.js, app.js) can keep reading state.flows directly —
+   this doesn't replace that array, it indexes it. ---- */
+export function createFlowStore(order){
+  return {order:order||[],byId:new Map()};
+}
+// loadFlowStore replaces the store's contents wholesale (a fresh /api/flows page
+// load or a full reload) — order is reassigned so callers holding the old array
+// reference must re-read store.order afterward (proxy.js does: state.flows=store.order).
+export function loadFlowStore(store,flows){
+  store.order=flows;
+  store.byId.clear();
+  for(const f of flows)store.byId.set(f.id,f);
+}
+// upsertFlow inserts a new flow at the front of `order` (the live-tail position)
+// or merges onto the existing object in place (so any other reference held to it,
+// e.g. state.detail, sees the update without a second lookup). Returns
+// {flow, isNew} so callers can branch on whether this was an insert or a merge.
+export function upsertFlow(store,f){
+  const ex=store.byId.get(f.id);
+  if(ex){Object.assign(ex,f);return {flow:ex,isNew:false};}
+  store.order.unshift(f);
+  store.byId.set(f.id,f);
+  return {flow:f,isNew:true};
+}
+// appendFlows adds flows at the back of `order` (older-page pagination), skipping
+// any id already present (a flow can arrive live between two page fetches).
+export function appendFlows(store,flows){
+  const added=[];
+  for(const f of flows){
+    if(store.byId.has(f.id))continue;
+    store.order.push(f);
+    store.byId.set(f.id,f);
+    added.push(f);
+  }
+  return added;
+}
+// removeFlow deletes by id from both byId and order (O(N) on order — used only
+// for the rare single-id case; bulk eviction uses dropFlowsFrom instead).
+export function removeFlow(store,id){
+  if(!store.byId.delete(id))return null;
+  const i=store.order.findIndex(f=>f.id===id);
+  const removed=i>=0?store.order.splice(i,1)[0]:null;
+  return removed;
+}
+// dropFlowsFrom truncates `order` at index (splice-to-end) and removes the
+// dropped ids from byId — used to cap in-memory live history at MAX_LIVE_FLOWS.
+export function dropFlowsFrom(store,index){
+  const dropped=store.order.splice(index);
+  dropped.forEach(d=>store.byId.delete(d.id));
+  return dropped;
+}
+
+/* ---- createVirtualList: windowed-rendering helper for long rows-in-a-scroll-
+   -div lists (Proxy history today; Map's table and Intruder's results are
+   candidates for a later migration, not touched by this pass).
+   Owns the scroll-binding + rAF-coalescing bookkeeping a caller would otherwise
+   keep as module-level `virtScrollBound`/`scrollTick`/`virtActive` flags, and
+   exposes `computeWindow(total)` — pure windowing math the caller uses inside
+   its own render function (which still owns building/wiring row HTML; this
+   helper only decides which indices are visible). ---- */
+export function createVirtualList({container,itemHeight,threshold,buffer,onScroll}){
+  let active=false,scrollTick=false,scrollBound=false;
+  function bindScroll(){
+    if(scrollBound||!container)return;
+    scrollBound=true;
+    // rAF-throttled: below `threshold` the list is fully in the DOM so scrolling
+    // needs no re-render at all; once virtualized, recompute the window at most
+    // once per frame instead of on every scroll tick.
+    container.addEventListener('scroll',()=>{
+      if(!active||scrollTick)return;
+      scrollTick=true;
+      requestAnimationFrame(()=>{scrollTick=false;onScroll();});
+    },{passive:true});
+  }
+  // computeWindow returns the visible slice bounds for `total` items, or null
+  // when total is below `threshold` (caller should render the full list and
+  // treat the list as non-virtualized — isActive() reflects this after the call).
+  function computeWindow(total){
+    bindScroll();
+    if(total<threshold){active=false;return null;}
+    active=true;
+    const viewH=container.clientHeight||640,scrollTop=container.scrollTop||0;
+    const start=Math.max(0,Math.floor(scrollTop/itemHeight)-buffer);
+    const end=Math.min(total,start+Math.ceil(viewH/itemHeight)+2*buffer);
+    return {start,end,topPad:start*itemHeight,bottomPad:(total-end)*itemHeight};
+  }
+  return {computeWindow,isActive:()=>active};
+}
+
+/* ---- createAutosave: shared debounced-save-with-status pattern.
+   Modeled on notes.js's project-notebook autosave (the clearest, most
+   self-contained of the three variants in this codebase — flow notes save on
+   blur only, and findings.js's block-body save needs an extra id-snapshot to
+   dodge a stale-finding-id race; both are good follow-up migrations once this
+   shape is proven, but aren't touched in this pass).
+   `save(value)` performs the actual PUT/PATCH and may throw/reject; `onStatus`
+   is called with 'dirty' | 'saving' | 'saved' | '' (idle) exactly where
+   notes.js's setNotesStatus() was called, so swapping in this helper doesn't
+   change when the status indicator changes. `schedule(value)` compares against
+   the last-saved value and no-ops (like notes.js bailing when
+   v===notesState.loaded) instead of scheduling a redundant save. ---- */
+export function createAutosave({delay=800,save,onStatus}={}){
+  let timer=null,saving=false,lastSaved='',current='';
+  const status=k=>{if(onStatus)onStatus(k);};
+  async function flush(){
+    clearTimeout(timer);timer=null;
+    if(current===lastSaved||saving)return;
+    saving=true;status('saving');
+    try{
+      await save(current);
+      lastSaved=current;
+      status('saved');
+    }catch(e){
+      status('dirty');
+      throw e;
+    }finally{saving=false;}
+  }
+  function schedule(value){
+    current=value;
+    if(value===lastSaved){clearTimeout(timer);timer=null;return;}
+    status('dirty');
+    clearTimeout(timer);
+    timer=setTimeout(()=>{flush().catch(()=>{});},delay);
+  }
+  // setBaseline marks `value` as already-saved (e.g. right after the initial
+  // load fetch) without triggering a save or a status change.
+  function setBaseline(value){lastSaved=value;current=value;}
+  return {schedule,flush,setBaseline,isDirty:()=>current!==lastSaved};
+}
+
 export const FLAG_WS=32;
 export const FLAG_TLS=16;
 export const FLAG_AI=1024;

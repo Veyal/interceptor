@@ -1,4 +1,4 @@
-import { $, $$, esc, escAttr, state, toast, api, methodColor, statusColor, statusText, mimeLabel, fmtSize, fmtBytes, fmtTime, fmtDur, FLAG_WS, FLAG_TLS, FLAG_AI, FLAG_DISCOVERY, RENDER_CAP, highlightHTTP, prettify, copyText, uiPrompt, uiConfirm, closeModals, openModal, closeModal, isBinaryMime, bodyMime, headerBlockText, hideCtxMenu, openCtxMenu, flowBodyDownloadName, flowBodyDownloadHref, selectionWithin, wireSelectionDecode, wireRowKey } from './core.js';
+import { $, $$, esc, escAttr, state, toast, api, methodColor, statusColor, statusText, mimeLabel, fmtSize, fmtBytes, fmtTime, fmtDur, FLAG_WS, FLAG_TLS, FLAG_AI, FLAG_DISCOVERY, RENDER_CAP, highlightHTTP, prettify, copyText, uiPrompt, uiConfirm, closeModals, openModal, closeModal, isBinaryMime, bodyMime, headerBlockText, hideCtxMenu, openCtxMenu, flowBodyDownloadName, flowBodyDownloadHref, selectionWithin, wireSelectionDecode, wireRowKey, createFlowStore, loadFlowStore, upsertFlow as storeUpsertFlow, appendFlows, dropFlowsFrom, createVirtualList } from './core.js';
 import { flowFindings, addFlowToFinding, openFinding, updateFindPocBtn } from './findings.js';
 import { tagChipStyle, renderTagBar, tagActionTargets, mutateFlowTags, openTagChipMenu } from './tags.js';
 import { sendToRepeater, sendToIntruder, repNewTab, renderRepTabs, repLoadEditor, repPersist, repTitle, headersToText } from './tools.js';
@@ -54,9 +54,6 @@ const VIRT_BUF=40;
 const MAX_LIVE_FLOWS=5000;      // cap the in-memory live list so long capture sessions don't grow unbounded (older rows stay on the server, reachable via scroll paging)
 let flowHasMore=false;         // the server may have older flows past what's loaded
 let loadingMore=false;         // a scroll-triggered page fetch is in flight
-let virtScrollBound=false;
-let virtActive=false;          // set in renderRows: true only while the list is virtualized
-let scrollTick=false;          // rAF guard: coalesce multiple scroll events per frame
 const EXCLUDE_NORM=64|128|512; // repeater, intruder, active scan
 const FLOW_COLS_KEY='proxy.cols';
 const HIDE_TLS_KEY='proxy.hideTlsFailed';
@@ -257,7 +254,7 @@ function wireFlowRow(r){
   });
   r.oncontextmenu=e=>{
     e.preventDefault();
-    const f=flowMap.get(id);
+    const f=flowStore.byId.get(id);
     const cell=e.target.closest('[data-field]');
     showCtx(e.clientX,e.clientY,f,cell?cell.dataset.field:'');
   };
@@ -300,19 +297,23 @@ export function patchFlowRow(f){
     if(anchor)anchor.before(nr);else box.prepend(nr);
   }else box.prepend(nr);
 }
+// upsertFlow is Proxy's live-update policy layered on the generic flowStore
+// primitive from core.js: it decides *whether* a brand-new flow should be
+// inserted at all (only when the live-default sort order applies — otherwise a
+// full reload is needed to place it correctly), tracks newly-seen methods for
+// the method filter, and enforces the MAX_LIVE_FLOWS memory cap. The actual
+// Map/array bookkeeping is delegated to storeUpsertFlow/dropFlowsFrom.
 export function upsertFlow(f){
-  const ex=flowMap.get(f.id);
+  const ex=flowStore.byId.get(f.id);
   if(ex){
-    Object.assign(ex,f); // refresh the object in place — state.flows holds `ex`
+    storeUpsertFlow(flowStore,f); // refresh the object in place — state.flows holds `ex`
   } else if(sortIsLiveDefault()){
-    state.flows.unshift(f);
-    flowMap.set(f.id,f);
+    storeUpsertFlow(flowStore,f);
     if(f.method && !seenMethods.has(f.method)){ seenMethods.add(f.method); methodsDirty=true; }
     // Bound memory on long live sessions: drop the oldest rows past the cap.
     // They remain on the server and reload when the user scrolls to the bottom.
     if(state.flows.length>MAX_LIVE_FLOWS){
-      const dropped=state.flows.splice(MAX_LIVE_FLOWS);
-      dropped.forEach(d=>{flowMap.delete(d.id); if(state.selected)state.selected.delete(d.id);});
+      dropFlowsFrom(flowStore,MAX_LIVE_FLOWS).forEach(d=>{ if(state.selected)state.selected.delete(d.id); });
       flowHasMore=true;
     }
   } else { scheduleReload(); return; }
@@ -343,9 +344,8 @@ export function handleFlowNew(f){
 export function handleFlowUpdate(f){
   if(!f)return;
   onFlowMaybeTLS(f);
-  const ex=flowMap.get(f.id);
-  if(ex){
-    Object.assign(ex,f); // O(1) refresh — no findIndex over the loaded list
+  if(flowStore.byId.has(f.id)){
+    storeUpsertFlow(flowStore,f); // O(1) in-place refresh — no findIndex over the loaded list
     const proxy=document.querySelector('.panel[data-panel="proxy"]');
     if(!proxy||!proxy.classList.contains('active'))return;
     flowRowLiveUpdate(f);
@@ -355,11 +355,6 @@ export function handleFlowUpdate(f){
   else scheduleReload();
 }
 
-export function applySort(flows){
-  // History order comes from the server (?sort=&dir=); keep this for callers that
-  // still pass a list, but the loaded page is already sorted.
-  return flows;
-}
 export function getStartedCard(){
   const diag=getStartedDiagnosisHint();
   return `<div style="max-width:640px;margin:26px auto;padding:0 16px">
@@ -389,10 +384,15 @@ export function syncInspectorVisibility(){
   if(spl)spl.style.display=has?'':'none';
   if(nb&&!has)nb.style.display='none';
 }
+// flowVirt owns the Proxy history table's windowed-rendering bookkeeping
+// (scroll binding + rAF coalescing); computeWindow() below runs the same
+// windowing math the hand-rolled version used (start/end/topPad/bottomPad),
+// just centralized in core.js so future panels can share it.
+const flowVirt=createVirtualList({container:$('#rows'),itemHeight:ROW_H,threshold:VIRT_MIN,buffer:VIRT_BUF,onScroll:renderRows});
 export function renderRows(){
   syncInspectorVisibility();
   const box=$('#rows');
-  const flows=applySort(state.flows);
+  const flows=state.flows;
   $('#rowCount').textContent=state.flows.length;
   if(!flows.length){
     if(anyFilter()||state.inScopeOnly){
@@ -406,28 +406,12 @@ export function renderRows(){
       const b=document.getElementById('gsMcp');if(b)b.onclick=()=>{document.querySelector('.tab[data-tab="settings"]')?.click();document.querySelector('#setNav button[data-sec="api"]')?.click();document.querySelector('#apiSub button[data-s="mcp"]')?.click();};
     }
     return;}
-  if(!virtScrollBound&&box){
-    virtScrollBound=true;
-    // rAF-throttled: a non-virtualized list is fully in the DOM, so scrolling
-    // needs no re-render at all; a virtualized list recomputes its window at most
-    // once per frame instead of on every scroll tick.
-    box.addEventListener('scroll',()=>{
-      if(!virtActive||scrollTick)return;
-      scrollTick=true;
-      requestAnimationFrame(()=>{scrollTick=false;renderRows();});
-    },{passive:true});
-  }
-  if(flows.length>=VIRT_MIN&&box){
-    virtActive=true;
-    const viewH=box.clientHeight||640,scrollTop=box.scrollTop||0;
-    const start=Math.max(0,Math.floor(scrollTop/ROW_H)-VIRT_BUF);
-    const end=Math.min(flows.length,start+Math.ceil(viewH/ROW_H)+2*VIRT_BUF);
-    const topPad=start*ROW_H,bottomPad=(flows.length-end)*ROW_H;
-    box.innerHTML=`<div style="height:${topPad}px" aria-hidden="true"></div>`+flows.slice(start,end).map(f=>flowRowHTML(f)).join('')+`<div style="height:${bottomPad}px" aria-hidden="true"></div>`;
+  const win=flowVirt.computeWindow(flows.length);
+  if(win){
+    box.innerHTML=`<div style="height:${win.topPad}px" aria-hidden="true"></div>`+flows.slice(win.start,win.end).map(f=>flowRowHTML(f)).join('')+`<div style="height:${win.bottomPad}px" aria-hidden="true"></div>`;
     $$('#rows .trow').forEach(wireFlowRow);
     return;
   }
-  virtActive=false;
   box.innerHTML=flows.map(f=>flowRowHTML(f)).join('');
   $$('#rows .trow').forEach(wireFlowRow);
 }
@@ -435,7 +419,7 @@ export function flowRowClick(id,e){
   // A click on a tag chip filters History by that tag instead of inspecting the row.
   const chip=e&&e.target&&e.target.closest&&e.target.closest('.flowtag');
   if(chip){filterByTag(chip.dataset.tagchip);return;}
-  const list=applySort(state.flows),idx=list.findIndex(f=>f.id===id);
+  const list=state.flows,idx=list.findIndex(f=>f.id===id);
   if(idx<0)return;
   const mod=e.ctrlKey||e.metaKey;
   if(mod){
@@ -457,7 +441,7 @@ export function flowRowClick(id,e){
   state.selected.clear();state.lastSelIdx=idx;selectFlow(id);updateSelBar();
 }
 export function walkFlowNav(down,e){
-  const list=applySort(state.flows);
+  const list=state.flows;
   if(!list.length)return null;
   const i=list.findIndex(f=>f.id===state.selId);
   const ni=i<0?0:(down?Math.min(i+1,list.length-1):Math.max(i-1,0));
@@ -477,12 +461,11 @@ export function walkFlowNav(down,e){
   state.selected.clear();state.lastSelIdx=ni;selectFlow(id);updateSelBar();return id;
 }
 export function toggleSelectAllShown(){
-  const list=applySort(state.flows);
+  const list=state.flows;
   const all=list.length>0&&list.every(f=>state.selected.has(f.id));
   if(all)state.selected.clear();else list.forEach(f=>state.selected.add(f.id));
   updateSelBar();renderRows();
 }
-function updateSearchNoteBanner(){}
 // buildFlowParams encodes the active filters into a query (without limit/cursor),
 // shared by the initial load and the scroll-triggered page loads.
 function buildFlowParams(){
@@ -520,14 +503,13 @@ export async function loadFlows(){
     let flows=d.flows||[];
     flowHasMore=flows.length>FLOW_FETCH&&!bodySearchActive();
     if(flows.length>FLOW_FETCH)flows=flows.slice(0,FLOW_FETCH);
-    state.flows=flows;
+    loadFlowStore(flowStore,flows);
+    state.flows=flowStore.order;
     seenMethods.clear(); flows.forEach(f=>{ if(f.method) seenMethods.add(f.method); }); methodsDirty=true;
-    flowMap.clear(); flows.forEach(f=>{ flowMap.set(f.id,f); });
     state.flowSearchNote=d.searchNote||'';
     const box=$('#rows');if(box)box.scrollTop=0;
     renderRows();
     updateTruncBanner();
-    updateSearchNoteBanner();
     refreshMethodFilter();
     loadTrafficDiagnosis();
   }catch(e){toast('flows: '+e.message);}
@@ -550,12 +532,10 @@ export async function loadMoreFlows(){
     flowHasMore=flows.length>FLOW_FETCH;
     if(flows.length>FLOW_FETCH)flows=flows.slice(0,FLOW_FETCH);
     if(flows.length){
-      // Drop any ids already present (a flow could arrive live between pages).
-      const add=flows.filter(f=>!flowMap.has(f.id));
+      // appendFlows drops any ids already present (a flow could arrive live between pages).
+      const box=$('#rows');const keep=box?box.scrollTop:0;
+      const add=appendFlows(flowStore,flows);
       if(add.length){
-        const box=$('#rows');const keep=box?box.scrollTop:0;
-        state.flows=state.flows.concat(add);
-        add.forEach(f=>flowMap.set(f.id,f));
         renderRows();
         if(box)box.scrollTop=keep;
       }
@@ -577,10 +557,11 @@ function refreshMethodFilter(){
 }
 const seenMethods=new Set();
 let methodsDirty=true; // build the method filter once initially
-// id -> flow object (the same reference held in state.flows). Lets live flow events
-// (new/update, which fire per captured request) do O(1) lookup+refresh instead of
-// O(N) findIndex over the whole loaded list — essential once you've scrolled deep.
-const flowMap=new Map();
+// flowStore.byId: id -> flow object (the same reference held in state.flows, aka
+// flowStore.order). Lets live flow events (new/update, which fire per captured
+// request) do O(1) lookup+refresh instead of O(N) findIndex over the whole
+// loaded list — essential once you've scrolled deep.
+const flowStore=createFlowStore(state.flows);
 let reloadTimer=null;
 export function scheduleReload(){clearTimeout(reloadTimer);reloadTimer=setTimeout(loadFlows,150);}
 export async function selectFlow(id){
@@ -782,7 +763,7 @@ if($('#hideTlsFilter'))$('#hideTlsFilter').onclick=()=>{
 };
 syncHideTlsFilter();
 // Inspector header actions — operate on the currently-selected flow.
-function inspectorFlow(){return state.detail||flowMap.get(state.selId)||null;}
+function inspectorFlow(){return state.detail||flowStore.byId.get(state.selId)||null;}
 {const b=$('#insRepeater');if(b)b.onclick=()=>{const f=inspectorFlow();if(f)sendToRepeater(f);else toast('select a flow first');};}
 {const b=$('#insIntruder');if(b)b.onclick=()=>{const f=inspectorFlow();if(f)sendToIntruder(f);else toast('select a flow first');};}
 {const b=$('#insCurl');if(b)b.onclick=()=>{const f=inspectorFlow();if(f)copyCurl(f);else toast('select a flow first');};}
@@ -814,7 +795,7 @@ export async function saveNote(){
   try{
     await api('/api/flows/'+state.selId+'/note',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({note})});
     if(state.detail)state.detail.note=note;
-    const fl=flowMap.get(state.selId);
+    const fl=flowStore.byId.get(state.selId);
     if(fl){fl.note=note;patchFlowRow(fl);}
     const s=$('#noteSaved');s.style.opacity='1';setTimeout(()=>{s.style.opacity='0';},1200);
   }catch(e){toast('note: '+e.message);}
@@ -903,7 +884,6 @@ $('#addScopeBtn').onclick=async()=>{
 };
 /* ---- filters: chips + apply/clear, kept in sync with the toolbar controls ---- */
 export function syncControls(){
-  const fs=$('#fScheme'); if(fs) fs.value=state.filters.scheme;
   $('#fMethod').value=state.filters.method;
   $('#fStatus').value=state.filters.status;
   $('#fSearch').value=state.filters.search;
@@ -1121,7 +1101,7 @@ export function showCtx(x,y,f,field){
 // (only when text is highlighted) for copy/decode/search/scope, plus the global
 // flow actions.
 export function showInspectorCtx(x,y,side){
-  const f=flowMap.get(state.selId)||state.detail;
+  const f=flowStore.byId.get(state.selId)||state.detail;
   if(!f)return;
   const sel=selectionWithin($(side==='req'?'#reqView':'#resView'));
   const sections=[];
@@ -1255,7 +1235,7 @@ if($('#compareClose'))$('#compareClose').onclick=()=>closeModal($('#compareModal
 $('#selClear').onclick=()=>{state.selected.clear();state.lastSelIdx=-1;renderRows();updateSelBar();};
 $('#selAsk').onclick=()=>{const ids=[...state.selected];if(ids.length)openAi({ids});};
 $('#selScope').onclick=async()=>{
-  const hosts=[...new Set([...state.selected].map(id=>{const f=flowMap.get(id);return f&&f.host;}).filter(Boolean))];
+  const hosts=[...new Set([...state.selected].map(id=>{const f=flowStore.byId.get(id);return f&&f.host;}).filter(Boolean))];
   if(!hosts.length)return;
   let added=0;
   for(const host of hosts){try{await api('/api/scope',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'include',host,enabled:true})});added++;}catch(e){}}

@@ -57,9 +57,3 @@ func (s *Store) ListIssues() ([]Issue, error) {
 	}
 	return out, rows.Err()
 }
-
-// ClearIssues removes all issues.
-func (s *Store) ClearIssues() error {
-	_, err := s.db.Exec(`DELETE FROM scan_issues`)
-	return err
-}

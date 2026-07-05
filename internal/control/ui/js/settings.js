@@ -129,7 +129,6 @@ function renderHostSelect(sel,selectedHost){
 
 async function loadNetworkHosts(){
   try{networkHosts=await api('/api/network/hosts');}catch(e){networkHosts=null;}
-  const hint=$('#proxySuggestedHint');if(hint)hint.remove();
   renderHostSelect($('#setControlHost'),parseListenAddr(state.controlAddr).host);
 }
 

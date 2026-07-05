@@ -366,13 +366,6 @@ function hydrateMapTreeNode(body){
   wireMapEpRows(body);
 }
 
-function mapHintText(){
-  if(mapState.view === 'params') return 'Parameter names mined from captured traffic — click a row to inspect the sample flow';
-  if(mapState.view === 'table') return 'Sortable endpoint list · click a row to inspect · → Rep sends to Repeater';
-  if(mapState.view === 'graph') return 'Images/fonts/media hidden · drag to pan · scroll to zoom · click folder to expand · double-click host to focus';
-  return 'Hierarchical site map · click an endpoint to inspect';
-}
-
 function setMapView(v){
   mapState.view = v;
   if(v === 'graph') mapState._forceGraph = false; // re-evaluate the node cap each time Graph is chosen
@@ -387,8 +380,6 @@ function setMapView(v){
   const exp = $('#mapExpand'), fit = $('#mapFit');
   if(exp) exp.style.display = v === 'tree' ? '' : 'none';
   if(fit) fit.style.display = v === 'graph' ? '' : 'none';
-  const hint = $('#mapHint');
-  if(hint) hint.textContent = mapHintText();
   mapState._needFit = true;
   if(v === 'params') loadParams();
   else renderMap();
