@@ -19,15 +19,13 @@ import './authz.js'; // side-effect: wires authz modal buttons
 import { openAuthz, renderAuthzScopePanel } from './authz.js';
 import { maybeShowSetup, openSetup } from './setup.js';
 import { loadTrafficDiagnosis, syncTlsBannerSetting, setTlsBannerHidden } from './tlsdiag.js';
-// discover.js and map.js are NOT imported here: every other feature module is
-// already reachable from the boot sequence below (loadIssues/loadFindings/
-// loadSettings/etc. all run unconditionally on load, and proxy.js's own import
-// chain pulls in tags/ai/authz/tlsdiag/flowmodal regardless of active tab), so
-// static-importing them buys nothing. Discover and Map are the only two panels
-// whose code never runs unless the user actually visits them — see
-// loadDiscoverModule()/loadMapModule() below for the dynamic import() (Phase 4a).
-let discoverMod=null, mapMod=null, autopwnMod=null;
-function loadDiscoverModule(){ return discoverMod || (discoverMod=import('./discovery.js')); }
+// map.js is NOT imported here: every other feature module is already reachable
+// from the boot sequence below (loadIssues/loadFindings/loadSettings/etc. all run
+// unconditionally on load, and proxy.js's own import chain pulls in
+// tags/ai/authz/tlsdiag/flowmodal regardless of active tab), so static-importing
+// it buys nothing. Map's code never runs unless the user visits it — see
+// loadMapModule() below for the dynamic import() (Phase 4a).
+let mapMod=null, autopwnMod=null;
 function loadMapModule(){ return mapMod || (mapMod=import('./map.js')); }
 function loadAutopwnModule(){ return autopwnMod || (autopwnMod=import('./autopwn.js')); }
 
@@ -59,7 +57,6 @@ function activateTab(t){
   if(t.dataset.tab==='activity'){renderActivity();clearActSeen();}
   if(t.dataset.tab==='scanner')loadScanTargets();
   if(t.dataset.tab==='findings')loadFindings();
-  if(t.dataset.tab==='discover'){clearNavDot('discBadge');loadDiscoverModule().then(m=>m.loadDiscovery());}
   if(t.dataset.tab==='map'){clearNavDot('mapBadge');loadMapModule().then(m=>m.loadEndpoints());}
   if(t.dataset.tab==='autopwn'){clearNavDot('autopwnBadge');loadAutopwnModule().then(m=>m.loadAutopwn());}
   if(t.dataset.tab==='notes')loadNotes();
@@ -192,7 +189,6 @@ function resyncAfterStaleReconnect(){
   if(document.querySelector('.tab[data-tab="findings"]')?.classList.contains('active'))loadFindings();
   if(document.querySelector('.tab[data-tab="notes"]')?.classList.contains('active'))loadNotes();
   if(document.querySelector('.tab[data-tab="activity"]')?.classList.contains('active'))renderActivity();
-  if(document.querySelector('.tab[data-tab="discover"]')?.classList.contains('active'))loadDiscoverModule().then(m=>m.refreshDiscovery());
   if(document.querySelector('.tab[data-tab="map"]')?.classList.contains('active'))loadMapModule().then(m=>m.loadEndpoints());
   if(document.querySelector('.tab[data-tab="autopwn"]')?.classList.contains('active'))loadAutopwnModule().then(m=>m.refreshAutopwn());
   refreshIntercept().then(()=>renderIcptStat());
@@ -285,7 +281,6 @@ function connectEvents(){
     else if(m.type==='scope.update'){loadScope();if(state.inScopeOnly)loadFlows();if($('#activeModal')&&$('#activeModal').style.display==='flex')renderAsScopePanel();if($('#authzModal')&&$('#authzModal').style.display==='flex')renderAuthzScopePanel();}
     else if(m.type==='views.update')loadViews();
     else if(m.type==='session.update')loadSession();
-    else if(m.type==='discovery.update'){if(document.querySelector('.tab[data-tab="discover"]').classList.contains('active'))loadDiscoverModule().then(mod=>mod.refreshDiscovery());else setNavDot('discBadge',true);}
     else if(m.type==='autopwn.update'){const onTab=document.querySelector('.tab[data-tab="autopwn"]').classList.contains('active');if(!onTab)setNavDot('autopwnBadge',true);loadAutopwnModule().then(mod=>mod.onAutopwnUpdate(m));}
     else if(m.type==='settings.update'){loadSettings();loadVersion(false);loadSysProxy();loadDeviceProxyEndpoint();loadAndroid();loadIOS();loadIOSSsh();applyAiDisabledUI();applyOobDisabledUI();}
     else if(m.type==='human.input')loadHumanInput();
@@ -331,7 +326,6 @@ function cmdkCommands(){
     {t:'Go to Intruder',kw:'fuzz brute force payloads enumerate',run:go('intruder')},
     {t:'Go to Scanner',kw:'passive active scan checks issues vulnerabilities report',run:go('scanner')},
     {t:'Go to Findings',kw:'findings poc vulnerability record curated impact',run:go('findings')},
-    {t:'Go to Discover',kw:'content discovery forced browse brute force dirbuster gobuster ffuf wordlist directories endpoints fuzz paths',run:go('discover')},
     {t:'Go to Map',kw:'endpoints attack surface graph tree headers body search',run:go('map')},
     {t:'Go to Notes',kw:'scratchpad markdown findings notebook',run:goToNotes},
     {t:'Edit custom scanner checks',kw:'starlark checks passive custom rules',run:openChecks},

@@ -29,7 +29,6 @@ import (
 	"github.com/Veyal/interceptor/internal/autopwn"
 	"github.com/Veyal/interceptor/internal/bind"
 	"github.com/Veyal/interceptor/internal/capture"
-	"github.com/Veyal/interceptor/internal/discovery"
 	"github.com/Veyal/interceptor/internal/intercept"
 	"github.com/Veyal/interceptor/internal/intruder"
 	"github.com/Veyal/interceptor/internal/mcp"
@@ -72,8 +71,6 @@ type Hub struct {
 	sc     *scope.Engine
 	oob    *oob.Catcher
 	hi     *humanInput // pending AI→human input prompts (request_human_input)
-	disc   *discovery.Engine
-	ds     discoveryState
 	mux    *http.ServeMux
 
 	// Upstream applies a chained upstream-proxy URL ("" = direct). Set by cmd.
@@ -161,11 +158,6 @@ func New(st *store.Store, eng *intercept.Engine, ca *tlsca.CA, rebind Rebinder, 
 	h.oob = oob.New()
 	h.oob.SetNotifier(func() { h.broadcast(map[string]any{"type": "oob.update"}) })
 	h.hi = newHumanInput()
-	h.disc = discovery.New()
-	h.disc.SetProbe(h.probeFor())
-	h.disc.SetScope(h.discInScope)
-	h.disc.SetNotifier(h.onDiscoveryUpdate)
-	h.disc.SetRecorder(h.discoveryRecord)
 	h.tun = tunnel.New(func() string {
 		addr := h.currentControlAddr()
 		if _, p, err := net.SplitHostPort(addr); err == nil && p != "" {
@@ -616,9 +608,6 @@ func (h *flowAPI) listFlows(w http.ResponseWriter, r *http.Request) {
 	if !showManual && !showAI {
 		writeJSON(w, http.StatusOK, map[string]any{"flows": []flowJSON{}, "truncated": false})
 		return
-	}
-	if q.Get("discovery") == "1" {
-		f.RequireFlags = store.FlagDiscovery
 	}
 	if q.Get("tlsFailed") == "1" {
 		f.RequireFlags |= store.FlagTLSFailed

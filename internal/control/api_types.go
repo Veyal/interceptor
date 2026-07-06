@@ -17,7 +17,6 @@ type androidAPI struct{ *Hub }
 type iosAPI struct{ *Hub }
 type oobAPI struct{ *Hub }
 type authzAPI struct{ *Hub }
-type discoveryAPI struct{ *Hub }
 type activescanAPI struct{ *Hub }
 type sessionAPI struct{ *Hub }
 type metaAPI struct{ *Hub }

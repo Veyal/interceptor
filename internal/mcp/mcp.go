@@ -166,7 +166,7 @@ func mcpInstructions() string {
 	return "Interceptor — an AI web-pentest workspace; a human watches everything you do and can take over manually, so record your work as you go.\n\n" +
 		"SETUP: check_readiness (structured JSON blockers: OOB, scope, auth identities, login macro) → fix blockers → scope_from_url → ca_info + route traffic through proxy. Re-run check_readiness if list_flows/scans come back empty.\n\n" +
 		"AUTH: list_flows tag=auth → promote_flow_to_authz (Surveyor, Admin, …) → authz_run inScope:true → set_login_macro_from_flow → run_login_macro (refresh CSRF).\n\n" +
-		"RECON: start_discovery (wordlist optional — server default) → suggest_discovery_paths.\n\n" +
+		"RECON: run content discovery with a real tool (feroxbuster / gobuster / ffuf) pointed THROUGH this proxy so hits land in History — Interceptor has no built-in forced-browser. Then triage with list_flows / host_stats.\n\n" +
 		"SCAN: run_scanner (passive) → active_scan arm:true inScope:true csrfAware:true → cross_host_token_replay mode:auto for SSO/JWT apps → oob_* for blind callbacks.\n\n" +
 		"RECORD: create_finding (body blocks) → add_finding_poc position:N → update_finding impact/detail (detail-only updates preserve interleaved PoC blocks).\n\n" +
 		"Everything you do is tagged AI. Pass optional `intent` on consequential tools. Use request_human_input before destructive or ambiguous steps.\n\n" +
@@ -1794,53 +1794,6 @@ func (s *Server) registerTools() {
 			return fmt.Sprintf("deleted %d flows · freed %s (mode=%s)", d.Deleted, formatBytes(d.FreedBytes), mode), nil
 		})
 
-	s.add("start_discovery",
-		"Content discovery (forced-browse): brute-force paths from a wordlist against a base URL. Scope-gated. Async — poll discovery_state.",
-		obj(map[string]any{
-			"baseUrl":    p("string", "absolute base URL e.g. https://target/"),
-			"wordlist":   p("string", "newline-separated paths (optional — server default if empty)"),
-			"extensions": p("string", "e.g. .php .bak"),
-			"threads":    p("integer", "1–64, default 20"),
-			"delayMs":    p("integer", "ms between dispatches"),
-			"recursive":  p("boolean", "recurse into found directories"),
-			"maxDepth":   p("integer", "recursion depth"),
-			"record":     p("boolean", "save hits to History/Map (default true)"),
-		}, "baseUrl"),
-		func(a map[string]any) (string, error) {
-			return s.api(http.MethodPost, "/api/discovery/start", map[string]any{
-				"baseUrl": argStr(a, "baseUrl"), "wordlist": argStr(a, "wordlist"),
-				"extensions": argStr(a, "extensions"), "threads": argInt(a, "threads", 0),
-				"delayMs": argInt(a, "delayMs", 0), "recursive": argBool(a, "recursive", false),
-				"maxDepth": argInt(a, "maxDepth", 0), "record": argBool(a, "record", true),
-			})
-		})
-
-	s.add("discovery_state", "Discovery run progress + found paths.", obj(map[string]any{}),
-		func(a map[string]any) (string, error) {
-			out, err := s.apiGet("/api/discovery/state")
-			return boundJSON(out, 400), err
-		})
-
-	s.add("stop_discovery", "Stop the running content-discovery scan.", obj(map[string]any{}),
-		func(a map[string]any) (string, error) { return s.api(http.MethodPost, "/api/discovery/stop", nil) })
-
-	s.add("suggest_discovery_paths",
-		"Suggest paths to brute-force on a host: merges captured-history seeds with optional AI guesses (needs AI key for the latter).",
-		obj(map[string]any{
-			"host":    p("string", "target hostname"),
-			"baseUrl": p("string", "alternative to host — derive hostname from this URL"),
-		}),
-		func(a map[string]any) (string, error) {
-			q := url.Values{}
-			if h := argStr(a, "host"); h != "" {
-				q.Set("host", h)
-			}
-			if b := argStr(a, "baseUrl"); b != "" {
-				q.Set("baseUrl", b)
-			}
-			return s.apiGet("/api/discovery/suggest?" + q.Encode())
-		})
-
 	s.add("run_login_macro",
 		"Run the recorded login macro now — refreshes session Cookie/Authorization headers from the login response. Configure via Settings → Session or set_session with loginMacro.",
 		obj(map[string]any{}),
@@ -2020,10 +1973,4 @@ func (s *Server) registerTools() {
 			return s.api(http.MethodPost, "/api/session/login/test", nil)
 		})
 
-	s.add("get_discovery_wordlist",
-		"Return the built-in default content-discovery wordlist (same fallback start_discovery uses when wordlist is empty).",
-		obj(map[string]any{}),
-		func(a map[string]any) (string, error) {
-			return s.apiGet("/api/discovery/wordlist")
-		})
 }

@@ -53,7 +53,6 @@
   <div class="nav-rail-group" data-nav-group="recon">
     <div class="nav-rail-group-label">Recon</div>
     <button class="tab" id="tab-scanner" role="tab" aria-selected="false" aria-controls="panel-scanner" data-tab="scanner" data-group="Recon">Scanner</button>
-    <button class="tab" id="tab-discover" role="tab" aria-selected="false" aria-controls="panel-discover" data-tab="discover" data-group="Recon">Discover<span id="discBadge" class="nav-dot" aria-label="Unread discovery updates"></span></button>
     <button class="tab" id="tab-map" role="tab" aria-selected="false" aria-controls="panel-map" data-tab="map" data-group="Recon">Map<span id="mapBadge" class="nav-dot" aria-label="Unread map updates"></span></button>
   </div>
   <div class="nav-rail-group" data-nav-group="report">
@@ -403,53 +402,6 @@ Content-Type: application/json
           <div class="state-empty-icon">🗂️</div>
           <div class="state-empty-title">No finding selected</div>
           <p class="state-empty-hint">Select a finding from the list to view its details.</p>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Content discovery (forced-browse) -->
-  <div class="panel" id="panel-discover" role="tabpanel" aria-labelledby="tab-discover" data-panel="discover">
-    <div class="toolbar">
-      <input id="dscBase" class="btn btn-field dsc-base" placeholder="https://target.com/  (base URL)" spellcheck="false" aria-label="Base URL to brute-force">
-      <button class="btn btn-primary" id="dscStart">Start ▸</button>
-      <button class="btn btn-danger" id="dscStop" disabled>Stop</button>
-      <span id="dscCount" class="count"></span>
-      <div class="spacer"></div>
-    </div>
-    <div class="toolbar toolbar-secondary">
-      <button class="btn" id="dscScope" title="Fill base URL from in-scope include rules">◎ From scope</button>
-      <button class="btn" id="dscSeeds" title="Add path segments from captured history for this host">＋ History seeds</button>
-      <button class="btn" id="dscAi" data-ai-ui title="Ask AI to suggest paths (needs AI key in Settings)">✨ AI paths</button>
-      <button class="btn" id="dscWordBtn" aria-expanded="false">Wordlist ▾ <span id="dscWordCount" class="count"></span></button>
-      <div class="spacer"></div>
-    </div>
-    <details class="dsc-opts">
-      <summary>Options</summary>
-      <div class="dsc-opts-row">
-        <label class="hint">Ext <input id="dscExt" class="btn btn-field dsc-ext" placeholder=".php .bak .json" title="Extensions appended to each word (space/comma separated)"></label>
-        <label class="hint" title="Recurse into found directories up to the given depth">Recurse <input type="checkbox" id="dscRec"> depth <input id="dscDepth" class="btn btn-field dsc-num-sm" type="number" min="0" max="8" value="2"></label>
-        <label class="hint">Threads <input id="dscThreads" class="btn btn-field dsc-num-md" type="number" min="1" max="64" value="20"></label>
-        <label class="hint">Delay ms <input id="dscDelay" class="btn btn-field dsc-num-md" type="number" min="0" value="0" title="Throttle: ms between dispatches"></label>
-        <label class="hint">Soft-404 len <input id="dscFilterLen" class="btn btn-field dsc-num-lg" type="number" min="0" value="0" title="Suppress results whose body length equals this (manual soft-404 filter)"></label>
-        <label class="hint" title="Re-issue each found URL so it lands in History and the Map"><input type="checkbox" id="dscRecord" checked> Save hits to History/Map</label>
-        <label class="hint" title="Auto-tag recorded endpoints that look like APIs (/api, /v1, .json, …) with the 'api' tag"><input type="checkbox" id="dscAutoTagApi" checked> Tag APIs</label>
-      </div>
-    </details>
-    <div id="dscWordWrap" class="dsc-word-wrap" style="display:none">
-      <div class="list-file-bar">
-        <button class="btn" id="dscWordLoad" type="button" title="Replace wordlist">📂 Load file</button>
-        <button class="btn" id="dscWordAppend" type="button" title="Append entries">＋ Append file</button>
-      </div>
-      <textarea id="dscWords" class="dsc-words" spellcheck="false" placeholder="one path per line — lines starting with # are ignored"></textarea>
-      <div class="hint dsc-words-hint">One path per line, # for comments.</div>
-    </div>
-    <div class="dsc-body">
-      <div id="dscResults" class="pane dsc-results">
-        <div class="state-empty">
-          <div class="state-empty-icon">🔎</div>
-          <div class="state-empty-title">No scan yet</div>
-          <p class="state-empty-hint">Enter a base URL and press <b>Start</b>.</p>
         </div>
       </div>
     </div>
@@ -836,7 +788,7 @@ Content-Type: application/json
             <label class="icpt-chk" style="display:flex;align-items:center;gap:8px;margin:12px 0 14px;cursor:pointer;color:var(--fg2);font-size:12.5px">
               <input type="checkbox" id="setAiDisabled"> Disable all AI features for this project
             </label>
-            <p id="aiDisabledHint" class="hint" style="display:none;margin-bottom:12px;color:var(--amber)">AI is off — assist, MCP, Activity, and AI paths in Discover are hidden. Uncheck above to re-enable.</p>
+            <p id="aiDisabledHint" class="hint" style="display:none;margin-bottom:12px;color:var(--amber)">AI is off — assist, MCP, and Activity are hidden. Uncheck above to re-enable.</p>
             <div id="aiSettingsFields">
             <p class="hint" style="margin-bottom:10px">Bring-your-own-key. Data goes to your provider only when you ask. <b id="aiKeyState"></b></p>
             <div class="field" id="aiProfilesField" style="display:none">
@@ -1113,7 +1065,7 @@ Content-Type: application/json
         <div class="sc-card"><div class="sc-keys"><kbd>Ctrl</kbd><kbd>I</kbd></div><p class="sc-desc">Send selected flow → Intruder (Proxy History tab only)</p></div>
         <div class="sc-card"><div class="sc-keys"><kbd>Ctrl</kbd><kbd>Space</kbd></div><p class="sc-desc">Send the request in Repeater</p></div>
         <h3 class="sc-section">Tools</h3>
-        <div class="sc-card"><div class="sc-keys">📂</div><p class="sc-desc">Discover, Intruder, and Decoder support <b>Load file</b> for wordlists, payloads, templates, and blobs</p></div>
+        <div class="sc-card"><div class="sc-keys">📂</div><p class="sc-desc">Intruder and Decoder support <b>Load file</b> for payloads, templates, and blobs</p></div>
         <div class="sc-card"><div class="sc-keys">Map ▾</div><p class="sc-desc">Search scope: path/host, headers, body, or all — body search is server-side and bounded</p></div>
         <h3 class="sc-section">Intercept</h3>
         <div class="sc-card"><div class="sc-keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>F</kbd></div><p class="sc-desc">Forward the held request</p></div>

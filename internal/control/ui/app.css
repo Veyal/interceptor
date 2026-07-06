@@ -963,35 +963,6 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--bg2);border:1px soli
 /* WebSocket captured frames — text frames click-to-replay into the send box */
 .ws-frame-replay{cursor:pointer}
 .ws-frame-replay:hover{background:var(--bg3)}
-/* Discover advanced-options disclosure (keeps the default surface to URL + go) */
-.dsc-opts{border-bottom:1px solid var(--line);background:var(--bg1)}
-.dsc-opts>summary{cursor:pointer;padding:7px 12px;font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--fg2);list-style:none}
-.dsc-opts>summary::-webkit-details-marker{display:none}
-.dsc-opts>summary::before{content:'▸';color:var(--fg3);margin-right:7px;font-size:10px}
-.dsc-opts[open]>summary::before{content:'▾'}
-.dsc-opts-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px;padding:4px 12px 10px}
-.dsc-base{flex:1;min-width:240px;font-family:var(--mono)}
-.dsc-ext{width:150px}
-.dsc-num-sm{width:48px}
-.dsc-num-md{width:64px}
-.dsc-num-lg{width:84px}
-.dsc-word-wrap{padding:var(--sp-2) var(--sp-3);border-bottom:1px solid var(--line)}
-.dsc-words{width:100%;height:150px;background:var(--bg3);color:var(--fg);border:1px solid var(--line);border-radius:var(--r-md);font-family:var(--mono);font-size:12px;padding:var(--sp-2);resize:vertical}
-.dsc-words-hint{margin-top:var(--sp-1)}
-.dsc-body{flex:1;display:flex;min-height:0}
-.dsc-results{flex:1;overflow:auto}
-.dsc-header{position:sticky;top:0;background:var(--bg2);border-bottom:1px solid var(--line2);padding:5px 12px;display:flex;gap:10px;font-size:9px;font-weight:700;letter-spacing:.5px;color:var(--fg3)}
-.dsc-row{display:flex;align-items:center;gap:10px;padding:5px 12px;border-bottom:1px solid var(--line);cursor:pointer}
-.dsc-code{font-weight:700;min-width:34px}
-.dsc-size{min-width:74px;text-align:right}
-.dsc-path-h{flex:1}
-.dsc-path{flex:1;font-family:var(--mono);font-size:12px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dsc-dir{color:var(--fg3)}
-.dsc-redir{margin-left:var(--sp-2)}
-.dsc-depth{margin-left:var(--sp-1)}
-.dsc-type{min-width:90px}
-.dsc-rep-h{min-width:52px}
-.dsc-note{padding:6px 12px;color:var(--amber)}
 
 /* ---- Autopilot (autonomous AI pentester) ---- */
 .ap-hint{flex:1;min-width:200px;max-width:360px;font-family:var(--mono)}

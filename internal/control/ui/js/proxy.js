@@ -8,11 +8,10 @@ import { openAuthz } from './authz.js';
 import { openDecoder, prefillScanner } from './scanner.js';
 import { getStartedDiagnosisHint, loadTrafficDiagnosis, onFlowMaybeTLS } from './tlsdiag.js';
 
-// discovery.js and map.js are dynamically imported (not statically, like the
-// modules above) because they are the two panels lazy-loaded on first visit
-// (Phase 4a, UI-REDESIGN-ROADMAP.md §4) — a static import here would defeat
-// that by pulling them in at boot via proxy.js's own always-loaded chain.
-const prefillDiscovery=(...args)=>import('./discovery.js').then(m=>m.prefillDiscovery(...args));
+// map.js is dynamically imported (not statically, like the modules above) because
+// it is a panel lazy-loaded on first visit (Phase 4a, UI-REDESIGN-ROADMAP.md §4) —
+// a static import here would defeat that by pulling it in at boot via proxy.js's
+// own always-loaded chain.
 const focusMapSearch=(...args)=>import('./map.js').then(m=>m.focusMapSearch(...args));
 
 // Authz identity cache for the "Send as" context-menu section. Loaded once at
@@ -1110,8 +1109,6 @@ export function showCtx(x,y,f,field){
   if(!f)return;
   const cls=f.status?Math.floor(f.status/100):0;
   const dom=registrableDomain(f.host);
-  const def=(f.scheme==='https'&&f.port===443)||(f.scheme==='http'&&f.port===80);
-  const baseURL=`${f.scheme}://${f.host}${def?'':':'+f.port}/`;
   const sections=[];
 
   if(field==='host'||field==='scheme'||field==='id'){
@@ -1124,7 +1121,6 @@ export function showCtx(x,y,f,field){
       items.push({label:'Add domain to scope',val:'*.'+dom,act:()=>addHostToScope('*.'+dom)});
     }
     items.push({label:'Add host to scope',val:f.host,act:()=>addHostToScope(f.host)});
-    items.push({label:'🔎 Discover content',val:f.host,act:()=>prefillDiscovery(baseURL)});
     items.push({sep:true});
     items.push({label:'🗑 Delete all from host',val:f.host,danger:true,act:deleteHost(f)});
     sections.push({head:'HOST · '+f.host, items});

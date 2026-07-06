@@ -15,7 +15,6 @@ func (h *Hub) routes() {
 	iosH := &iosAPI{h}
 	oob := &oobAPI{h}
 	az := &authzAPI{h}
-	disc := &discoveryAPI{h}
 	as := &activescanAPI{h}
 	sess := &sessionAPI{h}
 	meta := &metaAPI{h}
@@ -32,7 +31,6 @@ func (h *Hub) routes() {
 	h.registerProjectRoutes(proj)
 	h.registerOobRoutes(oob)
 	h.registerAuthzRoutes(az)
-	h.registerDiscoveryRoutes(disc)
 	h.registerMetaRoutes(meta)
 	h.registerAutopwnRoutes()
 
@@ -223,17 +221,6 @@ func (h *Hub) registerAuthzRoutes(az *authzAPI) {
 	h.mux.HandleFunc("POST /api/authz/check-sessions", az.authzCheckSessions)
 	h.mux.HandleFunc("POST /api/authz/run", az.authzRun)
 	h.mux.HandleFunc("POST /api/authz/cross-host-replay", az.authzCrossHostReplay)
-}
-
-func (h *Hub) registerDiscoveryRoutes(disc *discoveryAPI) {
-	h.mux.HandleFunc("POST /api/discovery/start", disc.discoveryStart)
-	h.mux.HandleFunc("POST /api/discovery/stop", disc.discoveryStop)
-	h.mux.HandleFunc("GET /api/discovery/state", disc.discoveryStateHandler)
-	h.mux.HandleFunc("GET /api/discovery/wordlist", disc.discoveryWordlist)
-	h.mux.HandleFunc("GET /api/discovery/seeds", disc.discoverySeeds)
-	h.mux.HandleFunc("GET /api/discovery/suggest", disc.discoverySuggest)
-	h.mux.HandleFunc("GET /api/discovery/scope-targets", disc.discoveryScopeTargets)
-	h.mux.HandleFunc("POST /api/discovery/inspect", disc.discoveryInspect)
 }
 
 // registerAutopwnRoutes wires the autonomous-pentest ("Autopilot") run lifecycle.

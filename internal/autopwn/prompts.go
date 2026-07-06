@@ -25,7 +25,7 @@ Do NOT send any attack traffic — you are planning only. When done, respond wit
    "tool":"active_scan","args":{"flowId":123,"arm":true},"priority":9}
 ]}
 Order steps by priority (higher first). Prefer active_scan for injection classes, start_intruder for
-enumeration, authz_run for access-control, start_discovery for content discovery.`
+enumeration, and authz_run for access-control.`
 
 // planTools is the read-only recon toolset the planning agent may use.
 var planTools = []aiagent.ToolSpec{

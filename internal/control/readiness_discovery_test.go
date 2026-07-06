@@ -11,27 +11,6 @@ import (
 	"github.com/Veyal/interceptor/internal/store"
 )
 
-func TestDiscoveryStartDefaultWordlist(t *testing.T) {
-	st, err := store.Open(t.TempDir())
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer st.Close()
-	hub := New(st, intercept.New(), nil, nil, nil)
-	ts := httptest.NewServer(hub.Handler())
-	defer ts.Close()
-
-	resp, err := http.Post(ts.URL+"/api/discovery/start", "application/json",
-		strings.NewReader(`{"baseUrl":"https://target.example/"}`))
-	if err != nil {
-		t.Fatalf("POST: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("status %d, want 202", resp.StatusCode)
-	}
-}
-
 func TestReadinessEndpoint(t *testing.T) {
 	st, err := store.Open(t.TempDir())
 	if err != nil {
