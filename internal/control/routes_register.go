@@ -169,6 +169,11 @@ func (h *Hub) registerAIRoutes(ai *aiAPI) {
 	h.mux.HandleFunc("POST /api/ai/assist/stream", ai.aiAssistStream)
 	h.mux.HandleFunc("POST /api/ai/actions", ai.aiActions)
 	h.mux.HandleFunc("GET /api/ai/openrouter/models", ai.aiOpenRouterModels)
+	// Saved AI provider profiles (switch the active provider with one click).
+	h.mux.HandleFunc("GET /api/ai/providers", h.listAiProviders)
+	h.mux.HandleFunc("POST /api/ai/providers", h.saveAiProvider)
+	h.mux.HandleFunc("DELETE /api/ai/providers/{id}", h.deleteAiProvider)
+	h.mux.HandleFunc("POST /api/ai/providers/{id}/activate", h.activateAiProvider)
 }
 
 func (h *Hub) registerProjectRoutes(proj *projectAPI) {

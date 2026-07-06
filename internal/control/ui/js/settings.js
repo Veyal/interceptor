@@ -324,6 +324,7 @@ export async function loadSettings(){try{const s=await api('/api/settings');stat
   if($('#setAiModel'))$('#setAiModel').value=savedAiModel;
   if($('#setAiEndpoint'))$('#setAiEndpoint').value=s.aiEndpoint||'';
   if($('#aiKeyState'))$('#aiKeyState').textContent=s.aiHasKey?'Key configured ✓':'No key set.';
+  loadAiProviders();
   if($('#capScopeToggle'))setCapScope(!!s.captureScopeOnly);
   if($('#suppressTelemetryToggle'))setSuppressTelemetry(s.suppressBrowserTelemetry!==false);
   if($('#invisibleProxyToggle'))setInvisibleProxy(!!s.invisibleProxy);
@@ -537,6 +538,47 @@ $('#saveAiBtn').onclick=async()=>{
     $('#setAiKey').value='';toast('AI settings saved');loadSettings();
   }catch(e){toast(e.message);}
 };
+
+/* ---- Saved AI provider profiles (switch active provider) ---- */
+const PROVIDER_LABEL={anthropic:'Anthropic',glm:'GLM',openrouter:'OpenRouter',openai:'OpenAI'};
+export async function loadAiProviders(){
+  const box=$('#aiProfiles'),field=$('#aiProfilesField');if(!box)return;
+  try{const d=await api('/api/ai/providers');const ps=d.providers||[];
+    field.style.display=ps.length?'block':'none';
+    box.innerHTML=ps.map(p=>{
+      const active=p.id===d.activeId;
+      return `<div class="row" data-pid="${escAttr(p.id)}" style="gap:8px;align-items:center;padding:6px 8px;margin-bottom:6px;border:1px solid var(--${active?'accent':'line'});border-radius:7px;background:var(--bg3)">
+        <span style="flex:1;min-width:0">
+          <b style="color:var(--fg)">${esc(p.name)}</b>
+          <span class="hint" style="margin-left:6px">${esc(PROVIDER_LABEL[p.provider]||p.provider)}${p.model?' · '+esc(p.model):''}${p.hasKey?'':' · <span style="color:var(--amber)">no key</span>'}</span>
+        </span>
+        ${active?'<span class="sev Low">active</span>':`<button class="btn" data-act="${escAttr(p.id)}" style="padding:3px 12px">Switch</button>`}
+        <button class="btn danger" data-del="${escAttr(p.id)}" style="padding:3px 10px" title="Delete profile">✕</button>
+      </div>`;
+    }).join('');
+    box.querySelectorAll('[data-act]').forEach(b=>b.onclick=()=>activateAiProvider(b.dataset.act));
+    box.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>deleteAiProvider(b.dataset.del));
+  }catch(e){}
+}
+async function activateAiProvider(id){
+  try{const r=await api('/api/ai/providers/'+id+'/activate',{method:'POST'});
+    toast('Switched to '+(PROVIDER_LABEL[r.provider]||r.provider));loadSettings();
+  }catch(e){toast(e.message);}
+}
+async function deleteAiProvider(id){
+  if(!await uiConfirm('Delete provider profile','Delete this saved provider? This does not affect the active AI settings unless it is the active one.','Delete','btn danger','var(--red)'))return;
+  try{await api('/api/ai/providers/'+id,{method:'DELETE'});loadAiProviders();toast('profile deleted');}catch(e){toast(e.message);}
+}
+$('#aiProfileSave')&&($('#aiProfileSave').onclick=async()=>{
+  const name=($('#aiProfileName')||{}).value.trim();
+  const provider=$('#setAiProvider').value;
+  const model=aiIsOpenRouter()||aiIsGLM()?(($('#setAiModelSelect')||{}).value||''):$('#setAiModel').value.trim();
+  const endpoint=($('#setAiEndpoint')||{}).value.trim();
+  const apiKey=$('#setAiKey').value; // blank ⇒ backend snapshots the live active key
+  try{await api('/api/ai/providers',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name,provider,model,endpoint,apiKey})});
+    $('#aiProfileName').value='';toast('provider profile saved');loadAiProviders();
+  }catch(e){toast(e.message);}
+});
 export async function loadSession(){try{const s=await api('/api/session');
   if($('#setSessionOn'))$('#setSessionOn').checked=!!s.enabled;
   if($('#setSessionUnscoped'))$('#setSessionUnscoped').checked=!!s.unscoped;

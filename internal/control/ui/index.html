@@ -839,6 +839,10 @@ Content-Type: application/json
             <p id="aiDisabledHint" class="hint" style="display:none;margin-bottom:12px;color:var(--amber)">AI is off — assist, MCP, Activity, and AI paths in Discover are hidden. Uncheck above to re-enable.</p>
             <div id="aiSettingsFields">
             <p class="hint" style="margin-bottom:10px">Bring-your-own-key. Data goes to your provider only when you ask. <b id="aiKeyState"></b></p>
+            <div class="field" id="aiProfilesField" style="display:none">
+              <label>Saved providers <span class="hint">— click to switch the active one</span></label>
+              <div id="aiProfiles"></div>
+            </div>
             <div class="field"><label>Provider</label><select id="setAiProvider"><option value="anthropic">Anthropic (native API)</option><option value="glm">GLM Coding Plan (Zhipu / z.ai)</option><option value="openrouter">OpenRouter (many models)</option><option value="openai">OpenAI (ChatGPT)</option></select></div>
             <div class="field"><label>API key</label><input id="setAiKey" type="password" placeholder="sk-ant-…"></div>
             <div class="field" id="setAiModelField">
@@ -856,6 +860,10 @@ Content-Type: application/json
               <button class="btn" id="loadAiModelsBtn" style="display:none" title="Fetch models from OpenRouter (validates your API key)">↻ Load models</button>
               <button class="btn accent" id="saveAiBtn">Save AI settings</button>
               <span class="hint" id="aiValidateState"></span>
+            </div>
+            <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">
+              <input id="aiProfileName" class="repurl" style="max-width:200px" aria-label="Profile name" placeholder="profile name (e.g. Claude prod)">
+              <button class="btn" id="aiProfileSave" title="Save the current provider/key/model/endpoint as a reusable, switchable profile">＋ Save as provider profile</button>
             </div>
             </div>
           </div>
