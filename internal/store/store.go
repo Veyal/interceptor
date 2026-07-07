@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -16,6 +17,11 @@ import (
 type Store struct {
 	db        *sql.DB
 	bodiesDir string
+
+	// notesMu guards the read-modify-write in AppendNote so concurrent callers
+	// (two AI agents, or an agent + a human editing in the UI) can't race between
+	// reading the current notes and writing the appended result — see AppendNote.
+	notesMu sync.Mutex
 }
 
 // Flow is one captured request/response exchange. Bodies are referenced by

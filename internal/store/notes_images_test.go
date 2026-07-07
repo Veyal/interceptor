@@ -2,8 +2,10 @@ package store
 
 import (
 	"encoding/base64"
+	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -123,6 +125,62 @@ func TestPersistNotesRoundTrip(t *testing.T) {
 	}
 	if got != out || strings.Contains(got, "data:image/") {
 		t.Fatalf("persisted notes = %q", got)
+	}
+}
+
+// AppendNote must be atomic: N concurrent appends must all survive, even when
+// they race against each other, because it does its own read-modify-write
+// inside the store rather than relying on a client-side GET-then-PUT (which is
+// what the old append_notes MCP tool did, and which loses entries under race).
+func TestAppendNoteConcurrentNoLoss(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	const n = 20
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			if err := s.AppendNote(fmt.Sprintf("entry-%d", i)); err != nil {
+				t.Errorf("AppendNote(%d): %v", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	got, err := s.LoadNotes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < n; i++ {
+		want := fmt.Sprintf("entry-%d", i)
+		if !strings.Contains(got, want) {
+			t.Fatalf("lost update: missing %q in final notes; got:\n%s", want, got)
+		}
+	}
+}
+
+// AppendNote on an empty notebook should not leave a leading separator.
+func TestAppendNoteFirstEntryNoLeadingSeparator(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	if err := s.AppendNote("first"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.LoadNotes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "first" {
+		t.Fatalf("notes = %q, want %q", got, "first")
 	}
 }
 

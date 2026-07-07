@@ -164,6 +164,7 @@ var apiRoutes = []apiRoute{
 	{"GET", "/api/endpoints", "Unique endpoints map (searchScope: path|headers|body|all)"},
 	{"GET", "/api/notes", "Project markdown notebook"},
 	{"PUT", "/api/notes", "Replace project notebook"},
+	{"PATCH", "/api/notes", "Atomically append a block to the project notebook (appendText)"},
 	{"POST", "/api/notes/images", "Upload an image for the notebook"},
 	{"GET", "/api/notes/images/{id}", "Serve a notebook image"},
 	{"GET", "/api/activity", "AI/MCP activity feed"},

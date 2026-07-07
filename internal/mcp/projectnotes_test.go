@@ -30,6 +30,17 @@ func TestProjectNotesTools(t *testing.T) {
 			json.NewDecoder(r.Body).Decode(&b)
 			notes = b.Notes
 			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/notes":
+			var b struct {
+				AppendText string `json:"appendText"`
+			}
+			json.NewDecoder(r.Body).Decode(&b)
+			if notes != "" {
+				notes = notes + "\n\n" + b.AppendText
+			} else {
+				notes = b.AppendText
+			}
+			w.WriteHeader(http.StatusNoContent)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

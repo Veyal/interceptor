@@ -2,10 +2,12 @@ package control
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -126,5 +128,73 @@ func TestProjectNotesMigratesInlineDataURL(t *testing.T) {
 	}
 	if !strings.Contains(out.Notes, "/api/notes/images/") {
 		t.Fatalf("expected image ref, got %q", out.Notes)
+	}
+}
+
+// PATCH /api/notes appends atomically server-side. This is the fix for the
+// append_notes lost-update race: the old MCP tool did a client-side
+// GET-then-PUT which could clobber a concurrent writer's append. Firing N
+// concurrent PATCH requests must never lose an entry.
+func TestPatchNotesAppendConcurrentNoLoss(t *testing.T) {
+	h, _, _ := newHub(t)
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	const n = 20
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			body, _ := json.Marshal(map[string]string{"appendText": fmt.Sprintf("entry-%d", i)})
+			req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/notes", strings.NewReader(string(body)))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Errorf("PATCH notes: %v", err)
+				return
+			}
+			resp.Body.Close()
+			if resp.StatusCode/100 != 2 {
+				t.Errorf("PATCH notes status %d", resp.StatusCode)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	resp, err := http.Get(ts.URL + "/api/notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Notes string `json:"notes"`
+	}
+	json.NewDecoder(resp.Body).Decode(&out)
+	for i := 0; i < n; i++ {
+		want := fmt.Sprintf("entry-%d", i)
+		if !strings.Contains(out.Notes, want) {
+			t.Fatalf("lost update: missing %q in final notes", want)
+		}
+	}
+}
+
+// PATCH /api/notes with an empty appendText is rejected — nothing meaningful
+// to append.
+func TestPatchNotesRequiresAppendText(t *testing.T) {
+	h, _, _ := newHub(t)
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	body, _ := json.Marshal(map[string]string{"appendText": ""})
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/notes", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
 }

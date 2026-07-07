@@ -177,6 +177,7 @@ func (h *Hub) registerAIRoutes(ai *aiAPI) {
 func (h *Hub) registerProjectRoutes(proj *projectAPI) {
 	h.mux.HandleFunc("GET /api/notes", proj.getNotes)
 	h.mux.HandleFunc("PUT /api/notes", proj.putNotes)
+	h.mux.HandleFunc("PATCH /api/notes", proj.patchNotes)
 	h.mux.HandleFunc("POST /api/notes/images", proj.postNotesImage)
 	h.mux.HandleFunc("GET /api/notes/images/{id}", proj.getNotesImage)
 	h.mux.HandleFunc("GET /api/export/har", proj.exportHAR)
