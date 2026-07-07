@@ -1066,7 +1066,7 @@ function deleteHost(f){
     if(!confirmed)return;
     try{
       const r=await api('/api/flows/purge',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({hosts:[f.host],mode:'delete'})});
-      toast('deleted '+r.deleted+' flow'+(r.deleted===1?'':'s')+' · freed '+fmtBytes(r.freedBytes));
+      toast('deleted '+r.deleted+' flow'+(r.deleted===1?'':'s'));
       loadRetention();loadFlows();
     }catch(e){toast('purge: '+e.message);}
   };

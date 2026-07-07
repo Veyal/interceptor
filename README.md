@@ -43,8 +43,6 @@ tester's direction and **entirely on the local machine**.
   **grep-match/extract**, anomaly flagging, attack tabs and run history.
 - **Authorization testing** — replay a request as each saved identity (role) and diff for broken
   access control (IDOR). **OOB interaction catcher** for blind SSRF/XXE/SQLi/RCE (off by default — remote targets cannot reach `localhost`; enable in Settings → Scanner when you have a tunnel or public URL).
-- **Content discovery** — scope-aware forced-browse (dirbuster/ffuf-style): wordlist + extensions,
-  per-directory soft-404 calibration, recursion, threads/delay; found endpoints feed History & the Map.
 - **AI assist** — BYO-key LLM explains requests, suggests payloads (with Repeater/Intruder routing),
   and summarizes findings; streamed, rendered as Markdown.
 - **Scanner** — 12 passive checks (missing CSP/HSTS/`nosniff`/clickjacking headers, wildcard CORS,
@@ -63,7 +61,7 @@ tester's direction and **entirely on the local machine**.
 - **BYO-key AI assist** — explain a request, suggest payloads, or summarize findings via your own
   **Anthropic** or **OpenRouter** key (off until you set one; the exchange is sent only on request).
 - **API & MCP** — a REST control API + SSE event stream and a full **Model Context Protocol** server
-  (84 tools, stdio **and** Streamable-HTTP) so an agent or script drives the same core as the UI.
+  (83 tools, stdio **and** Streamable-HTTP) so an agent or script drives the same core as the UI.
 
 ## Install
 
@@ -172,7 +170,7 @@ the same capabilities as the UI. Run the app, then connect your MCP client one o
 **Streamable-HTTP** (hosted/remote agents) — `POST` JSON-RPC to `http://127.0.0.1:9966/mcp`
 (stateless; no subprocess needed).
 
-Both expose the same **84 tools** — reading flows (`list_flows`, `get_flow`, `analyze_flow`,
+Both expose the same **83 tools** — reading flows (`list_flows`, `get_flow`, `analyze_flow`,
 `flow_as_curl`), replaying/fuzzing (`send_request`, `start_intruder`, `ws_send`), scanning
 (`run_scanner`, `scan_report`), intercept/rules/scope control, and `set_session` — with bounded
 results so large bodies don't blow the agent's context. The **Settings → API & MCP** section shows
@@ -201,7 +199,6 @@ independently tested.
 | `internal/sender` | One-off direct request sender (+ session headers, CSRF/re-auth token macro, authz replays) — backs Repeater & Intruder |
 | `internal/intruder` | Sniper / Pitchfork / Race attack engine (threads, delay, grep-match/extract, payload processing) |
 | `internal/scanner` | Passive security checks over captured flows |
-| `internal/discovery` | Scope-aware content-discovery (forced-browse) engine: wordlist brute-force, soft-404 calibration, recursion, worker pool |
 | `internal/oob` | Out-of-band interaction catcher (blind SSRF/XXE/SQLi/RCE callbacks) |
 | `internal/checkscript` | Runs user-authored Starlark scanner checks (sandboxed, bounded) |
 | `internal/curlgen` · `internal/report` | Render a flow as `curl`; render findings as Markdown |

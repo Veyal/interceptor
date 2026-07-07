@@ -115,10 +115,19 @@ export async function organizeNotes(){
   const stop=$('#notesAiStop');if(stop)stop.style.display='';
   let acc='';
   try{
+    // Raw fetch (not core.js's api()) because this is a streaming SSE response and
+    // api() always awaits the full body as json/text. Manually replicate its two
+    // behaviors that matter for a mutating request: the anti-CSRF header for
+    // remote (cookie-authed) sessions, and redirecting to /login on 401 rather
+    // than surfacing a raw fetch error.
     const r=await fetch('/api/ai/notes/organize/stream',{
-      method:'POST',headers:{'content-type':'application/json'},
+      method:'POST',headers:{'content-type':'application/json','X-Interceptor-CSRF':'1'},
       body:JSON.stringify({notes:src}),signal:ctrl.signal,
     });
+    if(r.status===401){
+      if(location.pathname!=='/login')location.href='/login';
+      throw new Error('unauthorized');
+    }
     if(!r.ok||!r.body)throw new Error('stream-unavailable');
     const reader=r.body.getReader(),dec=new TextDecoder();
     let buf='',streaming=false;

@@ -232,12 +232,29 @@ export async function checkTest(){
   const out=$('#checkOut');out.innerHTML='<div class="check-status check-status-pending">running…</div>';
   try{const r=await api(checkEndpoint()+'/test',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({source:$('#checkSrc').value,flowId:state.selId||0})});
     if(r.error){out.innerHTML='<div class="check-status check-status-error"><b>Compile/runtime error</b><pre>'+esc(r.error)+'</pre></div>';return;}
-    const f=r.finding;
-    const note=r.note||(f?('finding on flow #'+(f.flowId||'?')):'no finding');
     const suffix=checkKind==='active'?' · ⚡ sent real probes':'';
-    out.innerHTML=f
-      ?`<div class="check-status check-status-finding"><div class="hint" style="margin-bottom:6px">${esc(note)}${suffix}</div><div><span class="sev ${escAttr(f.severity)}">${esc(f.severity)}</span> ${esc(f.title)}${f.evidence?' <span class="hint">— '+esc(f.evidence)+'</span>':''}</div></div>`
-      :`<div class="check-status check-status-ok"><div class="hint">${esc(note)}${suffix}</div><div style="color:var(--accent);margin-top:4px">✓ No finding — check compiles &amp; runs.</div></div>`;
+    if(checkKind==='active'){
+      // Active checks return a single {finding} (or {note} when none) — the shape
+      // testActiveCheck (internal/control/active_checks.go) always emits.
+      const f=r.finding;
+      const note=r.note||(f?('finding on flow #'+(f.flowId||'?')):'no finding');
+      out.innerHTML=f
+        ?`<div class="check-status check-status-finding"><div class="hint" style="margin-bottom:6px">${esc(note)}${suffix}</div><div><span class="sev ${escAttr(f.severity)}">${esc(f.severity)}</span> ${esc(f.title)}${f.evidence?' <span class="hint">— '+esc(f.evidence)+'</span>':''}</div></div>`
+        :`<div class="check-status check-status-ok"><div class="hint">${esc(note)}${suffix}</div><div style="color:var(--accent);margin-top:4px">✓ No finding — check compiles &amp; runs.</div></div>`;
+      return;
+    }
+    // Passive checks return {findings:[...]} (testCheck in internal/control/checks.go)
+    // — zero, one, or many findings on the tested flow.
+    const findings=r.findings||[];
+    if(!findings.length){
+      const note=r.note||'no finding';
+      out.innerHTML=`<div class="check-status check-status-ok"><div class="hint">${esc(note)}${suffix}</div><div style="color:var(--accent);margin-top:4px">✓ No finding — check compiles &amp; runs.</div></div>`;
+      return;
+    }
+    const note='finding'+(findings.length===1?'':'s')+' on flow #'+(r.flowId||'?');
+    out.innerHTML=`<div class="check-status check-status-finding"><div class="hint" style="margin-bottom:6px">${esc(note)}${suffix}</div>`
+      +findings.map(f=>`<div><span class="sev ${escAttr(f.severity)}">${esc(f.severity)}</span> ${esc(f.title)}${f.evidence?' <span class="hint">— '+esc(f.evidence)+'</span>':''}</div>`).join('')
+      +`</div>`;
   }catch(e){out.innerHTML='<div class="check-status check-status-error"><b>Request failed</b><pre>'+esc(e.message)+'</pre></div>';}
 }
 export async function checkSave(){

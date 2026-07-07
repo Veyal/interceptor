@@ -21,14 +21,17 @@ func mcpHTTPClientConfig(baseURL string) map[string]any {
 	}
 }
 
-func mcpStdioClientConfig() map[string]any {
+func mcpStdioClientConfig(baseURL string) map[string]any {
+	if baseURL == "" {
+		baseURL = "http://127.0.0.1:9966"
+	}
 	return map[string]any{
 		"mcpServers": map[string]any{
 			"interceptor": map[string]any{
 				"command": "interceptor",
 				"args":    []string{"mcp"},
 				"env": map[string]any{
-					"INTERCEPTOR_CONTROL_URL": "http://127.0.0.1:9966",
+					"INTERCEPTOR_CONTROL_URL": baseURL,
 				},
 			},
 		},
@@ -46,7 +49,7 @@ func mcpDescriptorForRequest(host string) map[string]any {
 		base,
 	)
 	out["clientConfig"] = mcpHTTPClientConfig(base)
-	out["stdioClientConfig"] = mcpStdioClientConfig()
+	out["stdioClientConfig"] = mcpStdioClientConfig(base)
 	out["httpTransport"] = map[string]any{
 		"type": "streamable-http",
 		"url":  base + "/mcp",
