@@ -229,33 +229,38 @@ func summaryTable(total int, counts, statusCounts map[string]int) string {
 
 // renderFinding writes one finding's section (heading, metadata, narrative body
 // or legacy detail/evidence/PoC-flows fallback) to b.
+//
+// Finding content (Title, Impact, narrative text/flow-note blocks) can
+// originate from untrusted proxied content — e.g. an AI pastes page content
+// into a finding — so it is neutralized before being written verbatim into the
+// exported report; see sanitizeLine/sanitizeBody for what each does and why.
 func renderFinding(b *strings.Builder, n int, f store.Finding) {
-	fmt.Fprintf(b, "\n### %d. %s\n", n, f.Title)
+	fmt.Fprintf(b, "\n### %d. %s\n", n, sanitizeLine(f.Title))
 	if f.Status != "" {
-		b.WriteString("- **Status:** " + f.Status + "\n")
+		b.WriteString("- **Status:** " + sanitizeLine(f.Status) + "\n")
 	}
 	if f.Target != "" {
 		b.WriteString("- **Target:** `" + code(f.Target) + "`\n")
 	}
 	if f.Cvss != "" {
-		b.WriteString("- **CVSS:** " + f.Cvss + "\n")
+		b.WriteString("- **CVSS:** " + sanitizeLine(f.Cvss) + "\n")
 	}
 	if f.Impact != "" {
-		b.WriteString("- **Impact:** " + f.Impact + "\n")
+		b.WriteString("- **Impact:** " + sanitizeLine(f.Impact) + "\n")
 	}
 	b.WriteString("\n")
 	// Render interleaved narrative body (text + PoC flows in author's order).
 	if len(f.Blocks) > 0 {
 		for _, bl := range f.Blocks {
 			if bl.Type == "text" && bl.MD != "" {
-				b.WriteString(bl.MD + "\n\n")
+				b.WriteString(sanitizeBody(bl.MD) + "\n\n")
 			} else if bl.Type == "flow" {
 				if bl.Missing {
 					// PoC flow was purged from history (prune_history / GC) — note
 					// that the evidence is gone instead of an empty/broken quote.
 					line := fmt.Sprintf("> ⚠ PoC flow #%d — evidence no longer in history", bl.FlowID)
 					if bl.Note != "" {
-						line += " — " + bl.Note
+						line += " — " + sanitizeBody(bl.Note)
 					}
 					b.WriteString(line + "\n>\n")
 					continue
@@ -265,7 +270,7 @@ func renderFinding(b *strings.Builder, n int, f store.Finding) {
 					line += fmt.Sprintf(" → **%d**", bl.Status)
 				}
 				if bl.Note != "" {
-					line += " — " + bl.Note
+					line += " — " + sanitizeBody(bl.Note)
 				}
 				b.WriteString(line + "\n>\n")
 			}
@@ -325,6 +330,56 @@ func code(s string) string {
 	s = strings.ReplaceAll(s, "`", "'")
 	s = strings.ReplaceAll(s, "\n", " ")
 	return strings.ReplaceAll(s, "\r", "")
+}
+
+// sanitizeLine neutralizes s for use as a single-line metadata value (Title,
+// Status, CVSS, Impact) that is written as plain inline text right after a
+// "### N. " heading marker or a "- **Label:** " bullet — never inside a code
+// span, so code()'s backtick-stripping isn't the right tool here. The only
+// injection vector for a single inline field is a newline: without one, no
+// attacker-controlled text can start a new Markdown line (a fake "## Heading"
+// or "- **Status:** " bullet), so collapsing CR/LF to a space is both
+// necessary and sufficient, and leaves inline formatting like `code` or
+// **bold** untouched for a legitimate author.
+func sanitizeLine(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	return strings.ReplaceAll(s, "\r", " ")
+}
+
+// sanitizeBody neutralizes freeform multi-line finding content (a narrative
+// text block's Markdown, or a PoC flow's note) before it is written verbatim
+// into the report. Unlike sanitizeLine, this content legitimately wants real
+// Markdown — paragraphs, lists, code blocks, bold/italic — so it is not
+// flattened to one line. Instead, only the specific line-start sequences that
+// could forge the report's OWN structural scaffolding are escaped:
+//   - a leading "#" (would start a heading, e.g. faking "## Fake Heading")
+//   - a leading "- **" (would start a metadata bullet, e.g. faking our own
+//     "- **Status:** verified" line)
+//
+// Escaping with a backslash keeps the character visible (so the author's
+// intent is still legible) while stopping a Markdown renderer — and a human
+// skimming the raw .md — from treating it as genuine document structure.
+// Ordinary prose, code spans, and other Markdown (bullets not styled like our
+// metadata lines, bold text mid-sentence, etc.) is left exactly as written.
+func sanitizeBody(s string) string {
+	if s == "" {
+		return s
+	}
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimLeft(line, " \t")
+		indent := line[:len(line)-len(trimmed)]
+		switch {
+		case strings.HasPrefix(trimmed, "#"):
+			lines[i] = indent + "\\" + trimmed
+		case strings.HasPrefix(trimmed, "- **"):
+			lines[i] = indent + "- \\**" + strings.TrimPrefix(trimmed, "- **")
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func orVal(s, def string) string {
