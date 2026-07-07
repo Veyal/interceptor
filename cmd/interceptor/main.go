@@ -72,6 +72,12 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "launcher":
+			if err := runLauncher(os.Args[2:]); err != nil {
+				fmt.Fprintf(os.Stderr, "launcher failed: %v\n", err)
+				os.Exit(1)
+			}
+			return
 		case "help", "-h", "--help":
 			printUsage()
 			return

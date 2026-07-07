@@ -34,6 +34,7 @@ func printUsage() {
 
 Usage:
   interceptor              start the proxy and control UI
+  interceptor launcher     dashboard to run multiple projects at once, each its own instance
   interceptor mcp          run the MCP server on stdio (see GET /api/mcp for HTTP /mcp)
   interceptor update       install the latest release
   interceptor stop         stop all running instances
@@ -45,6 +46,10 @@ Common flags / env:
   --control-port <port>    control UI/API port on 127.0.0.1 (e.g. 9967 for a second instance)
   --control-addr host:port full control listen address (overrides --control-port; also --control_port)
   INTERCEPTOR_CONTROL_ADDR same as --control-addr when the flag is not set
+  INTERCEPTOR_PROXY_ADDR   proxy listen address override (lets a second instance pick its own port)
+
+Launcher flags:
+  --addr host:port         dashboard listen address (default 127.0.0.1:9965)
 
 Update flags:
   --check                  report whether an update is available
@@ -61,6 +66,7 @@ Examples:
   interceptor update --version 0.6.0
   interceptor stop
   interceptor stop --force
+  interceptor launcher
 
 Updates download a prebuilt binary from GitHub Releases when one is attached
 for your OS/arch; otherwise `+"`go install github.com/Veyal/interceptor/cmd/interceptor@latest`"+` is used.
