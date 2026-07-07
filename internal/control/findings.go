@@ -2,6 +2,7 @@ package control
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -137,12 +138,48 @@ func (h *findingsAPI) createFinding(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Attach any PoC flows passed at create time. A bad flowId (e.g. a typo, or
+	// a flow that was since purged) must not fail the whole finding — the
+	// finding is the durable record and should still be created — but it also
+	// must not be silently dropped, so failures are collected and surfaced to
+	// the caller as warnings instead.
+	var warnings []string
 	for _, fid := range in.FlowIDs {
-		_ = h.st.AttachFlow(id, fid, "", -1)
+		if err := h.st.AttachFlow(id, fid, "", -1); err != nil {
+			warnings = append(warnings, fmt.Sprintf("failed to attach flow %d: %v", fid, err))
+		}
 	}
 	h.broadcast(map[string]any{"type": "findings.update"})
 	out, _ := h.st.GetFinding(id)
-	writeJSON(w, http.StatusOK, out)
+	// AttachFlow has no foreign-key check on flowId, so a nonexistent flow
+	// attaches "successfully" at the DB level with no error — the enriched
+	// finding then shows it as a Missing PoC flow block. Surface that as a
+	// warning too, alongside any hard AttachFlow errors collected above.
+	if out != nil {
+		for _, fl := range out.Flows {
+			if fl.Missing {
+				warnings = append(warnings, fmt.Sprintf("attached flow %d not found — PoC will show as missing", fl.FlowID))
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, findingWithWarnings(out, warnings))
+}
+
+// findingWithWarnings renders a finding as JSON with an additional "warnings"
+// field listing any non-fatal problems from the request (e.g. a PoC flow that
+// failed to attach). warnings is omitted entirely when empty, so existing
+// callers see byte-identical responses to before this field existed.
+func findingWithWarnings(f *store.Finding, warnings []string) map[string]any {
+	b, _ := json.Marshal(f)
+	var m map[string]any
+	_ = json.Unmarshal(b, &m)
+	if m == nil {
+		m = map[string]any{}
+	}
+	if len(warnings) > 0 {
+		m["warnings"] = warnings
+	}
+	return m
 }
 
 func (h *findingsAPI) getFinding(w http.ResponseWriter, r *http.Request) {
