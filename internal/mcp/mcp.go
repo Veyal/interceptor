@@ -1191,11 +1191,13 @@ func (s *Server) registerTools() {
 			"template":   p("string", "raw request with §…§"),
 			"attackType": p("string", "sniper | battering | pitchfork | cluster"),
 			"payloads":   map[string]any{"type": "array", "items": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}},
+			"threads":    p("integer", "concurrent in-flight requests, 1-64 (default 1)"),
 		}, "target", "template"),
 		func(a map[string]any) (string, error) {
 			return s.api(http.MethodPost, "/api/intruder/start", map[string]any{
 				"target": argStr(a, "target"), "template": argStr(a, "template"),
 				"attackType": argStr(a, "attackType"), "payloads": a["payloads"],
+				"threads": argInt(a, "threads", 1),
 			})
 		})
 

@@ -30,6 +30,10 @@ func (h *toolsAPI) intruderStart(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusForbidden, "refusing to attack Interceptor's own listener")
 		return
 	}
+	if in.Threads <= 0 {
+		httpErr(w, http.StatusBadRequest, "threads must be a positive number")
+		return
+	}
 	err := h.intr.Start(intruder.Spec{
 		Target:       in.Target,
 		Template:     in.Template,
