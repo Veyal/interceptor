@@ -123,8 +123,13 @@ func (h *iosAPI) postIOSSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	dev, port, err := h.iosDeviceAndPort(in)
 	if err != nil {
-		// No device: still return profile URL for manual physical setup.
+		// No device: still return profile URL for manual physical setup. The
+		// port from iosDeviceAndPort is 0 here — it short-circuited on the
+		// device-lookup error before ever computing a proxy port — so it must
+		// NOT be reused. Recompute the real configured proxy port directly;
+		// it doesn't depend on a device being present.
 		if in.UDID == "" {
+			_, port := h.deviceProxyHostPort("")
 			host := "127.0.0.1"
 			mode := strings.ToLower(strings.TrimSpace(in.ProxyMode))
 			if mode == "wifi" {
