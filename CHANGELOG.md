@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 > **Archive:** Release notes for 0.11.0 and earlier live in [CHANGELOG/archive/pre-0.12.md](CHANGELOG/archive/pre-0.12.md).
 
+## [Unreleased]
+
+### Fixed
+- **Compiling a Starlark check could OOM-kill the whole process.** `checkscript.Compile`/`activescript.Compile` never bounded execution steps — only `Run()` did — so a module-level (outside `def check(flow):`) list/dict comprehension ran unbounded at compile time. A ~90-byte payload drove the process to ~12GB RSS and crashed it. Reachable via `POST /api/checks/test`, `PUT /api/checks/{id}` (save), `POST /api/ai/checks/generate`, the active-check twin, and `LoadDir` at scan time. Both `Compile()` functions now call `thread.SetMaxExecutionSteps` with the same budget `Run()` already used. (`internal/checkscript/checkscript.go`, `internal/activescript/checkscript.go`.)
+
 ## [0.29.0] - 2026-07-07
 
 ### Added
