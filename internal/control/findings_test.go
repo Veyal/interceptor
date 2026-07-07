@@ -364,6 +364,61 @@ func TestFindingAttachFlowPosition(t *testing.T) {
 	}
 }
 
+// TestCreateFindingSurfacesBadFlowIDWarning verifies that create_finding's
+// flowIds loop no longer silently swallows a failed PoC attachment: the
+// finding is still created (and the valid attachment still lands), but the
+// response signals which flowId failed via a "warnings" array instead of
+// discarding the error.
+func TestCreateFindingSurfacesBadFlowIDWarning(t *testing.T) {
+	h, s, _ := newHub(t)
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	validFlow, _ := s.InsertFlow(&store.Flow{TS: time.UnixMilli(1), Method: "GET", Host: "t.com", Path: "/ok", Status: 200})
+	const invalidFlow int64 = 999999 // does not exist
+
+	payload := fmt.Sprintf(`{"title":"mixed attach","severity":"Medium","flowIds":[%d,%d]}`, validFlow, invalidFlow)
+	resp, err := http.Post(ts.URL+"/api/findings", "application/json", strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create: want 200, got %d", resp.StatusCode)
+	}
+	var out struct {
+		ID       int64          `json:"id"`
+		Flows    []store.FindingFlow `json:"flows"`
+		Warnings []string       `json:"warnings"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+
+	// The finding itself must still be created despite one bad attachment.
+	if out.ID == 0 {
+		t.Fatalf("finding was not created: %+v", out)
+	}
+	// The valid attachment must still have landed.
+	found := false
+	for _, fl := range out.Flows {
+		if fl.FlowID == validFlow {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("valid flow attachment missing: %+v", out.Flows)
+	}
+	// The failed attachment must be surfaced, not silently dropped.
+	if len(out.Warnings) == 0 {
+		t.Fatalf("expected a warning about the invalid flowId %d, got none: %+v", invalidFlow, out)
+	}
+	joined := strings.Join(out.Warnings, " | ")
+	if !strings.Contains(joined, strconv.FormatInt(invalidFlow, 10)) {
+		t.Fatalf("warnings do not mention the failing flowId %d: %v", invalidFlow, out.Warnings)
+	}
+}
+
 // TestListFlowsTagFilter verifies GET /api/flows?tag= wires into FlowFilter.Tag.
 func TestListFlowsTagFilter(t *testing.T) {
 	h, s, _ := newHub(t)

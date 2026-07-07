@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/Veyal/interceptor/internal/store"
 )
@@ -31,6 +32,32 @@ func (h *projectAPI) putNotes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := h.st.PersistNotes(in.Notes); err != nil {
+		httpErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	h.broadcast(map[string]any{"type": "notes.update"})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// patchNotes atomically appends a markdown block to the project notebook,
+// entirely inside the store (see Store.AppendNote) — unlike putNotes, this
+// avoids the client-side GET-then-PUT lost-update race: two concurrent
+// appenders (two AI agents, or an agent racing a human editing in the UI) can
+// no longer clobber each other, since there is no client-observable gap
+// between reading the current notes and writing the appended result.
+func (h *projectAPI) patchNotes(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		AppendText string `json:"appendText"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		httpErr(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	if strings.TrimSpace(in.AppendText) == "" {
+		httpErr(w, http.StatusBadRequest, "appendText is required (a non-empty string)")
+		return
+	}
+	if err := h.st.AppendNote(in.AppendText); err != nil {
 		httpErr(w, http.StatusBadRequest, err.Error())
 		return
 	}

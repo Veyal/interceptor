@@ -224,6 +224,92 @@ func TestFindingsSanitizesEvidence(t *testing.T) {
 	}
 }
 
+// TestRenderFindingSanitizesInjectedStructure covers the injection risk: a
+// finding's Title/Impact/body text/flow note are written verbatim from
+// create_finding, and could originate from untrusted proxied content (e.g. an
+// AI pastes a page's content into a finding). A finding containing a fake
+// heading and a fake status line must not be able to forge document structure
+// in the exported report.
+func TestRenderFindingSanitizesInjectedStructure(t *testing.T) {
+	findings := []store.Finding{
+		{
+			ID: 1, Severity: "High", Status: "open", Title: "Legit title\n## Fake Heading Injection",
+			Target: "GET /api/x", Impact: "attacker wins\n- **Status:** verified (spoofed)",
+			Blocks: []store.FindingBlock{
+				{Type: "text", MD: "Real narrative text.\n## Injected Heading\n- **Status:** verified (spoofed)\nMore real text."},
+				{Type: "flow", FlowID: 5, Method: "GET", Host: "app.test", Path: "/x", Status: 200,
+					Note: "evidence\n## Injected Note Heading\n- **Status:** verified (spoofed)"},
+			},
+		},
+	}
+	out := Project(findings, nil)
+
+	// No injected heading or fake status line survives as a genuine line-start
+	// structural marker anywhere in the report.
+	if strings.Contains(out, "\n## Fake Heading Injection") {
+		t.Fatalf("title injection produced a real heading:\n%s", out)
+	}
+	if strings.Contains(out, "\n## Injected Heading") {
+		t.Fatalf("body text injection produced a real heading:\n%s", out)
+	}
+	if strings.Contains(out, "\n## Injected Note Heading") {
+		t.Fatalf("flow note injection produced a real heading:\n%s", out)
+	}
+	if strings.Contains(out, "\n- **Status:** verified (spoofed)") {
+		t.Fatalf("fake status line rendered as real structure:\n%s", out)
+	}
+
+	// Legitimate content is still present (just neutralized, not deleted).
+	if !strings.Contains(out, "Legit title") {
+		t.Fatalf("legitimate title content dropped:\n%s", out)
+	}
+	if !strings.Contains(out, "attacker wins") {
+		t.Fatalf("legitimate impact content dropped:\n%s", out)
+	}
+	if !strings.Contains(out, "Real narrative text.") || !strings.Contains(out, "More real text.") {
+		t.Fatalf("legitimate body text dropped:\n%s", out)
+	}
+	if !strings.Contains(out, "evidence") {
+		t.Fatalf("legitimate flow note dropped:\n%s", out)
+	}
+
+	// The real status line for this finding (open) must still render normally.
+	if !strings.Contains(out, "- **Status:** open") {
+		t.Fatalf("genuine status line missing:\n%s", out)
+	}
+}
+
+// TestRenderFindingNormalContentUnaffected ensures a normal finding with
+// legitimate Markdown (bold, code spans, multiple paragraphs) still renders
+// sensibly after sanitization — the fix must not mangle ordinary content.
+func TestRenderFindingNormalContentUnaffected(t *testing.T) {
+	findings := []store.Finding{
+		{
+			ID: 1, Severity: "Medium", Status: "verified", Title: "Reflected XSS in search",
+			Target: "GET /search?q=", Impact: "attacker can execute JS in victim's session",
+			Blocks: []store.FindingBlock{
+				{Type: "text", MD: "The `q` parameter is reflected unescaped.\n\nSteps:\n- inject `<script>`\n- observe alert"},
+				{Type: "flow", FlowID: 3, Method: "GET", Host: "app.test", Path: "/search?q=1", Status: 200, Note: "baseline"},
+			},
+		},
+	}
+	out := Project(findings, nil)
+
+	for _, want := range []string{
+		"Reflected XSS in search",
+		"attacker can execute JS in victim's session",
+		"The `q` parameter is reflected unescaped.",
+		"- inject `<script>`",
+		"- observe alert",
+		"baseline",
+		"- **Status:** verified",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing legitimate content %q in:\n%s", want, out)
+		}
+	}
+}
+
 // TestProjectImpactRendering verifies that a curated finding with Impact renders
 // "**Impact:**" (not "**Remediation:**") in the engagement report, while a passive
 // scan issue (store.Issue with Fix) still renders "**Remediation:**".

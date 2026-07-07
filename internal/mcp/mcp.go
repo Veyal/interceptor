@@ -924,22 +924,14 @@ func (s *Server) registerTools() {
 		})
 
 	s.add("append_notes",
-		"Append a markdown block to the project notebook (e.g. a new finding) without rewriting the rest.",
+		"Append a markdown block to the project notebook (e.g. a new finding) without rewriting the rest. Atomic server-side — safe to call concurrently (e.g. from multiple AI agents, or alongside a human editing in the UI) without losing either side's text.",
 		obj(map[string]any{"text": pt("string")}, "text"),
 		func(a map[string]any) (string, error) {
-			raw, err := s.apiGet("/api/notes")
+			text, err := reqStr(a, "text")
 			if err != nil {
 				return "", err
 			}
-			var d struct {
-				Notes string `json:"notes"`
-			}
-			json.Unmarshal([]byte(raw), &d)
-			joined := argStr(a, "text")
-			if d.Notes != "" {
-				joined = d.Notes + "\n\n" + joined
-			}
-			if _, err := s.api(http.MethodPut, "/api/notes", map[string]any{"notes": joined}); err != nil {
+			if _, err := s.api(http.MethodPatch, "/api/notes", map[string]any{"appendText": text}); err != nil {
 				return "", err
 			}
 			return "appended to notes", nil

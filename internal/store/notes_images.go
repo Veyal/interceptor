@@ -167,6 +167,28 @@ func (s *Store) LoadNotes() (string, error) {
 	return s.PersistNotes(notes)
 }
 
+// AppendNote atomically appends a markdown block to the project notebook,
+// separated from any existing content by a blank line. Unlike a client-side
+// GET-then-PUT (the old append_notes MCP tool's approach), the read and write
+// happen inside one critical section here, so two concurrent appends (two AI
+// agents, or an agent racing a human editing in the UI) can never silently
+// clobber each other — both appends are guaranteed to land.
+func (s *Store) AppendNote(text string) error {
+	s.notesMu.Lock()
+	defer s.notesMu.Unlock()
+
+	notes, _, err := s.GetSetting("project.notes")
+	if err != nil {
+		return err
+	}
+	joined := text
+	if notes != "" {
+		joined = notes + "\n\n" + text
+	}
+	_, err = s.PersistNotes(joined)
+	return err
+}
+
 // DecodeNotesImagePayload decodes a base64 image upload body.
 func DecodeNotesImagePayload(mime, b64 string) (string, []byte, error) {
 	mime = strings.TrimSpace(mime)
