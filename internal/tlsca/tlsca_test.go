@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -132,6 +133,17 @@ func TestTLSConfigUsesSNI(t *testing.T) {
 
 // LoadOrCreate must create the CA dir 0o700: it holds the CA private key, so
 // only the owner should be able to traverse it (defense in depth).
+//
+// This assertion is POSIX-specific: os.MkdirAll(dir, 0o700) requests those
+// bits, but on Windows/NTFS, Go's directory creation doesn't map POSIX
+// permission bits to ACLs the same way — Stat().Mode().Perm() reports 0777
+// regardless of the requested mode. That makes the 0o700 check a permanent,
+// environment-dependent false-positive failure on Windows (not a real
+// regression), so it's skipped there rather than weakened for everyone.
+// golang.org/x/sys/windows can query the real ACL, but it's only an
+// indirect dependency today and a correct "not world-writable" ACL check is
+// substantial enough to be its own change — skip with this explanation
+// instead of promoting a new direct dependency for a test-only assertion.
 func TestLoadOrCreateDirPerms(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "ca")
 	if _, err := LoadOrCreate(dir); err != nil {
@@ -140,6 +152,9 @@ func TestLoadOrCreateDirPerms(t *testing.T) {
 	fi, err := os.Stat(dir)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits are not meaningful on Windows/NTFS — os.Stat always reports 0777 regardless of the requested mode; see comment above")
 	}
 	if perm := fi.Mode().Perm(); perm != 0o700 {
 		t.Fatalf("CA dir perms = %o, want 700", perm)
