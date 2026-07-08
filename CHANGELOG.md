@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 > **Archive:** Release notes for 0.11.0 and earlier live in [CHANGELOG/archive/pre-0.12.md](CHANGELOG/archive/pre-0.12.md).
 
-## [Unreleased]
+## [1.0.0] - 2026-07-09
 
 ### Changed
 - **README trimmed to a summary.** Detailed install/config/security/architecture/API/MCP content moved to dedicated files under `docs/` (`getting-started.md`, `FEATURES.md`, `architecture.md`, `api-and-mcp.md`); README now links out instead of carrying everything inline.
