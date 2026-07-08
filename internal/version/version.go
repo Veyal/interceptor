@@ -20,7 +20,7 @@ import (
 const Version = "0.29.0"
 
 // Repo is the GitHub owner/name used for the update check.
-const Repo = "Veyal/interceptor"
+const Repo = "Veyal/interseptor"
 
 // String returns the running version: the module version when installed via
 // `go install …@vX.Y.Z` (authoritative), otherwise the baked-in constant. It
