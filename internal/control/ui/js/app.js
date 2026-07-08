@@ -446,7 +446,7 @@ async function loadVersion(retry){
       el.title='You have v'+(d.version||'?')+' — a newer release is available. Click for releases.';
     }else{
       el.textContent='v'+(d.version||'');el.style.color='var(--fg3)';el.style.fontWeight='';
-      el.title='Interceptor v'+(d.version||'');
+      el.title='Interseptor v'+(d.version||'');
     }
     if(!d.latest&&retry)setTimeout(()=>loadVersion(false),3500); // the server's update check may still be in flight
   }catch(e){}

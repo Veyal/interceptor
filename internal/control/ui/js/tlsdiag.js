@@ -22,7 +22,7 @@ function hostsLine(rep) {
 }
 
 function bypassNote() {
-  return `<p style="margin:8px 0 0;font-size:11.5px;color:var(--fg3)"><b>Interceptor cannot bypass SSL pinning to read this traffic</b> — that requires changes on the device (Frida, patched APK, emulator + system CA if the app does not pin). If these domains aren't important to your test, <b>pass them through</b> so the app keeps working while you intercept the rest.</p>`;
+  return `<p style="margin:8px 0 0;font-size:11.5px;color:var(--fg3)"><b>Interseptor cannot bypass SSL pinning to read this traffic</b> — that requires changes on the device (Frida, patched APK, emulator + system CA if the app does not pin). If these domains aren't important to your test, <b>pass them through</b> so the app keeps working while you intercept the rest.</p>`;
 }
 
 export function isTlsBannerHidden() {
@@ -169,7 +169,7 @@ export function getStartedDiagnosisHint() {
   return `<div style="margin:14px 0;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg2);font-size:12px;line-height:1.6">
     <div style="font-weight:700;color:${v.color};margin-bottom:4px">${v.icon} ${esc(v.label)}</div>
     <div style="color:var(--fg2)">${esc(lastDiag.detail || '')}</div>
-    ${lastDiag.verdict === 'tls_blocked' ? '<div style="margin-top:6px;color:var(--fg3)">Interceptor detects pinning but <b>cannot bypass it</b> — use Frida, a patched APK, or an emulator with system CA.</div>' : ''}
+    ${lastDiag.verdict === 'tls_blocked' ? '<div style="margin-top:6px;color:var(--fg3)">Interseptor detects pinning but <b>cannot bypass it</b> — use Frida, a patched APK, or an emulator with system CA.</div>' : ''}
     ${lastDiag.fix ? `<div style="margin-top:6px;color:var(--fg2)"><b>Try:</b> ${esc(lastDiag.fix)}</div>` : ''}
   </div>`;
 }

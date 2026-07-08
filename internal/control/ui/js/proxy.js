@@ -426,7 +426,7 @@ export function getStartedCard(){
   const diag=getStartedDiagnosisHint();
   return `<div style="max-width:640px;margin:26px auto;padding:0 16px">
     <div style="font-size:14px;font-weight:700;color:var(--fg);margin-bottom:4px">No traffic yet — let's capture some</div>
-    <div class="hint" style="margin-bottom:14px">Interceptor sits between your client and the internet; point traffic at it and it shows up here live.</div>
+    <div class="hint" style="margin-bottom:14px">Interseptor sits between your client and the internet; point traffic at it and it shows up here live.</div>
     ${diag}
     <ol style="color:var(--fg2);line-height:2;font-size:12.5px;padding-left:20px;margin:0">
       <li>Point your browser/client at the proxy <b style="color:var(--accent);font-family:var(--mono)">${esc(state.proxyAddr)}</b>${navigator.platform&&/win/i.test(navigator.platform)?' — Windows: Settings → Network → Proxy → manual <b>127.0.0.1:8080</b> (or <code>netsh winhttp set proxy 127.0.0.1:8080</code> for system-wide)':''}</li>
@@ -1223,7 +1223,7 @@ export async function copyCurl(f){
   try{
     const d=await api('/api/flows/'+f.id);
     const parts=[`curl -x http://${state.proxyAddr}`];
-    if(f.scheme==='https')parts.push('--cacert interceptor-ca.crt');
+    if(f.scheme==='https')parts.push('--cacert interseptor-ca.crt');
     parts.push('-X '+f.method);
     const headers=d.reqHeaders||{};
     Object.keys(headers).sort().forEach(k=>{if(k.toLowerCase()==='host')return;(headers[k]||[]).forEach(v=>parts.push('-H '+shq(k+': '+v)));});

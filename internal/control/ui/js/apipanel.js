@@ -39,7 +39,7 @@ export async function loadShare(){
     }else if(s.running){
       html='<span class="sev Info">starting…</span> waiting for the public URL — refresh in a moment.';
     }else if(!s.installed){
-      html='<span class="sev Medium">cloudflared not installed</span><div class="hint" style="margin-top:6px">Install <code>cloudflared</code> (<a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/" target="_blank" rel="noopener">download</a>) and retry — Interceptor runs a free quick tunnel, no account needed.</div>';
+      html='<span class="sev Medium">cloudflared not installed</span><div class="hint" style="margin-top:6px">Install <code>cloudflared</code> (<a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/" target="_blank" rel="noopener">download</a>) and retry — Interseptor runs a free quick tunnel, no account needed.</div>';
     }else if(!s.hasKeys){
       html='<span class="sev Medium">no access key</span><div class="hint" style="margin-top:6px">Create an access key first (Keys tab) — sharing is refused with no key so the surface is never exposed unauthenticated.</div>';
     }else{
@@ -95,21 +95,21 @@ export async function loadMCP(){
   try{const m=await api('/api/mcp');
     const httpCfg=JSON.stringify(m.clientConfig||{},null,2);
     const stdioCfg=JSON.stringify(m.stdioClientConfig||{},null,2);
-    const cmd=`${(m.transport&&m.transport.command)||'interceptor'} ${((m.transport&&m.transport.args)||[]).join(' ')}`.trim();
+    const cmd=`${(m.transport&&m.transport.command)||'interseptor'} ${((m.transport&&m.transport.args)||[]).join(' ')}`.trim();
     const tools=(m.tools||[]).map(t=>`<tr>
       <td style="font-family:var(--mono);color:var(--accent)">${esc(t.name)}</td>
       <td style="color:var(--fg2)">${esc(t.desc)}</td></tr>`).join('');
     $('#mcpBody').innerHTML=`
       <div class="row" style="gap:8px"><span class="sev ${m.status==='ready'?'Low':'Info'}">${esc(m.status)}</span>
-        <span class="hint">Let your AI assistant drive Interceptor — same tools as the UI.</span></div>
+        <span class="hint">Let your AI assistant drive Interseptor — same tools as the UI.</span></div>
       <p class="hint" style="margin:12px 0;line-height:1.6">${esc(m.note||'')}</p>
       <div style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--accent);margin:14px 0 6px">RECOMMENDED · CURSOR / STREAMABLE HTTP (auto-syncs on restart)</div>
-      <div class="row" style="gap:10px;margin:0 0 6px"><span class="hint">Paste into <code>.cursor/mcp.json</code> — uses the running Interceptor, no stale stdio binary.</span><button class="btn accent" id="mcpCopyHttp" style="padding:3px 10px">Copy</button></div>
+      <div class="row" style="gap:10px;margin:0 0 6px"><span class="hint">Paste into <code>.cursor/mcp.json</code> — uses the running Interseptor, no stale stdio binary.</span><button class="btn accent" id="mcpCopyHttp" style="padding:3px 10px">Copy</button></div>
       <pre class="evidence" style="white-space:pre;overflow:auto;margin-top:0">${esc(httpCfg)}</pre>
       ${m.httpTransport?`<p class="hint" style="margin:8px 0 0;line-height:1.6">Endpoint: <code>${esc(m.httpTransport.url||'')}</code> · ${esc(m.httpTransport.note||'')}</p>`:''}
       <div style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3);margin:16px 0 6px">STDIO · Claude Desktop / separate MCP process</div>
       <div class="evidence" style="font-family:var(--mono);margin-bottom:8px">${esc(cmd)}</div>
-      <p class="hint" style="margin:0 0 8px">Windows: <code>scripts/interceptor-mcp.cmd</code> resolves the latest <code>interceptor</code> on PATH after <code>go install</code> / <code>interceptor update</code>.</p>
+      <p class="hint" style="margin:0 0 8px">Windows: <code>scripts/interceptor-mcp.cmd</code> resolves the latest <code>interseptor</code> on PATH after <code>go install</code> / <code>interseptor update</code>.</p>
       <div class="row" style="gap:10px;margin:0 0 6px"><span style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3)">STDIO CLIENT CONFIG</span><button class="btn" id="mcpCopyStdio" style="padding:3px 10px">Copy</button></div>
       <pre class="evidence" style="white-space:pre;overflow:auto;margin-top:0">${esc(stdioCfg)}</pre>
       <div style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3);margin:18px 0 6px">TOOLS · ${(m.tools||[]).length}</div>

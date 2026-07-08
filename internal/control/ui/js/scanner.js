@@ -205,7 +205,7 @@ export async function loadBuiltinCheck(id,kind='passive'){
     checkOverridden=!!d.overridden;
     $('#checkId').value=id;checkSetEditorReadonly(true);
     $('#checkSrc').value=d.source||'';
-  const note=checkOverridden?'your Starlark override is active':'edit & Save to write ~/.interceptor/'+(kind==='active'?'active-checks/':'checks/')+id+'.star';
+  const note=checkOverridden?'your Starlark override is active':'edit & Save to write ~/.interseptor/'+(kind==='active'?'active-checks/':'checks/')+id+'.star';
     $('#checkOut').innerHTML='<div class="check-status check-status-pending">Built-in <b>'+esc(id)+'</b> — '+note+'</div>';
     updateCheckDeleteLabel();
     markChecksSelected($('#checksList'));

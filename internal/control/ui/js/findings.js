@@ -616,7 +616,7 @@ $('#findExport') && ($('#findExport').onclick = async () => {
     const isHtml = fmt === 'html';
     const body = await api('/api/findings/report' + (isHtml ? '?format=html' : ''));
     const mime = isHtml ? 'text/html' : 'text/markdown';
-    await saveFile(new Blob([body], { type: mime }), 'interceptor-report.' + (isHtml ? 'html' : 'md'), mime);
+    await saveFile(new Blob([body], { type: mime }), 'interseptor-report.' + (isHtml ? 'html' : 'md'), mime);
     toast('Report downloaded');
   } catch (e) { if (!(e && e.name === 'AbortError')) toast(e.message); }
 });

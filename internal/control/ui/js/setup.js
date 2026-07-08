@@ -17,9 +17,9 @@ function osHint() {
 }
 
 const TRUST_STEPS = {
-  mac: `<li>Open the downloaded <code>interceptor-ca.crt</code> — Keychain Access opens.</li><li>Add it to <b>System</b> (or login) → double-click <b>Interceptor</b> CA → <b>Trust</b> → <b>Always Trust</b>.</li>`,
+  mac: `<li>Open the downloaded <code>interseptor-ca.crt</code> — Keychain Access opens.</li><li>Add it to <b>System</b> (or login) → double-click <b>Interseptor</b> CA → <b>Trust</b> → <b>Always Trust</b>.</li>`,
   win: `<li>Double-click the <code>.crt</code> → <b>Install Certificate</b> → <b>Local Machine</b> <span class="hint">(needs admin — choose <b>Current User</b> if you're not)</span> → <b>Place all certificates in: Trusted Root Certification Authorities</b>.</li>`,
-  linux: `<li><b>Debian/Ubuntu:</b> copy to <code>/usr/local/share/ca-certificates/interceptor.crt</code> → <code>sudo update-ca-certificates</code>.</li><li>Or one-off: <code>curl --cacert ~/.interceptor/ca/ca.crt -x http://127.0.0.1:8080 https://…</code></li>`,
+  linux: `<li><b>Debian/Ubuntu:</b> copy to <code>/usr/local/share/ca-certificates/interseptor.crt</code> → <code>sudo update-ca-certificates</code>.</li><li>Or one-off: <code>curl --cacert ~/.interseptor/ca/ca.crt -x http://127.0.0.1:8080 https://…</code></li>`,
 };
 
 function renderStep() {
@@ -29,7 +29,7 @@ function renderStep() {
   const b = $('#setupBody');
   if (step === 0) {
     const addr = esc(state.proxyAddr || '127.0.0.1:8080');
-    b.innerHTML = `<p style="margin:0 0 10px">Interceptor is running. Point your browser or HTTP client's proxy at:</p>
+    b.innerHTML = `<p style="margin:0 0 10px">Interseptor is running. Point your browser or HTTP client's proxy at:</p>
       <div class="row" style="gap:8px;margin-bottom:14px">
         <code class="evidence" style="flex:1;margin:0;font-size:13px">${addr}</code>
         <button class="btn" id="setupCopyAddr">⧉ Copy</button>
@@ -43,8 +43,8 @@ function renderStep() {
       <a class="btn accent" href="/api/ca.crt" download style="text-decoration:none;display:inline-block;margin-bottom:14px">⤓ Download CA certificate</a>
       <details class="ca-how"${os ? ' open' : ''}><summary>${os === 'mac' ? 'macOS' : os === 'win' ? 'Windows' : os === 'linux' ? 'Linux' : 'Trust it'} — how to</summary><ol style="margin:8px 0 4px;padding-left:22px;color:var(--fg2)">${trust}</ol></details>
       <label class="icpt-chk" style="display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer;color:var(--fg2)"><input type="checkbox" id="setupTrusted"> I've installed &amp; trusted the CA</label>
-      <p class="hint" style="margin:8px 0 0">This is a one-time manual step — Interceptor never modifies your OS trust store itself.</p>
-      <p class="hint" style="margin:10px 0 0;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg2)"><b>Mobile apps:</b> installing the CA is not enough for most Android/iOS apps. SSL <b>pinning</b> must be bypassed on the device (Frida, patched APK) — Interceptor only detects when pinning blocks traffic (red <b>PIN</b> rows).</p>`;
+      <p class="hint" style="margin:8px 0 0">This is a one-time manual step — Interseptor never modifies your OS trust store itself.</p>
+      <p class="hint" style="margin:10px 0 0;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg2)"><b>Mobile apps:</b> installing the CA is not enough for most Android/iOS apps. SSL <b>pinning</b> must be bypassed on the device (Frida, patched APK) — Interseptor only detects when pinning blocks traffic (red <b>PIN</b> rows).</p>`;
     $('#setupNext').disabled = true;
     $('#setupTrusted').onchange = e => { $('#setupNext').disabled = !e.target.checked; };
   } else if (step === 2) {
