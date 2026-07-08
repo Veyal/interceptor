@@ -30,7 +30,7 @@ assistants alike. They describe how the existing code is written; match it.
 ## Architecture & package conventions
 
 - `internal/*` packages each own **one** responsibility and depend downward only
-  (see the table in [README.md](README.md)); `cmd/interseptor` does the wiring. Don't create
+  (see the table in [docs/architecture.md](docs/architecture.md)); `cmd/interseptor` does the wiring. Don't create
   import cycles — the control plane talks to other packages through small interfaces
   (e.g. `proxy.Events`), never the reverse.
 - **Storage:** bodies stream to disk via `io.TeeReader` and are content-addressed/deduped —
