@@ -69,8 +69,12 @@ func TestSwitchProjectRejectsPaths(t *testing.T) {
 func TestSwitchProjectAcceptsExplicitPath(t *testing.T) {
 	h, _, _ := newHub(t)
 	h.GlobalDir = t.TempDir()
-	var gotTarget string
-	h.SwitchProject = func(target string) error { gotTarget = target; return nil }
+	// switchProject fires SwitchProject on a background goroutine after a
+	// short delay (so the client sees the 202 before the process re-execs) —
+	// a channel gives the test a real happens-before edge to wait on, unlike
+	// a fixed time.Sleep racing a plain variable.
+	gotTarget := make(chan string, 1)
+	h.SwitchProject = func(target string) error { gotTarget <- target; return nil }
 	ts := httptest.NewServer(h.Handler())
 	defer ts.Close()
 
@@ -88,9 +92,13 @@ func TestSwitchProjectAcceptsExplicitPath(t *testing.T) {
 	if code, _ := postPath(custom); code != http.StatusAccepted {
 		t.Fatalf("absolute path: expected 202, got %d", code)
 	}
-	time.Sleep(350 * time.Millisecond) // the switch fires after a short delay
-	if gotTarget != custom {
-		t.Fatalf("SwitchProject called with %q, want %q", gotTarget, custom)
+	select {
+	case got := <-gotTarget:
+		if got != custom {
+			t.Fatalf("SwitchProject called with %q, want %q", got, custom)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("SwitchProject was not called within 2s")
 	}
 
 	list := readExternalProjects(h.GlobalDir)
