@@ -1,5 +1,21 @@
 import { $, esc, escAttr, toast, api, methodColor, statusColor, statusText, highlightHTTP, highlightHeaderLines, highlightBodyText, prettify, beautifyBody, fmtDur, fmtSize, openCtxMenu, DEC_OPS, contentTypeFromRaw, pickTextFile, normalizeListText, parseListLines, previewListLines, LIST_PREVIEW_LINES, wireRowKey, uiPrompt, createTabManager } from './core.js';
 
+// friendlySendError turns a raw backend/network error (Go's url.Parse wording,
+// net.OpError text, etc.) into a short, actionable lead sentence for a user who
+// isn't reading Go source — the raw detail stays appended for anyone who is.
+function friendlySendError(raw){
+  const m=raw||'';
+  const lead=
+    /invalid request URL/i.test(m) ? "That doesn't look like a valid URL — check the scheme (http/https) and try again." :
+    /refusing to (send|attack|forward).*own listener/i.test(m) ? "Can't target Interceptor's own address — that would create a loop." :
+    /connection refused/i.test(m) ? 'Connection refused — nothing is listening at that address.' :
+    /no such host|lookup .* no such host|dns/i.test(m) ? "Couldn't resolve that host — check the domain name." :
+    /(deadline exceeded|timeout|timed out)/i.test(m) ? 'The request timed out.' :
+    /x509|certificate/i.test(m) ? "TLS certificate error — the target's certificate isn't trusted." :
+    null;
+  return lead ? lead+' ('+m+')' : m;
+}
+
 // repStatusLine builds a rich response summary: "200 OK · 142 ms · 4.1 KB".
 function repStatusLine(f){
   const head=f.status?f.status+' '+statusText(f.status):(f.error||'sent');
@@ -91,7 +107,7 @@ export async function repSend(){
     $('#repStatus').textContent=t.status;$('#repStatus').style.color=t.color;
     if(flow.status===401) toast('401 Unauthorized — run login macro in Settings → Session or enable Re-auth on 401');
     await renderRepResponse();loadRepHistory();repPersist();
-  }catch(e){$('#repStatus').textContent='';$('#repResView').textContent='(error: '+e.message+')';toast('send: '+e.message);}
+  }catch(e){const msg=friendlySendError(e.message);$('#repStatus').textContent='';$('#repResView').textContent='(error: '+msg+')';toast(msg);}
   $('#repSend').textContent='Send ▸';$('#repSend').disabled=false;
 }
 export async function renderRepResponse(){
