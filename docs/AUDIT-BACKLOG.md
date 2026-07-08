@@ -34,12 +34,28 @@ after each merge. See `CHANGELOG.md` `[Unreleased]` for user-facing detail.
 | A19 | — | branches | **RESOLVED (housekeeping)** — `feat/ai-workspace-and-backlog`, `feat/autonomous-pentest`, `feat/collab-and-autopilot-fix`, `loop/pm-autonomous`, `loop/ui-and-bugs`, `redesign/ui-overhaul` were all already fully merged into `main` (0 commits ahead, confirmed ancestors) before this audit started. Deleted locally and on origin. |
 | A20 | — | discovery | **NOTED, no action** — content-discovery was already fully removed from `main` (commit `5d28f58`) before this audit started; the initial task brief assumed it still needed trimming and was stale by one day. |
 
-**Known pre-existing, unrelated flakiness**: `internal/activescan`'s
-`TestRunFindsAndBoundsRequests`/`TestRunHonorsDisabledChecks` intermittently
-fail only under full-suite parallel load (`go test ./...`) and pass reliably
-in isolation (`-run`, `-count=3`+). Confirmed present on a clean pre-audit
-checkout and untouched by any of this cycle's changes — likely an ordering/
-timing dependency worth a follow-up investigation, not a regression.
+**Update (2026-07-08) — the flakiness above is FIXED.** Root cause confirmed:
+all 14 built-in active checks race for one shared, mutex-protected request
+budget across concurrent goroutines — which check gets to run before the
+budget is exhausted is scheduler-dependent, not an ordering/timing quirk.
+Both tests now isolate to the single check under test via a new
+`onlyCheck()` helper. Verified 30/30 clean under `-count=30`.
+
+Same pass also fixed 3 more pre-existing Linux-CI-only failures that had
+gone unnoticed locally (Windows) and unenforced (no test gate on the release
+workflow) until this cycle added one: `TestAliveInitProcess` (assumed
+permission to signal PID 1 — removed as redundant with
+`TestAliveCurrentProcess`), `TestForceReapsChild` (never reaped its killed
+child, so the zombie still answered liveness checks as alive), and
+`TestBackupToRefusesExisting` (relied on non-portable SQLite driver behavior
+instead of an explicit existence check).
+
+Once these 4 stopped masking it, actually running `-race` end-to-end on CI
+for the first time caught one more, genuine race: `TestSwitchProjectAcceptsExplicitPath`
+synchronized with a bare `time.Sleep` and a plain shared variable instead of
+a real happens-before edge. Fixed with a channel. See `CHANGELOG.md`
+`[Unreleased]` for detail; all four fixes are pushed and pending final
+Linux-CI confirmation.
 
 ---
 
