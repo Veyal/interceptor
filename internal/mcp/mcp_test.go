@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/Veyal/interceptor/internal/version"
 )
 
 // TestCreateFindingWithImpact verifies that the create_finding MCP tool forwards
@@ -351,13 +353,20 @@ func TestMCPProtocolAndTools(t *testing.T) {
 			Tools json.RawMessage `json:"tools"`
 		} `json:"capabilities"`
 		ServerInfo struct {
-			Name string `json:"name"`
+			Name    string `json:"name"`
+			Version string `json:"version"`
 		} `json:"serverInfo"`
 		Instructions string `json:"instructions"`
 	}
 	json.Unmarshal(resps[0].Result, &initRes)
 	if initRes.ProtocolVersion == "" || initRes.ServerInfo.Name != "interceptor" || initRes.Capabilities.Tools == nil {
 		t.Fatalf("bad initialize result: %s", resps[0].Result)
+	}
+	// serverInfo.version must report the resolved running version
+	// (version.String(), which honors `go install .../interceptor@vX.Y.Z`
+	// build info), not the stale baked-in version.Version placeholder.
+	if initRes.ServerInfo.Version != version.String() {
+		t.Fatalf("serverInfo.version = %q, want version.String() = %q", initRes.ServerInfo.Version, version.String())
 	}
 	// Agents must be told where to report bugs/gaps in Interceptor itself.
 	if !strings.Contains(initRes.Instructions, "github.com/Veyal/interceptor/issues") {
