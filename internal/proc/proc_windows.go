@@ -65,3 +65,30 @@ func Alive(pid int) bool {
 	}
 	return strings.Contains(s, strconv.Itoa(pid))
 }
+
+// aliveInterceptor reports whether pid is alive AND its image name is
+// interceptor.exe — closing the PID-reuse race where a dead child's PID gets
+// recycled by an unrelated process before the launcher notices it exited.
+func aliveInterceptor(pid int) bool {
+	out, err := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/FO", "CSV", "/NH").Output()
+	if err != nil {
+		return false
+	}
+	reader := csv.NewReader(bytes.NewReader(out))
+	for {
+		row, err := reader.Read()
+		if err != nil {
+			break
+		}
+		if len(row) < 2 {
+			continue
+		}
+		image := strings.Trim(row[0], `"`)
+		rowPID, err := strconv.Atoi(strings.Trim(row[1], `"`))
+		if err != nil || rowPID != pid {
+			continue
+		}
+		return matchesInterceptor(image)
+	}
+	return false
+}

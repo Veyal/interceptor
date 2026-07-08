@@ -30,6 +30,17 @@ const (
 	launcherPortSpan     = 500
 )
 
+// launcherAlive/launcherGraceful/launcherForce are indirections over the proc
+// package so tests can substitute fakes and assert the launcher's kill path
+// calls the PID-reuse-safe AliveInterceptor check rather than the generic
+// Alive (which would happily report a recycled, unrelated PID as "our
+// process"). Production code always uses the real proc functions below.
+var (
+	launcherAlive    = proc.AliveInterceptor
+	launcherGraceful = proc.Graceful
+	launcherForce    = proc.Force
+)
+
 // runLauncher runs a small dashboard process that starts/stops per-project
 // Interceptor instances (each its own OS process, its own control+proxy
 // ports, sharing only the global CA and Starlark checks) and tracks them in
@@ -63,7 +74,7 @@ func runLauncher(args []string) error {
 	if err != nil {
 		return fmt.Errorf("open instance registry: %w", err)
 	}
-	_ = reg.Reconcile(proc.Alive)
+	_ = reg.Reconcile(launcherAlive)
 
 	lh := &launcherServer{
 		globalDir:   globalDir,
@@ -151,7 +162,7 @@ func (lh *launcherServer) knownProjects() []string {
 // dashboard shows every project (started or not) plus any registry entry for
 // a project whose directory it didn't otherwise find.
 func (lh *launcherServer) views() []instanceView {
-	_ = lh.reg.Reconcile(proc.Alive)
+	_ = lh.reg.Reconcile(launcherAlive)
 	running := map[string]launcher.Instance{}
 	for _, inst := range lh.reg.All() {
 		running[inst.Project] = inst
@@ -193,8 +204,8 @@ func (lh *launcherServer) handleStart(w http.ResponseWriter, r *http.Request) {
 	lh.mu.Lock()
 	defer lh.mu.Unlock()
 
-	_ = lh.reg.Reconcile(proc.Alive)
-	if inst, ok := lh.reg.Get(project); ok && proc.Alive(inst.PID) {
+	_ = lh.reg.Reconcile(launcherAlive)
+	if inst, ok := lh.reg.Get(project); ok && launcherAlive(inst.PID) {
 		writeLauncherJSON(w, http.StatusOK, runningView(inst))
 		return
 	}
@@ -255,19 +266,19 @@ func (lh *launcherServer) handleStop(w http.ResponseWriter, r *http.Request) {
 	lh.mu.Lock()
 	inst, ok := lh.reg.Get(project)
 	lh.mu.Unlock()
-	if !ok || !proc.Alive(inst.PID) {
+	if !ok || !launcherAlive(inst.PID) {
 		launcherErr(w, http.StatusNotFound, "not running")
 		return
 	}
 
-	_ = proc.Graceful(inst.PID)
+	_ = launcherGraceful(inst.PID)
 	go func(pid int, project string) {
 		deadline := time.Now().Add(6 * time.Second)
-		for time.Now().Before(deadline) && proc.Alive(pid) {
+		for time.Now().Before(deadline) && launcherAlive(pid) {
 			time.Sleep(200 * time.Millisecond)
 		}
-		if proc.Alive(pid) {
-			_ = proc.Force(pid)
+		if launcherAlive(pid) {
+			_ = launcherForce(pid)
 		}
 		lh.mu.Lock()
 		_ = lh.reg.Remove(project)
@@ -284,7 +295,7 @@ func (lh *launcherServer) handleStop(w http.ResponseWriter, r *http.Request) {
 func (lh *launcherServer) allocatePorts() (controlPort, proxyPort int, err error) {
 	used := map[int]bool{}
 	for _, inst := range lh.reg.All() {
-		if !proc.Alive(inst.PID) {
+		if !launcherAlive(inst.PID) {
 			continue
 		}
 		if _, p, e := net.SplitHostPort(inst.ControlAddr); e == nil {

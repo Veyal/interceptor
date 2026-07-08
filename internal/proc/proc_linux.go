@@ -30,3 +30,17 @@ func List() ([]Proc, error) {
 	}
 	return procs, nil
 }
+
+// aliveInterceptor reports whether pid is alive AND /proc identifies it as an
+// Interceptor binary, closing the same PID-reuse race that aliveInterceptor
+// guards against on Windows. Falls back to the generic liveness check when
+// /proc isn't readable (e.g. sandboxed environments without procfs).
+func aliveInterceptor(pid int) bool {
+	if _, ok := procFromProcFS(pid); ok {
+		return true
+	}
+	if _, err := os.Stat("/proc"); err != nil {
+		return Alive(pid)
+	}
+	return false
+}
