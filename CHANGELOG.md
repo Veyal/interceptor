@@ -9,11 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`internal/control/active_checks_test.go`** — HTTP-handler coverage for active checks, previously untested despite being the reachable surface for the Critical Starlark compile-time DoS.
+
 ### Changed
 - **`/api/reference` now documents request/response body shapes**, not just method+path+one-line description, for every mutating route — derived from each handler's actual decode struct. README's Control API and MCP sections now point at it. (`internal/control/api.go`.)
 - **Release engineering hardened ahead of v1.0.** `internal/version`'s fallback constant bumped to the last published tag; the release workflow now gates `goreleaser` on a passing `vet`/`test`/`-race` job instead of publishing unconditionally on any tag push; CI's build matrix gained `windows/arm64` to match what the release actually ships. (`internal/version/version.go`, `.github/workflows/release.yml`, `.github/workflows/ci.yml`.)
 
 ### Fixed
+- **Repeater showed raw backend/network error text** ("send: invalid request URL \"...\"") instead of an actionable message. Common cases (bad URL, connection refused, DNS failure, timeout, TLS cert error, the self-listener guard) now get a short lead sentence, with the raw detail kept for debugging. (`internal/control/ui/js/tools.js`.)
+- **The TLS-diagnosis banner could get stuck showing a stale "no traffic" verdict** after real (non-TLS) traffic had already landed — it only re-checked on TLS-flagged flows. Now re-checks on any new flow while the current verdict is traffic-volume-related; also reworded the labels to not read as contradicting visible History rows. (`internal/control/ui/js/tlsdiag.js`.)
 - **MCP `initialize` and `GET /api/mcp` reported a stale version.** Both read the dev-build fallback constant directly instead of `version.String()` (which resolves the real installed version via build info), so an MCP client doing version negotiation against a release build would see the wrong version. (`internal/mcp/mcp.go`, `internal/control/api.go`.)
 - **The launcher's Windows PID-reuse-safe liveness check was built but never wired in.** `AliveInterceptor` (image-name-verified, closing a narrow race where a dead child's recycled PID could be mistaken for a live one) is now the launcher's actual kill-path check, via a new cross-platform `proc.AliveInterceptor` entry point. (`internal/proc/proc.go`, `cmd/interceptor/launcher.go`.)
 - **The launcher dashboard's `-addr` flag wasn't gated by `INTERCEPTOR_ALLOW_EXTERNAL_BIND`** like the main control/proxy listeners, so a non-loopback bind (which also embeds the raw auth token in the served HTML) had no policy check. Now consistent with the rest of the app. (`cmd/interceptor/launcher.go`.)
