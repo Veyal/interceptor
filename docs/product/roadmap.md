@@ -60,7 +60,7 @@ verified live). See [CHANGELOG.md](../../CHANGELOG.md).
 | **Content discovery** (forced-browse) | scope-aware engine, Discover tab, soft-404 calibration, recursion, `FlagDiscovery` flows |
 | **Discovery loop** | History DSC badge + filter, Discover→Repeater, scope targets, history seeds, AI path suggestions |
 | **Login macro + 401 re-auth** | recorded login request, auto session refresh, Repeater/Intruder retry on 401 |
-| **MCP discovery + session tools** | `start_discovery`, `discovery_state`, `stop_discovery`, `suggest_discovery_paths`, `run_login_macro` (**41 tools**) |
+| **MCP discovery + session tools** | `start_discovery`, `discovery_state`, `stop_discovery`, `suggest_discovery_paths`, `run_login_macro` (**41 tools**) — *the four discovery tools were removed in a later cycle along with the content-discovery feature; see the `[0.29.0]` → Removed entry in CHANGELOG.md* |
 | **UX polish** | header intercept cue, `j`/`k` history nav, `r`→Repeater, improved empty states |
 | **[MCP cookbook](mcp-cookbook.md)** + **[benchmark comparison](benchmark-comparison.md)** | agent recipes + Burp/ZAP positioning numbers |
 
