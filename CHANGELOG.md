@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Renamed Interceptor → Interseptor.** "Interseptor" (Indonesian slang "intersep" + "-tor") keeps the same shape and meaning as the old name while giving the project its own identity. The Go module path, binary name, GitHub repo, and data directory (`~/.interceptor` → `~/.interseptor`, auto-migrated on first run) all changed; see README for the updated install/config instructions.
+
 ### Added
 - **`internal/control/active_checks_test.go`** — HTTP-handler coverage for active checks, previously untested despite being the reachable surface for the Critical Starlark compile-time DoS.
 
