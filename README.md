@@ -237,12 +237,15 @@ the same capabilities as the UI. Run the app, then connect your MCP client one o
 Both expose the same **83 tools** — reading flows (`list_flows`, `get_flow`, `analyze_flow`,
 `flow_as_curl`), replaying/fuzzing (`send_request`, `start_intruder`, `ws_send`), scanning
 (`run_scanner`, `scan_report`), intercept/rules/scope control, and `set_session` — with bounded
-results so large bodies don't blow the agent's context. The **Settings → API & MCP** section shows
-a copy-paste config and the live tool list.
+results so large bodies don't blow the agent's context. Each tool's JSON Schema documents its
+arguments (types, required fields, accepted variants) inline, so an agent can read a tool's
+definition instead of guessing. The **Settings → API & MCP** section shows a copy-paste config
+and the live tool list.
 
 ## Control API
 
-The full REST surface is documented at runtime: `GET /api/reference` (or the **Settings → API & MCP** section).
+The full REST surface is documented at runtime: `GET /api/reference` (or the **Settings → API & MCP** section) —
+including the request/response body shape for every mutating route, not just its method and path.
 Live updates stream over Server-Sent Events at `GET /api/events`. Highlights: `/api/flows`,
 `/api/repeater/send`, `/api/intruder/start`, `/api/scanner/run`, `/api/scope`, `/api/session`,
 `/api/ws/send`, `/api/export/{har,project}`, `/api/settings`.
