@@ -187,7 +187,7 @@ func (s *Server) dispatch(method string, params json.RawMessage) (any, *rpcError
 		return map[string]any{
 			"protocolVersion": ver,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
-			"serverInfo":      map[string]any{"name": "interceptor", "version": version.Version},
+			"serverInfo":      map[string]any{"name": "interceptor", "version": version.String()},
 			"instructions":    mcpInstructions(),
 		}, nil
 	case "tools/list":

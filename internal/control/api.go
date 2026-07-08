@@ -207,7 +207,7 @@ func (h *metaAPI) apiReference(w http.ResponseWriter, r *http.Request) {
 
 var mcpDescriptor = map[string]any{
 	"name":    "interceptor",
-	"version": version.Version,
+	"version": version.String(),
 	"status":  "ready",
 	"note":    "Run `interceptor` first. See GET /api/mcp for Cursor (HTTP /mcp) and stdio client configs.",
 	"transport": map[string]any{

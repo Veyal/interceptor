@@ -17,6 +17,7 @@ import (
 	"github.com/Veyal/interceptor/internal/intercept"
 	"github.com/Veyal/interceptor/internal/mcp"
 	"github.com/Veyal/interceptor/internal/store"
+	"github.com/Veyal/interceptor/internal/version"
 )
 
 func readAll(r io.Reader) string { b, _ := io.ReadAll(r); return string(b) }
@@ -194,6 +195,19 @@ func TestMCPDescriptorMatchesRegistry(t *testing.T) {
 		if !listed[name] {
 			t.Fatalf("tool %q is registered but missing from the UI descriptor (internal/control/api.go)", name)
 		}
+	}
+}
+
+// GET /api/mcp must report the real running version (version.String(), which
+// resolves via debug.ReadBuildInfo() for `go install .../interceptor@vX.Y.Z`
+// installs) rather than the stale baked-in version.Version placeholder.
+func TestMCPDescriptorReportsResolvedVersion(t *testing.T) {
+	v, ok := mcpDescriptor["version"].(string)
+	if !ok || v == "" {
+		t.Fatalf("mcpDescriptor[\"version\"] missing or not a string: %#v", mcpDescriptor["version"])
+	}
+	if v != version.String() {
+		t.Fatalf("mcpDescriptor[\"version\"] = %q, want version.String() = %q", v, version.String())
 	}
 }
 
