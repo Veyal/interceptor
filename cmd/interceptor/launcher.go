@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Veyal/interceptor/internal/bind"
 	"github.com/Veyal/interceptor/internal/launcher"
 	"github.com/Veyal/interceptor/internal/proc"
 )
@@ -43,6 +44,43 @@ const (
 	bindConfirmInterval = 50 * time.Millisecond
 )
 
+// launcherAlive/launcherGraceful/launcherForce are indirections over the proc
+// package so tests can substitute fakes and assert the launcher's kill path
+// calls the PID-reuse-safe AliveInterceptor check rather than the generic
+// Alive (which would happily report a recycled, unrelated PID as "our
+// process"). Production code always uses the real proc functions below.
+var (
+	launcherAlive    = proc.AliveInterceptor
+	launcherGraceful = proc.Graceful
+	launcherForce    = proc.Force
+)
+
+// resolveLauncherAddr applies the same loopback-bind policy as the main
+// control/proxy listeners (see cmd/interceptor/flags.go's resolveControlAddr
+// and internal/bind) to the launcher dashboard's -addr flag: a non-loopback
+// bind is only honored when INTERCEPTOR_ALLOW_EXTERNAL_BIND permits it,
+// otherwise it's ignored in favor of the loopback default.
+//
+// This matters more here than for the main control plane: serveDashboard
+// serves an unauthenticated page (no session/token) that can start/stop
+// project instances and reveals each instance's control address, so an
+// unintended non-loopback bind would expose that to the LAN/internet with
+// no gate at all. Known tradeoff: even a policy-approved external bind
+// still has no per-request auth — external bind here is opt-in and the
+// operator is assumed to have made that call deliberately, same as for the
+// main control/proxy listeners.
+func resolveLauncherAddr(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		addr = defaultLauncherAddr
+	}
+	if !isLoopbackBind(addr) && !bind.ExternalBindAllowed() {
+		log.Printf("launcher addr %q is non-loopback; ignoring (external bind disabled via INTERCEPTOR_ALLOW_EXTERNAL_BIND=0)", addr)
+		return defaultLauncherAddr
+	}
+	return addr
+}
+
 // runLauncher runs a small dashboard process that starts/stops per-project
 // Interceptor instances (each its own OS process, its own control+proxy
 // ports, sharing only the global CA and Starlark checks) and tracks them in
@@ -52,10 +90,11 @@ const (
 func runLauncher(args []string) error {
 	fs := flag.NewFlagSet("launcher", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	addr := fs.String("addr", defaultLauncherAddr, "launcher dashboard listen address")
+	addrFlag := fs.String("addr", defaultLauncherAddr, "launcher dashboard listen address")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	addr := resolveLauncherAddr(*addrFlag)
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -76,7 +115,7 @@ func runLauncher(args []string) error {
 	if err != nil {
 		return fmt.Errorf("open instance registry: %w", err)
 	}
-	_ = reg.Reconcile(proc.Alive)
+	_ = reg.Reconcile(launcherAlive)
 
 	token, err := loadOrCreateLauncherToken(globalDir)
 	if err != nil {
@@ -92,9 +131,9 @@ func runLauncher(args []string) error {
 		token:       token,
 	}
 
-	ln, err := net.Listen("tcp", *addr)
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return fmt.Errorf("launcher listen on %s: %w", *addr, err)
+		return fmt.Errorf("launcher listen on %s: %w", addr, err)
 	}
 	srv := &http.Server{Handler: lh.routes()}
 	go func() {
@@ -102,7 +141,7 @@ func runLauncher(args []string) error {
 			log.Printf("launcher serve: %v", err)
 		}
 	}()
-	log.Printf("Interceptor launcher: dashboard on http://%s", *addr)
+	log.Printf("Interceptor launcher: dashboard on http://%s", addr)
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
@@ -227,7 +266,7 @@ func (lh *launcherServer) knownProjects() []string {
 // dashboard shows every project (started or not) plus any registry entry for
 // a project whose directory it didn't otherwise find.
 func (lh *launcherServer) views() []instanceView {
-	_ = lh.reg.Reconcile(proc.Alive)
+	_ = lh.reg.Reconcile(launcherAlive)
 	running := map[string]launcher.Instance{}
 	for _, inst := range lh.reg.All() {
 		running[inst.Project] = inst
@@ -269,8 +308,8 @@ func (lh *launcherServer) handleStart(w http.ResponseWriter, r *http.Request) {
 	lh.mu.Lock()
 	defer lh.mu.Unlock()
 
-	_ = lh.reg.Reconcile(proc.Alive)
-	if inst, ok := lh.reg.Get(project); ok && proc.Alive(inst.PID) {
+	_ = lh.reg.Reconcile(launcherAlive)
+	if inst, ok := lh.reg.Get(project); ok && launcherAlive(inst.PID) {
 		writeLauncherJSON(w, http.StatusOK, runningView(inst))
 		return
 	}
@@ -366,19 +405,19 @@ func (lh *launcherServer) handleStop(w http.ResponseWriter, r *http.Request) {
 	lh.mu.Lock()
 	inst, ok := lh.reg.Get(project)
 	lh.mu.Unlock()
-	if !ok || !proc.Alive(inst.PID) {
+	if !ok || !launcherAlive(inst.PID) {
 		launcherErr(w, http.StatusNotFound, "not running")
 		return
 	}
 
-	_ = proc.Graceful(inst.PID)
+	_ = launcherGraceful(inst.PID)
 	go func(pid int, project string) {
 		deadline := time.Now().Add(6 * time.Second)
-		for time.Now().Before(deadline) && proc.Alive(pid) {
+		for time.Now().Before(deadline) && launcherAlive(pid) {
 			time.Sleep(200 * time.Millisecond)
 		}
-		if proc.Alive(pid) {
-			_ = proc.Force(pid)
+		if launcherAlive(pid) {
+			_ = launcherForce(pid)
 		}
 		lh.mu.Lock()
 		_ = lh.reg.Remove(project)
@@ -395,7 +434,7 @@ func (lh *launcherServer) handleStop(w http.ResponseWriter, r *http.Request) {
 func (lh *launcherServer) allocatePorts() (controlPort, proxyPort int, err error) {
 	used := map[int]bool{}
 	for _, inst := range lh.reg.All() {
-		if !proc.Alive(inst.PID) {
+		if !launcherAlive(inst.PID) {
 			continue
 		}
 		if _, p, e := net.SplitHostPort(inst.ControlAddr); e == nil {

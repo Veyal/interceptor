@@ -1,6 +1,9 @@
 package version
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestPickLatest(t *testing.T) {
 	tags := []string{"v0.2.1", "v0.2.0", "v0.1.0", "latest", "nightly"}
@@ -58,5 +61,25 @@ func TestStringFallsBackToConst(t *testing.T) {
 	// In `go test` the main module version is "(devel)", so String() returns the const.
 	if String() != Version {
 		t.Fatalf("String()=%q, expected baked-in %q in test builds", String(), Version)
+	}
+}
+
+// TestVersionConstLooksLikePreviousRelease is a no-network format guard for the
+// bump-to-previous-tag convention documented above the Version constant and in
+// CONTRIBUTING.md: at each release commit, Version is bumped to the *previous*
+// published tag, not the tag being released. It can't verify the tag was
+// actually published (that needs the network — see update_test.go), but it
+// catches the two easiest ways to break the pattern by hand: leaving a
+// non-semver value, or using a "v" prefix / prerelease suffix that the update
+// check doesn't expect.
+func TestVersionConstLooksLikePreviousRelease(t *testing.T) {
+	if strings.HasPrefix(Version, "v") {
+		t.Fatalf("Version=%q should not have a leading %q — store the bare semver, e.g. %q", Version, "v", strings.TrimPrefix(Version, "v"))
+	}
+	if parseSemver(Version) == nil {
+		t.Fatalf("Version=%q is not a plausible semver (X.Y.Z) — this constant must always name a real, already-published GitHub release; see the comment above it and CONTRIBUTING.md", Version)
+	}
+	if strings.ContainsAny(Version, "-+") {
+		t.Fatalf("Version=%q has a prerelease/build suffix — release tags are bumped as plain X.Y.Z", Version)
 	}
 }

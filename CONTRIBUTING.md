@@ -67,6 +67,16 @@ assistants alike. They describe how the existing code is written; match it.
   Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
   ```
 
+## Cutting a release
+
+- `internal/version/version.go`'s `Version` constant is the dev-build fallback. At each
+  release commit, bump it to the **previous** published tag (not the tag being released) —
+  e.g. when tagging v1.0.0, bump `Version` to the last tag that was already public before
+  v1.0.0 (see the code comment above the constant). This is deliberate: `update_test.go`
+  does a live network check that the named version already exists as a GitHub release, so
+  bumping to the *new* tag (which doesn't exist yet at commit time) breaks that test. Don't
+  "fix" this by bumping it to match the tag you're about to push.
+
 ## Before opening a PR
 
 - [ ] `go test ./...` and `go test -race ./...` pass

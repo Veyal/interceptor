@@ -50,6 +50,27 @@ func TestAliveInitProcess(t *testing.T) {
 	}
 }
 
+func TestAliveInterceptorNonExistentProcess(t *testing.T) {
+	const deadPID = 99999999
+	if proc.AliveInterceptor(deadPID) {
+		t.Fatalf("AliveInterceptor(%d) = true, want false", deadPID)
+	}
+}
+
+func TestAliveInterceptorRejectsNonInterceptorProcess(t *testing.T) {
+	// The test binary itself (or its "go test" host process) is alive but is
+	// not an "interceptor"/"interceptor.exe" image — AliveInterceptor must
+	// say false even though the generic Alive(pid) says true, which is
+	// exactly the PID-reuse scenario it exists to guard against.
+	self := os.Getpid()
+	if !proc.Alive(self) {
+		t.Fatal("Alive(self) = false, want true (sanity check)")
+	}
+	if proc.AliveInterceptor(self) {
+		t.Fatalf("AliveInterceptor(self=%d) = true, want false — the test process is not an interceptor binary", self)
+	}
+}
+
 func TestForceReapsChild(t *testing.T) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
