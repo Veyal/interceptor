@@ -143,6 +143,8 @@ function closeUiSelectMenu(inst){
   inst.menu.hidden=true;
   inst.menu.classList.remove('ui-select-menu-fixed');
   inst.menu.style.cssText='';
+  // Return the portaled menu (see openUiSelectMenu) to its wrap.
+  if(inst.wrap&&inst.menu.parentNode!==inst.wrap)inst.wrap.appendChild(inst.menu);
   inst.trigger.setAttribute('aria-expanded','false');
   if(uiSelectOpen&&uiSelectOpen.menu===inst.menu)uiSelectOpen=null;
 }
@@ -161,12 +163,30 @@ function scrollUiSelectMenuToSelected(menu){
 
 function openUiSelectMenu(inst){
   closeAllUiSelects();
+  hideCtxMenu(); // dismiss any open ctx/Views menu — same mutually-exclusive group
   const r=inst.trigger.getBoundingClientRect();
+  // Portal the menu to <body> before showing it. Its .ui-select wrap lives inside
+  // the Proxy .toolbar, whose backdrop-filter creates BOTH a stacking context and a
+  // containing block for position:fixed descendants. Left in place, the menu (a)
+  // can't raise its z-index above later-painted toolbar siblings (#chips, the flow
+  // list) and (b) resolves its fixed coords relative to the toolbar, not the
+  // viewport. At <body> level both behave. Menu styling is class-based (not scoped
+  // under .ui-select), so it renders identically here; closeUiSelectMenu returns it.
+  if(inst.menu.parentNode!==document.body)document.body.appendChild(inst.menu);
   inst.menu.classList.add('ui-select-menu-fixed');
   inst.menu.style.left=r.left+'px';
   inst.menu.style.top=(r.bottom+4)+'px';
   inst.menu.style.width=Math.max(r.width,120)+'px';
   inst.menu.hidden=false;
+  // Defensive: should <body> itself ever sit under a transformed/filtered ancestor
+  // (which would re-establish a fixed containing block), nudge the menu back onto
+  // the trigger by the delta between intended and rendered position. No-op normally.
+  const got=inst.menu.getBoundingClientRect();
+  const dx=r.left-got.left,dy=(r.bottom+4)-got.top;
+  if(dx||dy){
+    inst.menu.style.left=(r.left+dx)+'px';
+    inst.menu.style.top=(r.bottom+4+dy)+'px';
+  }
   inst.trigger.setAttribute('aria-expanded','true');
   uiSelectOpen=inst;
   scrollUiSelectMenuToSelected(inst.menu);
@@ -748,6 +768,7 @@ export function hideCtxMenu(){
 // openCtxMenu renders sectioned items on #ctxmenu and positions at (x,y).
 export function openCtxMenu(x,y,sections){
   const ctx=$('#ctxmenu');if(!ctx)return;
+  closeAllUiSelects(); // ctx/Views menus and ui-select dropdowns are one mutually-exclusive group
   ctx.setAttribute('role','menu');
   const acts=[];let html='';
   sections.forEach(sec=>{

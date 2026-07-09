@@ -1,4 +1,4 @@
-import { $, $$, esc, escAttr, state, toast, api, methodColor, statusColor, statusText, mimeLabel, fmtSize, fmtBytes, fmtTime, fmtDur, FLAG_WS, FLAG_TLS, FLAG_AI, FLAG_DISCOVERY, RENDER_CAP, highlightHTTP, prettify, copyText, uiPrompt, uiConfirm, closeModals, openModal, closeModal, isBinaryMime, bodyMime, headerBlockText, hideCtxMenu, openCtxMenu, flowBodyDownloadName, flowBodyDownloadHref, selectionWithin, wireSelectionDecode, wireRowKey, createFlowStore, loadFlowStore, upsertFlow as storeUpsertFlow, appendFlows, dropFlowsFrom, removeFlow, createVirtualList } from './core.js';
+import { $, $$, esc, escAttr, state, toast, api, methodColor, statusColor, statusText, mimeLabel, fmtSize, fmtBytes, fmtTime, fmtDur, FLAG_WS, FLAG_TLS, FLAG_AI, FLAG_DISCOVERY, RENDER_CAP, highlightHTTP, prettify, copyText, uiPrompt, uiConfirm, closeModals, openModal, closeModal, isBinaryMime, bodyMime, headerBlockText, hideCtxMenu, openCtxMenu, closeAllUiSelects, flowBodyDownloadName, flowBodyDownloadHref, selectionWithin, wireSelectionDecode, wireRowKey, createFlowStore, loadFlowStore, upsertFlow as storeUpsertFlow, appendFlows, dropFlowsFrom, removeFlow, createVirtualList } from './core.js';
 import { flowFindings, addFlowToFinding, openFinding, updateFindPocBtn } from './findings.js';
 import { tagChipStyle, renderTagBar, tagActionTargets, mutateFlowTags, openTagChipMenu } from './tags.js';
 import { sendToRepeater, sendToIntruder, repNewTab, renderRepTabs, repLoadEditor, repPersist, repTitle, headersToText } from './tools.js';
@@ -60,6 +60,8 @@ let flowHasMore=false;         // the server may have older flows past what's lo
 let loadingMore=false;         // a scroll-triggered page fetch is in flight
 const EXCLUDE_NORM=64|128|512; // repeater, intruder, active scan
 const FLOW_COLS_KEY='proxy.cols';
+const FLOW_COLW_KEY='proxy.colW';   // per-column pixel-width overrides (drag-to-resize)
+const FLOW_COL_MIN=40;              // floor width for a resized column
 const HIDE_TLS_KEY='proxy.hideTlsFailed';
 function loadProxyPrefs(){
   try{state.hideTlsFailed=localStorage.getItem(HIDE_TLS_KEY)!=='0';}catch(e){state.hideTlsFailed=true;}
@@ -93,7 +95,20 @@ function normalizeFlowCols(cols){
   const set=new Set(cols);
   return FLOW_COLUMNS.map(c=>c.key).filter(k=>set.has(k));
 }
-function flowColGrid(){return state.flowCols.map(k=>FLOW_COLUMNS.find(c=>c.key===k).w).join(' ');}
+function flowColGrid(){
+  return state.flowCols.map(k=>{
+    const w=state.flowColW&&state.flowColW[k];
+    return (typeof w==='number')?w+'px':FLOW_COLUMNS.find(c=>c.key===k).w;
+  }).join(' ');
+}
+// Push the current column template into a CSS var the header and every row read
+// (.thead / .trow both use `grid-template-columns:var(--flow-cols)`), so a live
+// drag repaints all tracks with one write instead of restyling every row.
+function applyFlowGrid(){
+  const grid=flowColGrid();
+  const h=$('#flowHead');if(h)h.style.setProperty('--flow-cols',grid);
+  const box=$('#rows');if(box)box.style.setProperty('--flow-cols',grid);
+}
 function loadFlowCols(){
   try{
     const raw=JSON.parse(localStorage.getItem(FLOW_COLS_KEY)||'null');
@@ -104,6 +119,52 @@ function loadFlowCols(){
   }catch(e){state.flowCols=defaultFlowCols();}
 }
 function saveFlowCols(){try{localStorage.setItem(FLOW_COLS_KEY,JSON.stringify(state.flowCols));}catch(e){}}
+function loadFlowColW(){
+  const out={};
+  try{
+    const raw=JSON.parse(localStorage.getItem(FLOW_COLW_KEY)||'null');
+    if(raw&&typeof raw==='object')for(const c of FLOW_COLUMNS){
+      const v=raw[c.key];
+      if(typeof v==='number'&&isFinite(v))out[c.key]=Math.max(FLOW_COL_MIN,Math.min(1200,Math.round(v)));
+    }
+  }catch(e){}
+  state.flowColW=out;
+}
+function saveFlowColW(){try{localStorage.setItem(FLOW_COLW_KEY,JSON.stringify(state.flowColW));}catch(e){}}
+// --- drag-to-resize a history column -------------------------------------
+// The dragged column is pinned to an explicit pixel width (read from its live
+// rendered width + drag delta); untouched flexible columns (Host/Path) absorb
+// the slack, so the table keeps filling the pane. Double-click a grip to reset.
+let colResizeState=null;
+let colResizeSuppressClick=false; // swallow the click-to-sort that trails a drag
+function startColResize(e){
+  e.preventDefault();e.stopPropagation();
+  const handle=e.currentTarget,cell=handle.parentElement;
+  colResizeState={key:handle.dataset.col,startX:e.clientX,startW:cell.getBoundingClientRect().width};
+  document.body.classList.add('col-resizing');
+  document.addEventListener('mousemove',onColResizeMove);
+  document.addEventListener('mouseup',endColResize);
+}
+function onColResizeMove(e){
+  if(!colResizeState)return;
+  const w=Math.max(FLOW_COL_MIN,Math.round(colResizeState.startW+(e.clientX-colResizeState.startX)));
+  state.flowColW[colResizeState.key]=w;
+  applyFlowGrid();
+}
+function endColResize(){
+  if(!colResizeState)return;
+  colResizeState=null;
+  document.removeEventListener('mousemove',onColResizeMove);
+  document.removeEventListener('mouseup',endColResize);
+  document.body.classList.remove('col-resizing');
+  saveFlowColW();
+  colResizeSuppressClick=true;setTimeout(()=>{colResizeSuppressClick=false;},0);
+}
+function resetColWidth(e){
+  e.preventDefault();e.stopPropagation();
+  const key=e.currentTarget.dataset.col;
+  if(state.flowColW[key]!=null){delete state.flowColW[key];applyFlowGrid();saveFlowColW();}
+}
 function wireFlowSort(){
   const toggle=h=>{
     const k=h.dataset.sort;
@@ -112,13 +173,22 @@ function wireFlowSort(){
     renderFlowHead();
     loadFlows();
   };
+  // Delegate the click across the whole header bar: each column cell is only
+  // text-height (~13px) centered in the 28px #flowHead, so per-cell onclick left
+  // dead strips above/below the label where clicks silently did nothing. The
+  // click can land on the bar between cells (e.target = the container), so we
+  // resolve the column by x-coordinate — making the full bar height sortable.
+  // Cells keep role/tabIndex/keydown for keyboard users (tab to a column, Enter/Space).
+  const head=$('#flowHead')||$('.thead');
+  if(head)head.onclick=e=>{
+    if(colResizeSuppressClick||e.target.closest('.col-resize'))return;
+    const cell=[...head.children].find(c=>{const r=c.getBoundingClientRect();return e.clientX>=r.x&&e.clientX<r.x+r.width;});
+    if(cell&&cell.dataset.sort)toggle(cell);
+  };
   $$('.thead [data-sort]').forEach(h=>{
-    // Sortable headers are mouse-only by default — promote to buttons so they're
-    // keyboard-operable and announced as such.
     h.setAttribute('role','button');
     h.tabIndex=0;
     h.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggle(h);}});
-    h.onclick=()=>toggle(h);
   });
 }
 function sortDirParam(){return state.sort.dir>0?'asc':'desc';}
@@ -142,8 +212,6 @@ function sortIsLiveDefault(){return state.sort.key==='id'&&state.sort.dir===-1;}
 export function renderFlowHead(){
   const head=$('#flowHead')||$('.thead');
   if(!head)return;
-  const grid=flowColGrid();
-  head.style.gridTemplateColumns=grid;
   head.innerHTML=state.flowCols.map(k=>{
     const c=FLOW_COLUMNS.find(x=>x.key===k);
     const align=c.align?` style="text-align:${c.align}"`:'';
@@ -151,8 +219,13 @@ export function renderFlowHead(){
     const sk=state.sort.key,sd=state.sort.dir;
     const sorted=c.sort===sk?` sorted${sd>0?' asc':' desc'}`:'';
     const arrow=c.sort===sk?(sd>0?' ▲':' ▼'):'';
-    return `<div class="${sorted.trim()}" data-sort="${c.sort}"${align}${title}>${esc(c.label)}${arrow}</div>`;
+    return `<div class="${sorted.trim()}" data-sort="${c.sort}"${align}${title}>${esc(c.label)}${arrow}<span class="col-resize" data-col="${c.key}" title="Drag to resize · double-click to reset"></span></div>`;
   }).join('');
+  head.querySelectorAll('.col-resize').forEach(h=>{
+    h.addEventListener('mousedown',startColResize);
+    h.addEventListener('dblclick',resetColWidth);
+  });
+  applyFlowGrid();
   wireFlowSort();
 }
 function setFlowCol(key,on){
@@ -179,6 +252,7 @@ function toggleColPicker(){
   if(!menu||!btn)return;
   const open=menu.style.display==='none'||!menu.style.display;
   if(open){
+    closeAllUiSelects();hideCtxMenu();
     renderColPicker();
     const r=btn.getBoundingClientRect();
     menu.style.display='block';
@@ -242,7 +316,6 @@ function flowRowHTML(f){
   const pending=!f.status&&!f.error;
   const hasNote=!!(f.note&&String(f.note).trim());
   const stHTML=f.status?String(f.status):(f.error?(f.flags&FLAG_TLS?'<span title="TLS MITM failed — likely SSL pinning or untrusted CA">PIN</span>':'ERR'):'<span class="blink" style="color:var(--fg3)" title="waiting for response">•••</span>');
-  const grid=flowColGrid();
   const rowTitle=(pending?'[pending] ':'')+(hasNote?String(f.note).trim()+' · ':'')+'Click inspect · Shift+click range · Ctrl/Cmd+click toggle';
   const cells={
     id:`<div class="tr-id" data-field="id">${f.id}</div>`,
@@ -254,7 +327,7 @@ function flowRowHTML(f){
     size:`<div class="tr-len" data-field="size">${f.status?fmtSize(f.resLen):''}</div>`,
     time:`<div class="tr-t" data-field="time">${fmtTime(f.ts)}</div>`,
   };
-  return `<div class="trow ${f.id===state.selId?'sel':''}${state.selected.has(f.id)?' msel':''}${pending?' pending':''}${hasNote?' has-note':''}" data-id="${f.id}" style="grid-template-columns:${grid}" title="${escAttr(rowTitle)}">
+  return `<div class="trow ${f.id===state.selId?'sel':''}${state.selected.has(f.id)?' msel':''}${pending?' pending':''}${hasNote?' has-note':''}" data-id="${f.id}" title="${escAttr(rowTitle)}">
       ${state.flowCols.map(k=>cells[k]).join('')}
     </div>`;
 }
@@ -341,7 +414,6 @@ export function upsertFlow(f){
       flowHasMore=true;
     }
   } else { scheduleReload(); return; }
-  $('#rowCount').textContent=state.flows.length;
 }
 let liveRenderQueued=false;
 function queueFullWindowRebuild(){
@@ -408,7 +480,6 @@ export function handleFlowUpdate(f){
     if(!flowMatchesFilters(f)){
       removeFlow(flowStore,f.id);
       if(state.selected)state.selected.delete(f.id);
-      $('#rowCount').textContent=state.flows.length;
       if(active){const row=document.querySelector('#rows .trow[data-id="'+f.id+'"]');if(row)row.remove();else if(flowVirt.isActive())queueFullWindowRebuild();}
       return;
     }
@@ -465,8 +536,8 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&flowVirt.
 export function renderRows(){
   syncInspectorVisibility();
   const box=$('#rows');
+  applyFlowGrid();
   const flows=state.flows;
-  $('#rowCount').textContent=state.flows.length;
   if(!flows.length){
     if(anyFilter()||state.inScopeOnly){
       box.innerHTML='<div class="state-empty"><div class="state-empty-icon">🔍</div><div class="state-empty-title">No flows match</div><p class="state-empty-hint">No flows match the current filters.</p><button class="btn" id="emptyClear">Clear filters</button></div>';
@@ -811,6 +882,7 @@ document.addEventListener('keydown',e=>{
 });
 
 loadFlowCols();
+loadFlowColW();
 renderFlowHead();
 {const b=$('#colPickerBtn');if(b)b.onclick=e=>{e.stopPropagation();toggleColPicker();};}
 {const m=$('#colPicker');if(m)m.onclick=e=>e.stopPropagation();}
@@ -835,11 +907,6 @@ if($('#hideTlsFilter'))$('#hideTlsFilter').onclick=()=>{
   syncHideTlsFilter();renderChips();renderTagBar();loadFlows();
 };
 syncHideTlsFilter();
-// Inspector header actions — operate on the currently-selected flow.
-function inspectorFlow(){return state.detail||flowStore.byId.get(state.selId)||null;}
-{const b=$('#insRepeater');if(b)b.onclick=()=>{const f=inspectorFlow();if(f)sendToRepeater(f);else toast('select a flow first');};}
-{const b=$('#insIntruder');if(b)b.onclick=()=>{const f=inspectorFlow();if(f)sendToIntruder(f);else toast('select a flow first');};}
-{const b=$('#insCurl');if(b)b.onclick=()=>{const f=inspectorFlow();if(f)copyCurl(f);else toast('select a flow first');};}
 $('#scopeToggle').onclick=()=>{
   state.inScopeOnly=!state.inScopeOnly;
   const st=$('#scopeToggle');
@@ -905,6 +972,7 @@ async function deleteView(id,name){
 }
 function openViewsMenu(){
   const btn=$('#viewsBtn'); if(!btn)return;
+  {const cp=$('#colPicker');if(cp)cp.style.display='none';} // Views joins the toolbar menu group
   const r=btn.getBoundingClientRect();
   const sections=[];
   if(state.views.length){

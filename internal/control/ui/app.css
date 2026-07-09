@@ -62,6 +62,12 @@ button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit
 .tag{font-size:9.5px;color:var(--fg3);letter-spacing:1.5px}
 .kv{font-size:10.5px;color:var(--fg2)}
 .kv b{color:var(--fg);font-weight:600}
+/* .kv-dim — dimmed .kv status span (top-bar capture/intercept status). Replaces
+   recurring inline `color:var(--fg3)` on .kv-like spans (#capStat, ctrl label). */
+.kv-dim{color:var(--fg3)}
+/* .state-active — amber active-state text for a status span (#icptStat). Replaces
+   the color+weight part of its inline style; `display` stays inline (JS toggles it). */
+.state-active{color:var(--amber);font-weight:600}
 /* breadcrumb — "Group / Panel" context indicator, updated on every tab switch */
 #crumb{font-size:11px;color:var(--fg3);font-family:var(--ui);display:flex;align-items:center;gap:5px;white-space:nowrap}
 #crumb .crumb-group{color:var(--fg3)}
@@ -99,6 +105,12 @@ button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit
 .nav-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent);margin-left:auto;flex:none;display:none}
 .nav-dot.on{display:block}
 .ai-tag{font-size:9px;font-weight:700;background:var(--accent);color:var(--onAccent);border-radius:4px;padding:0 4px;margin-left:6px;vertical-align:middle;letter-spacing:.3px}
+/* .nav-foot-proj — active-project pill in the nav-rail foot (#projBadge). Replaces
+   its inline recipe; `display` stays inline (JS toggles it at runtime). */
+.nav-foot-proj{padding:5px 9px;font-size:11px;font-weight:600;color:var(--accent);background:var(--accentDim);border-radius:6px;cursor:pointer}
+/* .nav-foot-ver — version-link badge in the nav-rail foot (#verBadge). Replaces its
+   inline recipe (no display toggle — always visible once version resolves). */
+.nav-foot-ver{padding:2px 9px;font-size:11px;color:var(--fg3);text-decoration:none}
 /* tag chips on a History row — click to filter by that tag */
 .flowtag{font-size:9.5px;font-weight:600;background:var(--bg3);color:var(--fg2);border:1px solid var(--line2);border-radius:4px;padding:0 5px;margin-left:5px;vertical-align:middle;cursor:pointer}
 .flowtag:hover{border-color:var(--accent);color:var(--fg)}
@@ -131,19 +143,49 @@ button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit
 .btn-primary:hover{filter:brightness(1.15);transform:translateY(-1px) scale(1.02);box-shadow:0 4px 12px var(--accentDim)}
 .btn-danger{background:var(--redDim);color:var(--red)}
 .btn-danger:hover{background:var(--red);color:#fff}
+/* .btn-compact — tight padding for inline action buttons in dense rows (Proxy
+   inspector action buttons #insRepeater/#insIntruder/#insCurl/#aiExplainBtn).
+   Replaces the recurring inline `padding:3px 9px` on .btn elements. */
+.btn-compact{padding:3px 9px}
 /* .btn-field — toolbar text input/select on the --bg3 surface (the recurring
    `class="btn" style="background:var(--bg3)"` pattern). Width stays inline
    per field since each toolbar field's width is a deliberate per-instance
    choice, not a reusable rule. */
 .btn-field{background:var(--bg3)}
+/* .chip-btn — slim chip-shaped .btn modifier for the top bar's device-proxy pill
+   (#deviceProxyChip). MUST follow .btn in source order: equal specificity (both
+   single-class) means later wins, so placing this above .btn lets .btn's 6px 12px
+   padding stomp the 2px 8px chip size. Replaces inline padding/font-size. */
+.chip-btn{padding:2px 8px;font-size:inherit}
+/* .field-grow — toolbar field that should grow to fill its row (the recurring
+   `flex:1;min-width:160px` pattern on .btn-field inputs/selects). Used together
+   with .btn-field; a per-instance min-width overrides this 160px floor inline
+   when a field needs a wider floor. */
+.field-grow{flex:1;min-width:160px}
+/* .font-mono — monospace font helper (replaces recurring inline `font-family:var(--mono)`). */
+.font-mono{font-family:var(--mono)}
 .count{font-size:11px;color:var(--fg2)}
+/* .ta-c / .ta-r — generic text-align utilities for grid/table cells (replaces
+   one-off inline `text-align:center`/`text-align:right`, e.g. Intruder results
+   header). Panel-agnostic counterparts to the history-table .tr-st/.tr-len/.tr-t. */
+.ta-c{text-align:center}
+.ta-r{text-align:right}
 
 /* history table */
-.thead,.trow{display:grid;align-items:center}
-.thead{flex:none;height:28px;background:var(--bg2);border-bottom:1px solid var(--line);font-size:10px;font-weight:700;letter-spacing:.8px;color:var(--fg2);padding:0 6px;backdrop-filter:blur(4px);position:sticky;top:0;z-index:5}
-.thead>div{padding:0 4px;cursor:pointer;user-select:none;transition:color 0.15s}
+/* --flow-cols is set by proxy.js (applyFlowGrid) on #flowHead and #rows; the
+   fallback is the default visible-column template for the pre-JS/first paint. */
+.thead,.trow{display:grid;align-items:center;grid-template-columns:var(--flow-cols,44px 64px minmax(110px,1.2fr) minmax(150px,2.4fr) 52px 64px 60px)}
+.thead{flex:none;height:28px;background:var(--bg2);border-bottom:1px solid var(--line);font-size:10px;font-weight:700;letter-spacing:.8px;color:var(--fg2);padding:0 6px;backdrop-filter:blur(4px);position:sticky;top:0;z-index:5;cursor:pointer}
+.thead>div{padding:0 4px;cursor:pointer;user-select:none;transition:color 0.15s;position:relative}
 .thead>div.sorted{color:var(--accent)}
 .thead>div:hover{color:var(--fg)}
+/* drag-to-resize grip on the right edge of each history column header */
+.col-resize{position:absolute;top:0;right:-3px;width:7px;height:100%;cursor:col-resize;z-index:3;touch-action:none}
+.col-resize::after{content:'';position:absolute;top:5px;bottom:5px;right:3px;width:1px;background:transparent;transition:background .12s}
+.thead>div:hover .col-resize::after{background:var(--line2)}
+.col-resize:hover::after{background:var(--accent)}
+body.col-resizing,body.col-resizing *{cursor:col-resize!important}
+body.col-resizing{user-select:none;-webkit-user-select:none}
 #rows{flex:1;overflow:auto;min-height:0;background:var(--bg1)}
 .trow{height:27px;border-bottom:1px solid var(--line);border-left:2px solid transparent;font-size:11.5px;padding:0 6px;cursor:pointer;user-select:none;-webkit-user-select:none;transition:background 0.15s, border-color 0.15s}
 .trow:hover{background:var(--bg3)}
@@ -190,6 +232,11 @@ button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit
 .pane:last-child{border-right:none}
 .pane-head{flex:none;height:30px;display:flex;align-items:center;gap:10px;padding:0 10px;background:var(--bg2);border-bottom:1px solid var(--line)}
 .pane-head .lbl{font-size:9px;font-weight:700;letter-spacing:1px;color:var(--fg3)}
+/* .micro-label — standalone all-caps section header inside a modal (REQUEST LOG,
+   CONFIRMED FINDINGS, QUICK TUNNEL, RESULTS, INTERACTIONS, etc.) and the
+   "HOW TO TRUST IT" label in the TLS section. Replaces the recurring inline
+   `font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3)`. */
+.micro-label{font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3)}
 .seg{display:inline-flex;gap:2px;background:var(--bg3);border-radius:6px;padding:2px}
 .seg button{font-size:10.5px;font-weight:600;color:var(--fg2);padding:3px 9px;border-radius:4px}
 .seg button.on{color:var(--accent);background:var(--accentDim)}
@@ -260,6 +307,13 @@ textarea.raw{width:100%;height:200px;resize:vertical;background:var(--bg);color:
 .icpt-bar{flex:none;display:flex;align-items:center;flex-wrap:nowrap;gap:10px;padding:9px 14px;border-bottom:1px solid var(--line);background:var(--bg1);overflow-x:auto;scrollbar-width:thin}
 .icpt-cond{display:flex;align-items:center;gap:8px;flex:1;min-width:300px}
 .icpt-cond .icpt-chk{display:flex;gap:6px;align-items:center;cursor:pointer;white-space:nowrap;color:var(--fg2);font-size:12px}
+/* .chk-row — panel-agnostic checkbox-row label (Settings/AI/Session/Scanner).
+   The common form of the recurring inline
+   `display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--fg2);font-size:12px`;
+   .icpt-cond .icpt-chk above is the scoped Intercept twin and stays as-is. Per-row
+   deltas (align-items:flex-start, color:var(--fg), gap:9px, a specific margin-bottom)
+   stay inline as minimal residuals. */
+.chk-row{display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--fg2);font-size:12px}
 .icpt-work{flex:1;display:flex;min-height:0}
 .icpt-queue{width:288px;flex:none;border-right:1px solid var(--line);display:flex;flex-direction:column;background:var(--bg1)}
 .icpt-queue-head{flex:none;height:30px;display:flex;align-items:center;gap:8px;padding:0 12px;font-size:9px;font-weight:700;letter-spacing:.8px;color:var(--fg3);border-bottom:1px solid var(--line)}
@@ -331,6 +385,14 @@ textarea.raw{width:100%;height:200px;resize:vertical;background:var(--bg);color:
 .modal-shell-title{font-weight:700;color:var(--accent);flex:1}
 .modal-shell-body{flex:1;overflow:auto;padding:var(--sp-4)}
 .modal-shell-foot{flex:none;display:flex;align-items:center;justify-content:flex-end;gap:var(--sp-2);padding:var(--sp-3) var(--sp-4);border-top:1px solid var(--line)}
+/* .modal-overlay — fixed full-viewport dim layer behind a .modal-shell dialog.
+   display is intentionally NOT set here: the initial inline style="display:none"
+   hides the layer and JS flips el.style.display='flex' at runtime (inline wins
+   over class), at which point the align/justify here center the dialog. */
+.modal-overlay{position:fixed;inset:0;background:var(--overlay);z-index:200;align-items:center;justify-content:center}
+/* .modal-overlay-high — stacking modifier for dialogs that must float above other
+   open modals (confirm/prompt/setup). Applied in addition to .modal-overlay. */
+.modal-overlay-high{z-index:240}
 .icpt-mr>summary::before{content:'▸';color:var(--fg3);margin-right:7px;font-size:10px}
 .icpt-mr[open]>summary::before{content:'▾'}
 .icpt-mr-body{padding:0 14px 14px;max-height:240px;overflow:auto}
@@ -417,6 +479,9 @@ textarea.raw{width:100%;height:200px;resize:vertical;background:var(--bg);color:
 .rep-hist .h .u{color:var(--fg2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rep-edit{width:100%;resize:none;background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:11.5px;line-height:1.7;padding:8px 12px;border:none;border-top:1px solid var(--line)}
 .rep-edit[readonly]{opacity:.88;cursor:default}
+/* .notes-edit — the Notes panel editor (#notesEdit textarea). Captures its former
+   inline recipe (flex:1 + full-bleed mono editor on --bg1). */
+.notes-edit{flex:1;border:none;outline:none;resize:none;background:var(--bg1);color:var(--fg);font-family:var(--mono);font-size:13px;line-height:1.6;padding:16px 18px}
 .rep-tabs{flex:none;display:flex;gap:2px;align-items:stretch;padding:6px 8px 0;overflow-x:auto;background:var(--bg1);border-bottom:1px solid var(--line)}
 .rep-tab{display:flex;align-items:center;gap:8px;padding:6px 12px 8px;border:none;border-radius:7px 7px 0 0;background:transparent;color:var(--fg2);cursor:pointer;white-space:nowrap;max-width:260px;font-size:11.5px;margin-bottom:-1px}
 .rep-tab:hover{background:var(--bg3);color:var(--fg)}
@@ -753,6 +818,12 @@ textarea.raw{width:100%;height:200px;resize:vertical;background:var(--bg);color:
 .map-virt-body{position:absolute;left:0;right:0;top:0}
 .map-warn{padding:6px 12px;font-size:11px;color:var(--amber);background:var(--noteDim);border-bottom:1px solid var(--line);flex:none}
 .map-table-wrap{padding:0}
+/* .map-view — scroll-container view in the Map panel (#mapTable, #mapParams).
+   Replaces the recurring inline `flex:1;overflow:auto;min-height:0`; `display`
+   stays inline (JS toggles between table/graph/params views), and #mapParams
+   keeps its padding residual. #mapGraphWrap is NOT this shape (it carries an SVG
+   + position:relative) and stays on its own inline style. */
+.map-view{flex:1;min-height:0;overflow:auto}
 .map-tbl{width:100%;border-collapse:collapse;font-size:12px}
 .map-tbl thead{position:sticky;top:0;background:var(--bg2);z-index:1}
 .map-tbl th{padding:6px 10px;text-align:left;font-size:9px;font-weight:700;letter-spacing:.5px;color:var(--fg3);border-bottom:1px solid var(--line2);cursor:pointer;user-select:none;white-space:nowrap}
@@ -861,7 +932,9 @@ details.acc>summary.acc-h>*{margin:7px 0}
 
 /* keyboard-shortcut cheatsheet — desktop card grid */
 kbd{font-family:var(--mono);font-size:11px;background:var(--bg2);border:1px solid var(--line2);border-bottom-width:2px;border-radius:5px;padding:2px 7px;color:var(--fg);white-space:nowrap;line-height:1.3}
-.sc-dialog{background:var(--bg2);border:1px solid var(--line2);border-radius:12px;width:min(940px,94vw);max-height:88vh;display:flex;flex-direction:column;box-shadow:0 20px 60px var(--shadow);overflow:hidden}
+/* .sc-dialog now supplies only size on top of the shared .modal-shell recipe
+   (the shortcuts modal carries both classes; .modal-shell is authoritative). */
+.sc-dialog{width:min(940px,94vw);max-height:88vh}
 .sc-body{padding:14px 18px 16px;overflow:auto}
 .sc-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;align-items:stretch}
 .sc-section{grid-column:1/-1;margin:6px 0 2px;font-size:10px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--fg3)}
@@ -872,8 +945,9 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--bg2);border:1px soli
 .sc-desc{margin:0;font-size:11.5px;line-height:1.45;color:var(--fg2)}
 .sc-foot{margin-top:12px}
 
-/* notes AI organize — side-by-side desktop preview */
-.checks-dialog{background:var(--bg2);border:1px solid var(--line2);border-radius:12px;width:min(1400px,96vw);height:min(92vh,920px);max-height:92vh;display:flex;flex-direction:column;box-shadow:0 20px 60px var(--shadow);overflow:hidden}
+/* checks manager — built-in (toggle) / custom (edit) / active (read-only).
+   .checks-dialog layers size on top of .modal-shell (authoritative for the recipe). */
+.checks-dialog{width:min(1400px,96vw);height:min(92vh,920px);max-height:92vh}
 /* unified checks manager: built-in (toggle) / custom (edit) / active (read-only) */
 .checks-sidebar{width:min(340px,32%);min-width:260px;flex:none;border-right:1px solid var(--line);display:flex;flex-direction:column;background:var(--bg1)}
 .checks-search-wrap{flex:none;padding:8px 8px 4px;border-bottom:1px solid var(--line)}

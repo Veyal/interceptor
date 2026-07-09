@@ -126,7 +126,7 @@ let capLast=0, capCount=0;
 function onCapture(){ capLast=Date.now(); capCount++; const d=$('#capDot'); if(d)d.classList.add('live'); renderCapStat(); }
 function renderCapStat(){
   const s=$('#capStat'); if(!s)return;
-  if(!capLast){ s.textContent='· waiting for traffic'; return; }
+  if(!capLast){ s.textContent=''; return; }
   const ago=Math.round((Date.now()-capLast)/1000);
   const d=$('#capDot');
   if(ago<3){ s.textContent='· capturing live'; }

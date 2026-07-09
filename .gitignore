@@ -33,3 +33,10 @@ docs/SPEC-agent-pentest*.md
 .harness-memory/
 .opencode/node_modules/
 .opencode/package-lock.json
+
+# Opencode / OhMyOpenCode harness runtime state (run-continuation sessions,
+# etc.) — machine-local, regenerates per session, not project source.
+.omo/
+
+# Playwright MCP local output (console logs, browser profile) — machine-local.
+.playwright-mcp/

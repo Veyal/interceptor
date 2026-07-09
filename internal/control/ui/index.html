@@ -26,8 +26,8 @@
   <span class="brand">INTERSEPTOR</span>
   <span id="crumb" aria-live="polite"><span class="crumb-group">Capture</span><span class="crumb-sep">/</span><span class="crumb-panel">Proxy</span></span>
   <div class="spacer"></div>
-  <div class="row" style="gap:6px" title="Proxy listener"><div class="dot" id="capDot"></div><span class="kv"><b id="proxyAddr">…</b></span><button type="button" class="btn kv" id="deviceProxyChip" title="Device proxy endpoint for phones" style="padding:2px 8px;font-size:inherit"><b id="deviceProxyAddr">…</b></button><span class="kv" id="capStat" style="color:var(--fg3)"></span><span class="kv" id="icptStat" aria-live="polite" style="display:none;color:var(--amber);font-weight:600"></span></div>
-  <span class="kv" style="color:var(--fg3)">ctrl <b id="controlAddr">…</b></span>
+  <div class="row" style="gap:6px" title="Proxy listener"><div class="dot" id="capDot"></div><span class="kv"><b id="proxyAddr">…</b></span><button type="button" class="btn kv chip-btn" id="deviceProxyChip" title="Device proxy endpoint for phones"><b id="deviceProxyAddr">…</b></button><span class="kv kv-dim" id="capStat"></span><span class="kv state-active" id="icptStat" aria-live="polite" style="display:none"></span></div>
+  <span class="kv kv-dim">ctrl <b id="controlAddr">…</b></span>
   <button id="cmdkBtn" class="btn" title="Ctrl+K — jump to any panel or flow" aria-label="Command palette"><span class="cmdk-label">🔎 Jump to…</span><kbd>Ctrl</kbd><kbd>K</kbd></button>
   <button id="themeToggle" title="Toggle theme" aria-label="Toggle theme">☾</button>
 </div>
@@ -66,8 +66,8 @@
     <button class="tab" id="tab-settings" role="tab" aria-selected="false" aria-controls="panel-settings" data-tab="settings" data-group="Configure">Settings</button>
   </div>
   <div class="nav-rail-foot">
-    <span id="projBadge" role="button" tabindex="0" style="padding:5px 9px;font-size:11px;font-weight:600;color:var(--accent);background:var(--accentDim);border-radius:6px;display:none;cursor:pointer" title="Active project — click to switch or create a project" aria-label="Active project — click to switch or create a project" aria-haspopup="dialog"></span>
-    <a id="verBadge" href="https://github.com/Veyal/interceptor/releases" target="_blank" rel="noopener" style="padding:2px 9px;font-size:11px;color:var(--fg3);text-decoration:none" title="Interseptor"></a>
+    <span class="nav-foot-proj" id="projBadge" role="button" tabindex="0" style="display:none" title="Active project — click to switch or create a project" aria-label="Active project — click to switch or create a project" aria-haspopup="dialog"></span>
+    <a class="nav-foot-ver" id="verBadge" href="https://github.com/Veyal/interceptor/releases" target="_blank" rel="noopener" title="Interseptor"></a>
   </div>
 </div>
 
@@ -123,7 +123,6 @@
       <select id="fStatus" class="btn"><option value="">status</option><option value="2">2xx</option><option value="3">3xx</option><option value="4">4xx</option><option value="5">5xx</option></select>
       <button class="btn" id="viewsBtn" title="Apply, save, or delete a saved view">Views ▾</button>
       <div class="spacer"></div>
-      <span class="count"><b id="rowCount">0</b> flows</span>
       <button class="btn" id="colPickerBtn" title="Choose which history columns to show" aria-haspopup="menu" aria-expanded="false">▦ Cols</button>
     </div>
     <div class="toolbar toolbar-secondary">
@@ -135,7 +134,6 @@
     <div id="chips"></div>
     <div id="tagBar" class="tagbar" style="display:none" aria-label="Filter by tag"></div>
     <div id="tlsDiagBanner" class="tls-diag-banner" style="display:none" role="status" aria-live="polite"></div>
-    <div id="flowCapBanner" class="hint info-banner" style="display:none"></div>
     <div id="selBar" class="row sel-bar" style="display:none">
       <span id="selCount" class="sel-count"></span>
       <button class="btn" id="selCompare" title="Compare responses">⇄ Compare</button>
@@ -154,10 +152,7 @@
         <div class="pane-head"><span class="lbl">REQUEST</span>
           <div class="seg" data-side="req"><button data-view="raw">Raw</button><button class="on" data-view="pretty">Pretty</button></div>
           <div class="spacer"></div>
-          <button class="btn" id="insRepeater" title="Send to Repeater (Ctrl+R)" style="padding:3px 9px">→ Rep</button>
-          <button class="btn" id="insIntruder" title="Send to Intruder (Ctrl+I)" style="padding:3px 9px">→ Intr</button>
-          <button class="btn" id="insCurl" title="Copy as cURL" style="padding:3px 9px">cURL</button>
-          <button class="btn" id="aiExplainBtn" data-ai-ui title="Ask AI about this flow" aria-label="Ask AI about this flow" style="padding:3px 9px">✨</button>
+          <button class="btn btn-compact" id="aiExplainBtn" data-ai-ui title="Ask AI about this flow" aria-label="Ask AI about this flow">✨</button>
         </div>
         <div class="sel-decode" id="reqDecode" hidden>
           <span class="sel-decode-kind">Base64</span><span class="sel-decode-arrow">→</span>
@@ -205,7 +200,7 @@
         <label class="icpt-chk"><input type="checkbox" id="interceptFilterOn"> Only hold when</label>
         <select id="interceptFilterTarget" class="btn"><option value="any">anything</option><option value="url">URL</option><option value="header">headers</option><option value="body">body</option><option value="method">method</option></select>
         <span class="hint">matches</span>
-        <input id="interceptFilterPattern" class="btn" style="flex:1;min-width:160px;background:var(--bg3);font-family:var(--mono)" aria-label="Intercept filter pattern" placeholder="regex e.g. /admin|password=" spellcheck="false">
+        <input id="interceptFilterPattern" class="btn btn-field field-grow font-mono" aria-label="Intercept filter pattern" placeholder="regex e.g. /admin|password=" spellcheck="false">
       </div>
     </div>
     <!-- workspace: hold queue + editor -->
@@ -218,8 +213,8 @@
         <div class="icpt-edhead" id="heldEditor" style="display:none">
           <div class="icpt-edtitle" id="heldTitle"></div>
           <div class="spacer"></div>
-          <button class="btn accent" id="forwardBtn" title="Forward (Ctrl+Shift+F)">▶ Forward</button>
-          <button class="btn danger" id="dropBtn" title="Drop (Ctrl+D)">✕ Drop</button>
+          <button class="btn btn-primary" id="forwardBtn" title="Forward (Ctrl+Shift+F)">▶ Forward</button>
+          <button class="btn btn-danger" id="dropBtn" title="Drop (Ctrl+D)">✕ Drop</button>
         </div>
         <textarea class="icpt-raw" id="heldRaw" spellcheck="false" style="display:none" aria-label="Held message — edit the raw HTTP before forwarding"></textarea>
         <div class="state-empty" id="heldEmpty">
@@ -239,9 +234,9 @@
         </table>
         <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap">
           <select id="newRuleType" class="btn"><option value="req-header">req-header</option><option value="req-body">req-body</option><option value="res-header">res-header</option><option value="res-body">res-body</option></select>
-          <input id="newRuleMatch" class="btn" style="flex:1;min-width:160px;background:var(--bg3)" aria-label="Match & replace — match regex" placeholder="match regex e.g. User-Agent: .*">
-          <input id="newRuleReplace" class="btn" style="flex:1;min-width:160px;background:var(--bg3)" aria-label="Match & replace — replacement" placeholder="replace e.g. User-Agent: interceptor">
-          <button class="btn accent" id="addRuleBtn">+ Add rule</button>
+          <input id="newRuleMatch" class="btn btn-field field-grow" aria-label="Match & replace — match regex" placeholder="match regex e.g. User-Agent: .*">
+          <input id="newRuleReplace" class="btn btn-field field-grow" aria-label="Match & replace — replacement" placeholder="replace e.g. User-Agent: interceptor">
+          <button class="btn btn-primary" id="addRuleBtn">+ Add rule</button>
         </div>
       </div>
     </details>
@@ -331,7 +326,7 @@ Content-Type: application/json
       <section class="pane intr-results">
         <div class="pane-head"><span class="lbl">RESULTS</span><span id="intrProgress" class="count"></span><div class="spacer"></div><span id="intrStats" class="hint"></span><button class="btn" id="intrHistToggle" title="Show/hide past attacks (this session)">⟲ History</button></div>
         <div class="intr-progbar" id="intrProgBar" style="display:none"><div id="intrProgFill"></div></div>
-        <div class="intr-head"><div>#</div><div>Payload</div><div style="text-align:center">St</div><div style="text-align:right">Len</div><div style="text-align:right">Time</div></div>
+        <div class="intr-head"><div>#</div><div>Payload</div><div class="ta-c">St</div><div class="ta-r">Len</div><div class="ta-r">Time</div></div>
         <div id="intrResults" class="scroll"><div class="state-empty"><div class="state-empty-icon">🎯</div><div class="state-empty-title">No results yet</div><p class="state-empty-hint">Set a target, mark <b>§</b> injection points, add payloads, then <b>Start</b>.</p></div></div>
       </section>
     </div>
@@ -436,12 +431,12 @@ Content-Type: application/json
     <div id="mapCrumb" class="map-crumb" style="display:none"></div>
     <div id="mapWarn" class="map-warn" style="display:none"></div>
     <div id="mapTree" class="map-tree"></div>
-    <div id="mapTable" class="map-table-wrap" style="display:none;flex:1;overflow:auto;min-height:0"></div>
+    <div id="mapTable" class="map-table-wrap map-view" style="display:none"></div>
     <div id="mapGraphWrap" style="display:none;flex:1;min-height:0;position:relative">
       <div id="mapGraphTip" class="map-graph-tip" style="display:none" role="tooltip"></div>
       <svg id="mapGraphSvg" style="width:100%;height:100%;background:var(--bg1);cursor:grab" xmlns="http://www.w3.org/2000/svg"><g id="mapGraphG"></g></svg>
     </div>
-    <div id="mapParams" class="map-table-wrap" style="display:none;flex:1;overflow:auto;min-height:0;padding:10px 14px"></div>
+    <div id="mapParams" class="map-table-wrap map-view" style="display:none;padding:10px 14px"></div>
   </div>
 
   <!-- Project notes (markdown notebook) -->
@@ -452,7 +447,7 @@ Content-Type: application/json
       <button class="btn btn-primary" id="notesOrganizeBtn" data-ai-ui title="Organize with AI">✨ Organize</button>
       <div class="spacer"></div>
     </div>
-    <textarea id="notesEdit" spellcheck="false" placeholder="# Engagement notes&#10;&#10;## Credentials&#10;&#10;## Findings&#10;&#10;## To-do" style="flex:1;border:none;outline:none;resize:none;background:var(--bg1);color:var(--fg);font-family:var(--mono);font-size:13px;line-height:1.6;padding:16px 18px"></textarea>
+    <textarea id="notesEdit" class="notes-edit" spellcheck="false" placeholder="# Engagement notes&#10;&#10;## Credentials&#10;&#10;## Findings&#10;&#10;## To-do"></textarea>
     <div id="notesPreview" class="md" style="flex:1;overflow:auto;padding:16px 22px;display:none"></div>
   </div>
 
@@ -526,7 +521,7 @@ Content-Type: application/json
             <div id="proxyListenersList"></div>
             <div class="row" style="gap:8px;margin-top:8px">
               <button class="btn" type="button" id="addProxyListenerBtn">+ Add listener</button>
-              <button class="btn accent" id="saveAddrBtn">Apply &amp; rebind</button>
+              <button class="btn btn-primary" id="saveAddrBtn">Apply &amp; rebind</button>
             </div>
             <p class="hint" style="margin-top:8px">★ marks the suggested host for mobile Wi-Fi proxy.</p>
             <input type="hidden" id="setAddr">
@@ -542,7 +537,7 @@ Content-Type: application/json
               <label>Manual host (port comes from listener)</label>
               <input id="deviceProxyManualHost" placeholder="192.168.1.5" spellcheck="false" style="font-family:var(--mono)">
             </div>
-            <div class="row" style="gap:8px;margin-top:8px"><button class="btn accent" type="button" id="saveDeviceProxyBtn">Save device proxy</button></div>
+            <div class="row" style="gap:8px;margin-top:8px"><button class="btn btn-primary" type="button" id="saveDeviceProxyBtn">Save device proxy</button></div>
           </div>
           <div class="section">
             <h3>CONTROL UI</h3>
@@ -552,7 +547,7 @@ Content-Type: application/json
               <div class="field" style="width:120px;flex:none;margin-bottom:0"><label>Port</label><input id="setControlPort" inputmode="numeric" placeholder="9966" style="width:100%"></div>
             </div>
             <input type="hidden" id="setControlAddr">
-            <div class="row" style="gap:8px;margin-top:8px"><button class="btn accent" id="saveControlAddrBtn">Apply &amp; rebind</button></div>
+            <div class="row" style="gap:8px;margin-top:8px"><button class="btn btn-primary" id="saveControlAddrBtn">Apply &amp; rebind</button></div>
             <div class="field" style="margin-top:16px"><label>Upstream proxy (blank = direct)</label><input id="setUpstream" placeholder="http://corp-proxy:8080"></div>
             <div class="row"><button class="btn" id="saveUpstreamBtn">Save upstream</button></div>
           </div>
@@ -581,14 +576,14 @@ Content-Type: application/json
           <div class="section">
             <h3>TLS CERTIFICATE AUTHORITY</h3>
             <p class="hint" style="margin-bottom:12px">Install &amp; trust this CA to intercept HTTPS. HTTP works without it.</p>
-            <a class="btn accent" id="dlCaBtn" href="/api/ca.crt" download style="text-decoration:none;display:inline-block">Download CA certificate</a>
+            <a class="btn btn-primary" id="dlCaBtn" href="/api/ca.crt" download style="text-decoration:none;display:inline-block">Download CA certificate</a>
           </div>
           <div class="section" id="tlsBypassSection">
             <h3>TLS PASSTHROUGH · SSL PINNING</h3>
             <p class="hint" style="margin-bottom:10px">Domains listed here are tunneled straight through <b>without interception</b>, so pinned apps keep working while you focus on the domains you <i>can</i> intercept. One host per line — exact (<code>api.example.com</code>) or wildcard (<code>*.example.com</code>).</p>
             <div class="row" style="gap:12px;margin-bottom:10px"><button class="uisw" id="autoBypassToggle">Auto-bypass on pinning failure is off</button><span class="hint">Adds a domain here automatically the first time its TLS handshake fails (pinning).</span></div>
             <textarea id="tlsBypassList" spellcheck="false" placeholder="api.pinned-app.com&#10;*.analytics.example.com" style="width:100%;min-height:96px;font-family:var(--mono);font-size:11.5px;line-height:1.6;padding:8px 12px;background:var(--bg3);color:var(--fg);border:1px solid var(--line);border-radius:8px;resize:vertical"></textarea>
-            <div class="row" style="gap:8px;margin-top:8px"><button class="btn accent" id="tlsBypassSave">Save passthrough list</button><span class="hint" id="tlsBypassCount"></span></div>
+            <div class="row" style="gap:8px;margin-top:8px"><button class="btn btn-primary" id="tlsBypassSave">Save passthrough list</button><span class="hint" id="tlsBypassCount"></span></div>
           </div>
           <div class="section" id="tlsPinningSection">
             <h3>SSL PINNING &amp; MISSING TRAFFIC</h3>
@@ -614,7 +609,7 @@ Content-Type: application/json
           </div>
           <div class="section">
             <div style="margin-top:0;display:flex;flex-direction:column;gap:6px">
-              <div style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3)">HOW TO TRUST IT</div>
+              <div class="micro-label">HOW TO TRUST IT</div>
               <details class="ca-how"><summary>macOS</summary><ol>
                 <li>Open the downloaded <code>interseptor-ca.crt</code> — Keychain Access opens.</li>
                 <li>Add it to the <b>System</b> (or login) keychain.</li>
@@ -675,7 +670,7 @@ Content-Type: application/json
             </div>
             <div class="hint android-lan-hint" id="androidLanHint" style="margin:-4px 0 10px;display:none"></div>
             <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px">
-              <button class="btn accent" type="button" id="androidSetupAllBtn">Setup all (proxy + CA)</button>
+              <button class="btn btn-primary" type="button" id="androidSetupAllBtn">Setup all (proxy + CA)</button>
             </div>
             <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px">
               <button class="btn" type="button" id="androidInstallUserBtn">Install CA — user</button>
@@ -683,10 +678,10 @@ Content-Type: application/json
               <span class="hint" id="androidCaHint"></span>
             </div>
             <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px">
-              <button class="btn accent" type="button" id="androidProxyBtn">Proxy through Interseptor</button>
+              <button class="btn btn-primary" type="button" id="androidProxyBtn">Proxy through Interseptor</button>
               <button class="btn" type="button" id="androidUnproxyBtn">Clear proxy</button>
             </div>
-            <label class="icpt-chk" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;color:var(--fg2);font-size:12px">
+            <label class="chk-row" style="margin-bottom:8px">
               <input type="checkbox" id="androidRemoveSystemCa"> Also remove system CA on clear (root/emulator)
             </label>
             <p class="hint" id="androidAdbHint"></p>
@@ -718,7 +713,7 @@ Content-Type: application/json
             </div>
             <div class="hint android-lan-hint" id="iosLanHint" style="margin:-4px 0 10px;display:none"></div>
             <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px">
-              <button class="btn accent" type="button" id="iosSetupAllBtn">Setup all (CA + profile)</button>
+              <button class="btn btn-primary" type="button" id="iosSetupAllBtn">Setup all (CA + profile)</button>
               <a class="btn" id="iosProfileLink" href="/api/ios/profile.mobileconfig" download style="text-decoration:none">Download profile</a>
             </div>
             <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px">
@@ -758,7 +753,7 @@ Content-Type: application/json
             <div class="hint android-lan-hint" id="iosSshLanHint" style="margin:-4px 0 10px;display:none"></div>
             <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px">
               <button class="btn" type="button" id="iosSshStatusBtn">Check SSH status</button>
-              <button class="btn accent" type="button" id="iosSshSetupBtn">Setup all (profile)</button>
+              <button class="btn btn-primary" type="button" id="iosSshSetupBtn">Setup all (profile)</button>
               <button class="btn" type="button" id="iosSshInstallCaBtn">Install CA (profile)</button>
             </div>
             <p class="hint" id="iosSshHint"></p>
@@ -776,16 +771,16 @@ Content-Type: application/json
             </table>
             <div class="row" style="gap:8px;margin-top:10px">
               <select id="newScopeAction" class="btn"><option value="include">include</option><option value="exclude">exclude</option></select>
-              <input id="newScopeHost" class="btn" style="flex:1;background:var(--bg3)" aria-label="Scope rule — host pattern" placeholder="host e.g. *.acme.com or .*ohsome.*">
-              <input id="newScopePath" class="btn" style="width:130px;background:var(--bg3)" aria-label="Scope rule — path prefix" placeholder="path prefix or regex">
-              <button class="btn accent" id="addScopeBtn">+ Add</button>
+              <input id="newScopeHost" class="btn btn-field" style="flex:1" aria-label="Scope rule — host pattern" placeholder="host e.g. *.acme.com or .*ohsome.*">
+              <input id="newScopePath" class="btn btn-field" style="width:130px" aria-label="Scope rule — path prefix" placeholder="path prefix or regex">
+              <button class="btn btn-primary" id="addScopeBtn">+ Add</button>
             </div>
           </div>
         </section>
         <section class="set-sec" data-sec="ai" hidden>
           <div class="section">
             <h3>AI ASSIST</h3>
-            <label class="icpt-chk" style="display:flex;align-items:center;gap:8px;margin:12px 0 14px;cursor:pointer;color:var(--fg2);font-size:12.5px">
+            <label class="chk-row" style="margin:12px 0 14px;font-size:12.5px">
               <input type="checkbox" id="setAiDisabled"> Disable all AI features for this project
             </label>
             <p id="aiDisabledHint" class="hint" style="display:none;margin-bottom:12px;color:var(--amber)">AI is off — assist, MCP, and Activity are hidden. Uncheck above to re-enable.</p>
@@ -810,7 +805,7 @@ Content-Type: application/json
             </div>
             <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
               <button class="btn" id="loadAiModelsBtn" style="display:none" title="Fetch models from OpenRouter (validates your API key)">↻ Load models</button>
-              <button class="btn accent" id="saveAiBtn">Save AI settings</button>
+              <button class="btn btn-primary" id="saveAiBtn">Save AI settings</button>
               <span class="hint" id="aiValidateState"></span>
             </div>
             <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">
@@ -840,7 +835,7 @@ Content-Type: application/json
                 <input id="keyLabel" class="repurl" style="max-width:220px" aria-label="API key label" placeholder="label (e.g. ci-runner)">
                 <select id="keyScope" class="repurl" style="max-width:130px" aria-label="Key scope"><option value="full">Full access</option><option value="read">Read-only</option></select>
                 <select id="keyExpiry" class="repurl" style="max-width:130px" aria-label="Key expiry"><option value="0">Never expires</option><option value="3600">1 hour</option><option value="86400">1 day</option><option value="604800">7 days</option></select>
-                <button class="btn accent" id="keyCreate">Create key</button>
+                <button class="btn btn-primary" id="keyCreate">Create key</button>
               </div>
               <div id="keyNew" class="evidence" style="display:none"></div>
               <table class="rules-tbl"><thead><tr><th style="width:130px">Prefix</th><th>Label</th><th style="width:80px">Scope</th><th style="width:150px">Created</th><th style="width:70px"></th></tr></thead><tbody id="keyList"></tbody></table>
@@ -850,8 +845,8 @@ Content-Type: application/json
               <p class="hint" style="margin-bottom:12px">Expose Interseptor over a Cloudflare tunnel so a teammate — or an AI agent on your VPS — can reach it with an access key. No public IP needed. <b style="color:var(--amber)">This publishes your captured traffic;</b> share read-only keys with reviewers and stop when done.</p>
               <div id="shareStatus" class="evidence" style="margin-bottom:12px">Loading…</div>
               <div class="row" style="gap:8px;margin-bottom:20px">
-                <button class="btn accent" id="shareStart">Start sharing</button>
-                <button class="btn danger" id="shareStop" style="display:none">Stop sharing</button>
+                <button class="btn btn-primary" id="shareStart">Start sharing</button>
+                <button class="btn btn-danger" id="shareStop" style="display:none">Stop sharing</button>
               </div>
               <h3 style="margin-top:8px">SYNC WITH A PEER</h3>
               <p class="hint" style="margin-bottom:12px">Pull a teammate's captured flows &amp; findings into this project, or push yours to theirs. Additive union — nothing is overwritten, duplicates are skipped.</p>
@@ -860,7 +855,7 @@ Content-Type: application/json
                 <input id="peerKey" class="repurl" type="password" style="max-width:200px" aria-label="Peer access key" placeholder="their full-access key (ick_…)">
                 <input id="peerLabel" class="repurl" style="max-width:130px" aria-label="Peer label" placeholder="label (optional)">
               </div>
-              <div class="row" style="gap:8px"><button class="btn accent" id="peerPull">Pull ↓</button><button class="btn" id="peerPush">Push ↑</button></div>
+              <div class="row" style="gap:8px"><button class="btn btn-primary" id="peerPull">Pull ↓</button><button class="btn" id="peerPush">Push ↑</button></div>
               <div id="mergeResult" class="hint" style="margin-top:10px"></div>
             </div>
             <div id="apiRest" class="api-pane" style="display:none">
@@ -877,9 +872,9 @@ Content-Type: application/json
           <div class="section">
             <h3>SESSION · auth headers</h3>
             <p class="hint" style="margin-bottom:10px">Auto-applied to <b>Repeater</b>, <b>Intruder</b>, and <b>Active scan</b> sends. Sent only to in-scope hosts.</p>
-            <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;color:var(--fg2)"><input type="checkbox" id="setSessionOn"> Apply session headers to outgoing sends</label>
+            <label class="chk-row" style="margin-bottom:8px"><input type="checkbox" id="setSessionOn"> Apply session headers to outgoing sends</label>
             <div class="field"><textarea id="setSessionHeaders" rows="3" placeholder="Authorization: Bearer eyJ…&#10;Cookie: session=…" style="font-family:var(--mono);width:100%;resize:vertical"></textarea></div>
-            <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;cursor:pointer;color:var(--fg2)"><input type="checkbox" id="setSessionUnscoped" style="margin-top:2px"> <span><b style="color:var(--red)">Allow on any host (unsafe)</b> — attach session headers even when the send target is outside scope. Only use if you understand the cross-domain leak risk.</span></label>
+            <label class="chk-row" style="align-items:flex-start;margin-bottom:8px"><input type="checkbox" id="setSessionUnscoped" style="margin-top:2px"> <span><b style="color:var(--red)">Allow on any host (unsafe)</b> — attach session headers even when the send target is outside scope. Only use if you understand the cross-domain leak risk.</span></label>
             <details class="section set-disc">
             <summary>Per-host overrides</summary>
               <div id="hostHdrList" style="margin-top:8px"></div>
@@ -889,25 +884,25 @@ Content-Type: application/json
           <details class="section set-disc">
             <summary>Token macro (CSRF / re-auth)</summary>
             <p class="hint" style="margin:10px 0 12px">Before each send, fires a refresh request, extracts a value with regex, and injects it as a header or placeholder.</p>
-            <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;cursor:pointer;color:var(--fg2)"><input type="checkbox" id="macroOn"> Run token macro before each send</label>
+            <label class="chk-row" style="margin-bottom:10px"><input type="checkbox" id="macroOn"> Run token macro before each send</label>
             <div class="field" style="max-width:none"><label>Refresh request <span class="hint">(raw HTTP — request line + headers)</span></label><textarea id="macroReq" rows="4" placeholder="GET /login HTTP/1.1&#10;Host: app.example.com&#10;Cookie: session=…" style="font-family:var(--mono);width:100%;resize:vertical"></textarea></div>
             <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:10px">
-              <input id="macroTarget" class="btn" style="flex:1;min-width:200px;background:var(--bg3);font-family:var(--mono)" aria-label="Token macro — target URL" placeholder="https://app.example.com" spellcheck="false">
-              <input id="macroExtract" class="btn" style="flex:1;min-width:200px;background:var(--bg3);font-family:var(--mono)" aria-label="Token macro — extract regex" placeholder="extract regex, 1 group e.g. name=&quot;csrf&quot; value=&quot;([^&quot;]+)&quot;" spellcheck="false">
+              <input id="macroTarget" class="btn btn-field field-grow font-mono" style="min-width:200px" aria-label="Token macro — target URL" placeholder="https://app.example.com" spellcheck="false">
+              <input id="macroExtract" class="btn btn-field field-grow font-mono" style="min-width:200px" aria-label="Token macro — extract regex" placeholder="extract regex, 1 group e.g. name=&quot;csrf&quot; value=&quot;([^&quot;]+)&quot;" spellcheck="false">
             </div>
             <div class="row" style="gap:8px;flex-wrap:wrap">
-              <select id="macroMode" class="btn" style="background:var(--bg3)"><option value="header">inject as header</option><option value="placeholder">replace placeholder</option></select>
-              <input id="macroName" class="btn" style="flex:1;min-width:200px;background:var(--bg3);font-family:var(--mono)" aria-label="Token macro — header name or placeholder" placeholder="header name e.g. X-CSRF-Token  (or placeholder e.g. §CSRF§)" spellcheck="false">
+              <select id="macroMode" class="btn btn-field"><option value="header">inject as header</option><option value="placeholder">replace placeholder</option></select>
+              <input id="macroName" class="btn btn-field field-grow font-mono" style="min-width:200px" aria-label="Token macro — header name or placeholder" placeholder="header name e.g. X-CSRF-Token  (or placeholder e.g. §CSRF§)" spellcheck="false">
             </div>
             <p class="hint" style="margin-top:8px;color:var(--amber)">Note: this fires one extra request per send — for Intruder that doubles the request count. Use <b>Save session</b> below to persist.</p>
           </details>
           <details class="section set-disc">
             <summary>Login macro (session re-auth)</summary>
             <p class="hint" style="margin:10px 0 12px">Runs a login request to extract <b>Cookie</b>/<b>Authorization</b> into session headers.</p>
-            <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;cursor:pointer;color:var(--fg2)"><input type="checkbox" id="loginMacroOn"> Enable login macro</label>
+            <label class="chk-row" style="margin-bottom:10px"><input type="checkbox" id="loginMacroOn"> Enable login macro</label>
             <div class="field" style="max-width:none"><label>Login request <span class="hint">(raw HTTP)</span></label><textarea id="loginMacroReq" rows="4" placeholder="POST /api/login HTTP/1.1&#10;Host: app.example.com&#10;Content-Type: application/json&#10;&#10;{&quot;user&quot;:&quot;…&quot;,&quot;pass&quot;:&quot;…&quot;}" style="font-family:var(--mono);width:100%;resize:vertical"></textarea></div>
             <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:10px">
-              <input id="loginMacroTarget" class="btn" style="flex:1;min-width:200px;background:var(--bg3);font-family:var(--mono)" aria-label="Login macro — target URL" placeholder="https://app.example.com" spellcheck="false">
+              <input id="loginMacroTarget" class="btn btn-field field-grow font-mono" style="min-width:200px" aria-label="Login macro — target URL" placeholder="https://app.example.com" spellcheck="false">
               <label class="hint">Refresh sec <input id="loginMacroRefresh" class="btn" type="number" min="0" value="0" style="background:var(--bg3);width:72px" title="0 = manual / 401 only"></label>
               <label class="hint"><input type="checkbox" id="loginMacro401" checked> Re-auth on 401</label>
             </div>
@@ -919,7 +914,7 @@ Content-Type: application/json
             <div id="loginMacroTestOut" class="evidence" style="display:none;margin-top:10px"></div>
             <p class="hint" style="margin-top:8px">Tip: right-click a login flow → <b>Use as login macro</b>.</p>
           </details>
-          <div class="row" style="gap:8px;padding:14px 16px"><button class="btn accent" id="saveSessionBtn">Save session</button> <span class="hint" id="sessionState"></span> <span id="sessionExpiry" style="display:none;font-size:11px;padding:2px 7px;border-radius:4px;background:var(--bg3)"></span></div>
+          <div class="row" style="gap:8px;padding:14px 16px"><button class="btn btn-primary" id="saveSessionBtn">Save session</button> <span class="hint" id="sessionState"></span> <span id="sessionExpiry" style="display:none;font-size:11px;padding:2px 7px;border-radius:4px;background:var(--bg3)"></span></div>
         </section>
         <section class="set-sec" data-sec="project" hidden>
           <div class="section">
@@ -927,14 +922,14 @@ Content-Type: application/json
             <p class="hint" style="margin-bottom:12px">Each project has its own history, rules, and scope, kept under <code>~/.interseptor/projects/&lt;name&gt;/</code> by default — or a folder you choose below. CA and checks are shared globally. Switching restarts Interseptor.</p>
             <div class="field"><label>Active project</label><div style="font-size:13px"><b id="projNameHint" style="color:var(--accent)">default</b> · <span id="projDirHint" style="color:var(--fg3)">~/.interseptor</span></div></div>
             <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
-              <div class="field" style="margin-bottom:0"><label>Switch to a saved project</label><select id="projSelect" class="btn" style="background:var(--bg3);min-width:200px"></select></div>
-              <button class="btn accent" id="projSwitchBtn">Open ▸</button>
+              <div class="field" style="margin-bottom:0"><label>Switch to a saved project</label><select id="projSelect" class="btn btn-field" style="min-width:200px"></select></div>
+              <button class="btn btn-primary" id="projSwitchBtn">Open ▸</button>
             </div>
             <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
-              <div class="field" style="margin-bottom:0;flex:1;min-width:220px"><label>New project</label><input id="projNew" class="btn" style="background:var(--bg3);width:100%" placeholder="acme-engagement"></div>
+              <div class="field" style="margin-bottom:0;flex:1;min-width:220px"><label>New project</label><input id="projNew" class="btn btn-field" style="width:100%" placeholder="acme-engagement"></div>
               <button class="btn" id="projNewBtn">Create &amp; open</button>
             </div>
-            <div class="field" style="margin-bottom:0;margin-top:8px"><label>Save location <span class="hint">(optional — leave blank to use ~/.interseptor/projects/&lt;name&gt;)</span></label><input id="projNewPath" class="btn" style="background:var(--bg3);width:100%;font-family:var(--mono);font-size:11.5px" placeholder="e.g. D:\engagements\acme-2026"></div>
+            <div class="field" style="margin-bottom:0;margin-top:8px"><label>Save location <span class="hint">(optional — leave blank to use ~/.interseptor/projects/&lt;name&gt;)</span></label><input id="projNewPath" class="btn btn-field font-mono" style="width:100%;font-size:11.5px" placeholder="e.g. D:\engagements\acme-2026"></div>
             <p class="hint" id="projSwitchNote" style="margin-top:12px;display:none;color:var(--accent)"></p>
             <div class="row" style="margin-top:14px"><button class="btn" id="runSetupBtn" type="button">🚀 Run setup wizard again</button><span class="hint">Replays the first-run guide (proxy, CA, scope).</span></div>
           </div>
@@ -942,13 +937,13 @@ Content-Type: application/json
             <h3>EXPORT / IMPORT</h3>
             <p class="hint" style="margin-bottom:10px">Portable session bundle (JSON) — flows, rules, scope, upstream proxy. Import <b>merges</b> into the current project. Good for sharing traffic with other tools.</p>
             <div class="row" style="gap:8px">
-              <a class="btn accent" id="exportProject" href="/api/export/project" download style="text-decoration:none">Export project</a>
+              <a class="btn btn-primary" id="exportProject" href="/api/export/project" download style="text-decoration:none">Export project</a>
               <button class="btn" id="importProjectBtn">Import project</button>
               <input type="file" id="importProjectFile" accept=".json,application/json" style="display:none">
             </div>
             <p class="hint" style="margin:16px 0 10px">Full project archive (.zip) — a <b>lossless</b> copy of the whole project (database + captured bodies) to move an engagement to another machine intact. Import creates a <b>new</b> project you can switch to. The global CA &amp; custom checks aren't included.</p>
             <div class="row" style="gap:8px">
-              <a class="btn accent" id="exportFull" href="/api/export/full" download style="text-decoration:none">Export full project</a>
+              <a class="btn btn-primary" id="exportFull" href="/api/export/full" download style="text-decoration:none">Export full project</a>
               <button class="btn" id="importFullBtn">Import full project</button>
               <input type="file" id="importFullFile" accept=".zip,application/zip" style="display:none">
             </div>
@@ -962,12 +957,12 @@ Content-Type: application/json
               <tbody id="retentionBody"><tr><td colspan="5" class="hint" style="padding:10px 8px">Loading…</td></tr></tbody>
             </table>
             <div class="row" style="gap:8px;margin-top:12px;flex-wrap:wrap">
-              <button class="btn danger" id="retDeleteSelected" style="color:var(--red)">🗑 Delete selected</button>
+              <button class="btn btn-danger" id="retDeleteSelected" style="color:var(--red)">🗑 Delete selected</button>
               <button class="btn" id="retKeepOnly">◉ Keep only selected</button>
             </div>
             <div class="row" style="gap:8px;margin-top:16px;flex-wrap:wrap;align-items:center">
-              <input id="retPatternInput" class="btn" style="flex:1;min-width:200px;max-width:340px;background:var(--bg3);border:1px solid var(--line)" aria-label="Purge host pattern" placeholder="Pattern e.g. *.ads.example.com">
-              <button class="btn danger" id="retPurgePattern" style="color:var(--red)">🗑 Purge by pattern</button>
+              <input id="retPatternInput" class="btn btn-field field-grow" style="min-width:200px;max-width:340px;border:1px solid var(--line)" aria-label="Purge host pattern" placeholder="Pattern e.g. *.ads.example.com">
+              <button class="btn btn-danger" id="retPurgePattern" style="color:var(--red)">🗑 Purge by pattern</button>
             </div>
             <div style="margin-top:16px">
               <button class="btn" id="retGc">♻ Reclaim space (GC body files)</button>
@@ -981,8 +976,8 @@ Content-Type: application/json
 </div>
 
 <div id="ctxmenu"></div>
-<div id="flowModal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:200;align-items:center;justify-content:center">
-  <div role="dialog" aria-modal="true" aria-labelledby="fmTitle" style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;width:min(1100px,94vw);height:min(82vh,820px);display:flex;flex-direction:column;box-shadow:0 20px 60px var(--shadow);overflow:hidden">
+<div id="flowModal" class="modal-overlay" style="display:none">
+  <div role="dialog" aria-modal="true" aria-labelledby="fmTitle" class="modal-shell" style="width:min(1100px,94vw);height:min(82vh,820px)">
     <div class="row" style="padding:10px 14px;border-bottom:1px solid var(--line);gap:10px">
       <div id="fmTitle" style="flex:1;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
       <div class="seg" id="fmSeg"><button data-v="raw">Raw</button><button class="on" data-v="pretty">Pretty</button></div>
@@ -1012,8 +1007,8 @@ Content-Type: application/json
     </div>
   </div>
 </div>
-<div id="aiModal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:200;align-items:center;justify-content:center">
-  <div role="dialog" aria-modal="true" aria-labelledby="aiModalTitle" style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;max-width:700px;max-height:80vh;width:90%;display:flex;flex-direction:column;box-shadow:0 20px 60px var(--shadow)">
+<div id="aiModal" class="modal-overlay" style="display:none">
+  <div role="dialog" aria-modal="true" aria-labelledby="aiModalTitle" class="modal-shell" style="max-width:700px;max-height:80vh;width:90%">
     <div class="row" style="padding:12px 16px;border-bottom:1px solid var(--line);gap:8px;flex-wrap:wrap">
       <span id="aiModalTitle" style="font-weight:700;color:var(--accent)">✨ Ask AI</span>
       <button class="btn" id="aiNewChat" title="Clear the conversation and start over">↺ New chat</button>
@@ -1021,8 +1016,8 @@ Content-Type: application/json
       <button class="btn" id="aiClose" aria-label="Close">✕</button>
     </div>
     <div class="row" style="padding:8px 16px;border-bottom:1px solid var(--line);gap:8px;flex-wrap:wrap">
-      <input id="aiQuestion" class="btn" style="flex:1;min-width:200px;background:var(--bg3)" placeholder="Ask anything about this request / response… (Enter)" aria-label="Ask a question about the selected flow(s)" spellcheck="false">
-      <button class="btn accent" id="aiAskBtn">Ask ▸</button>
+      <input id="aiQuestion" class="btn btn-field field-grow" style="min-width:200px" placeholder="Ask anything about this request / response… (Enter)" aria-label="Ask a question about the selected flow(s)" spellcheck="false">
+      <button class="btn btn-primary" id="aiAskBtn">Ask ▸</button>
     </div>
     <div class="row ai-agent-row" style="padding:0 16px 8px;gap:8px;border-bottom:1px solid var(--line)">
       <label class="ai-agent-toggle"><input type="checkbox" id="aiAgentToggle"> Let AI send requests</label>
@@ -1040,10 +1035,10 @@ Content-Type: application/json
     </div>
   </div>
 </div>
-<div id="shortcutsModal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:200;align-items:center;justify-content:center">
-  <div role="dialog" aria-modal="true" aria-labelledby="scTitle" class="sc-dialog">
+<div id="shortcutsModal" class="modal-overlay" style="display:none">
+  <div role="dialog" aria-modal="true" aria-labelledby="scTitle" class="modal-shell sc-dialog">
     <div class="row" style="padding:12px 18px;border-bottom:1px solid var(--line)">
-      <span id="scTitle" style="font-weight:700;color:var(--accent)">⌨ Keyboard shortcuts</span>
+      <span id="scTitle" class="modal-shell-title">⌨ Keyboard shortcuts</span>
       <div class="spacer"></div>
       <button class="btn" id="scClose" aria-label="Close">✕</button>
     </div>
@@ -1077,10 +1072,10 @@ Content-Type: application/json
     </div>
   </div>
 </div>
-<div id="checksModal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:200;align-items:center;justify-content:center">
-  <div role="dialog" aria-modal="true" aria-labelledby="checksModalTitle" class="checks-dialog">
-    <div class="row" style="padding:12px 16px;border-bottom:1px solid var(--line)">
-      <span id="checksModalTitle" style="font-weight:700;color:var(--accent)">🛡 Checks</span>
+<div id="checksModal" class="modal-overlay" style="display:none">
+  <div role="dialog" aria-modal="true" aria-labelledby="checksModalTitle" class="modal-shell checks-dialog">
+    <div class="row modal-shell-head">
+      <span id="checksModalTitle" class="modal-shell-title">🛡 Checks</span>
       <div class="spacer"></div>
       <button class="btn" id="checksClose" aria-label="Close">✕</button>
     </div>
@@ -1090,13 +1085,13 @@ Content-Type: application/json
           <input id="checksSearch" class="btn checks-search" placeholder="🔎 filter checks…" aria-label="Filter checks" spellcheck="false">
         </div>
         <div id="checksList" style="flex:1;overflow:auto"></div>
-        <div style="padding:8px;border-top:1px solid var(--line);display:flex;gap:6px"><button class="btn accent" id="checkNew" style="flex:1">+ New passive</button><button class="btn" id="checkNewActive" style="flex:1" title="Author an active check that sends probe requests">+ New active ⚡</button></div>
+        <div style="padding:8px;border-top:1px solid var(--line);display:flex;gap:6px"><button class="btn btn-primary" id="checkNew" style="flex:1">+ New passive</button><button class="btn" id="checkNewActive" style="flex:1" title="Author an active check that sends probe requests">+ New active ⚡</button></div>
       </div>
       <div class="checks-editor">
         <div class="row" style="padding:8px 12px;gap:8px;border-bottom:1px solid var(--line);flex:none">
-          <input id="checkId" class="btn" style="width:210px;background:var(--bg3)" aria-label="Check ID" placeholder="check-id (letters, - or _)">
+          <input id="checkId" class="btn btn-field" style="width:210px" aria-label="Check ID" placeholder="check-id (letters, - or _)">
           <button class="btn" id="checkTest">Test ▸</button>
-          <button class="btn accent" id="checkSave">Save</button>
+          <button class="btn btn-primary" id="checkSave">Save</button>
           <div class="spacer"></div>
           <button class="btn" id="checkDelete" style="color:var(--red)" title="Delete custom check, or revert a built-in override">🗑 Delete</button>
         </div>
@@ -1117,7 +1112,7 @@ Content-Type: application/json
             <p class="hint" style="margin:0 0 8px;line-height:1.5">Describe what to detect in plain English. AI writes Starlark using the sandboxed check API, then runs <b>Test</b> against your selected flow.</p>
             <textarea id="checkDescribe" class="rep-edit" spellcheck="true" placeholder="Example: On HTTPS responses, flag missing Strict-Transport-Security header with medium severity and a fix hint."></textarea>
             <div class="row" style="margin-top:8px;gap:8px">
-              <button class="btn accent" id="checkAiGen">✨ Generate &amp; test</button>
+              <button class="btn btn-primary" id="checkAiGen">✨ Generate &amp; test</button>
               <span class="hint" id="checkAiStatus"></span>
             </div>
           </div>
@@ -1130,8 +1125,8 @@ Content-Type: application/json
     </div>
   </div>
 </div>
-<div id="activeModal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:200;align-items:center;justify-content:center">
-  <div role="dialog" aria-modal="true" aria-labelledby="activeModalTitle" style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;max-width:800px;max-height:86vh;width:94%;display:flex;flex-direction:column;box-shadow:0 20px 60px var(--shadow)">
+<div id="activeModal" class="modal-overlay" style="display:none">
+  <div role="dialog" aria-modal="true" aria-labelledby="activeModalTitle" class="modal-shell" style="max-width:800px;max-height:86vh;width:94%">
     <div class="row" style="padding:12px 16px;border-bottom:1px solid var(--line)">
       <span id="activeModalTitle" style="font-weight:700;color:var(--red)">⚡ Active scan</span>
       <span class="hint" style="margin-left:10px">sends attack requests · scope-restricted</span>
@@ -1139,7 +1134,7 @@ Content-Type: application/json
     </div>
     <div style="padding:14px;display:flex;flex-direction:column;gap:12px;min-height:0;overflow:auto">
       <div style="border:1px solid var(--red);background:var(--redDim);border-radius:8px;padding:10px 12px">
-        <label style="display:flex;gap:9px;align-items:flex-start;cursor:pointer;color:var(--fg)">
+        <label class="chk-row" style="gap:9px;align-items:flex-start;color:var(--fg)">
           <input type="checkbox" id="asArm" style="margin-top:2px">
            <span><b style="color:var(--red)">Active scanning sends real attack requests</b> — only enable for systems you're authorized to test.</span>
         </label>
@@ -1148,19 +1143,19 @@ Content-Type: application/json
         <span class="hint">Target:</span>
         <label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="radio" name="asTarget" id="asTargetFlow" checked> selected flow <b id="asFlowLabel" style="color:var(--accent)"></b></label>
         <label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="radio" name="asTarget" id="asTargetScope"> all in-scope</label>
-        <input id="asMax" class="btn" style="width:150px;background:var(--bg3)" aria-label="Active scan — max requests" placeholder="max requests (2000)">
+        <input id="asMax" class="btn btn-field" style="width:150px" aria-label="Active scan — max requests" placeholder="max requests (2000)">
       </div>
       <div id="asScopePanel" style="display:none;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--bg)"></div>
-      <div class="row" style="gap:8px"><button class="btn accent" id="asStart">Start ▸</button><button class="btn" id="asStop">Stop</button><span class="hint" id="asProgress"></span></div>
-      <div style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3)">REQUEST LOG <span class="hint" id="asLogCount"></span></div>
+      <div class="row" style="gap:8px"><button class="btn btn-primary" id="asStart">Start ▸</button><button class="btn" id="asStop">Stop</button><span class="hint" id="asProgress"></span></div>
+      <div class="micro-label">REQUEST LOG <span class="hint" id="asLogCount"></span></div>
       <div id="asLogs" style="max-height:180px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--bg)"><div class="hint">Every probe is saved (success or error) — listed here as the scan runs.</div></div>
-      <div style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3)">CONFIRMED FINDINGS</div>
+      <div class="micro-label">CONFIRMED FINDINGS</div>
       <div id="asFindings"><div class="hint">No active findings yet.</div></div>
     </div>
   </div>
 </div>
-<div id="oobModal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:200;align-items:center;justify-content:center">
-  <div role="dialog" aria-modal="true" aria-labelledby="oobModalTitle" style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;max-width:760px;max-height:86vh;width:94%;display:flex;flex-direction:column;box-shadow:0 20px 60px var(--shadow)">
+<div id="oobModal" class="modal-overlay" style="display:none">
+  <div role="dialog" aria-modal="true" aria-labelledby="oobModalTitle" class="modal-shell" style="max-width:760px;max-height:86vh;width:94%">
     <div class="row" style="padding:12px 16px;border-bottom:1px solid var(--line)">
       <span id="oobModalTitle" style="font-weight:700;color:var(--accent)">⚲ Out-of-band (OOB) interactions</span>
       <span class="hint" style="margin-left:10px">catch blind SSRF / XXE / SQLi / RCE callbacks</span>
@@ -1170,11 +1165,11 @@ Content-Type: application/json
       <p class="hint" style="line-height:1.6;margin:0;color:var(--amber)"><b>Remote targets cannot reach localhost.</b> Set base URL to something reachable — e.g. ngrok, VPS, or LAN IP.</p>
       <div class="row" style="gap:8px;flex-wrap:wrap">
         <span class="hint">Base URL</span>
-        <input id="oobBase" class="btn" style="flex:1;min-width:240px;background:var(--bg3);font-family:var(--mono)" aria-label="OOB collector base URL" placeholder="http://your-host:port/oob" spellcheck="false">
+        <input id="oobBase" class="btn btn-field field-grow font-mono" style="min-width:240px" aria-label="OOB collector base URL" placeholder="http://your-host:port/oob" spellcheck="false">
         <button class="btn" id="oobSaveBase">Save</button>
       </div>
       <div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--bg)">
-        <div style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3);margin-bottom:6px">QUICK TUNNEL (CLOUDFLARE)</div>
+        <div class="micro-label" style="margin-bottom:6px">QUICK TUNNEL (CLOUDFLARE)</div>
         <p class="hint" style="margin:0 0 8px;line-height:1.55">Run in a terminal, paste the HTTPS URL + <code>/oob</code> as Base URL above.</p>
         <div class="row" style="gap:8px;flex-wrap:wrap">
           <code id="oobModalTunnelCmd" class="evidence" style="flex:1;min-width:200px;font-family:var(--mono);font-size:11px">cloudflared tunnel --url http://127.0.0.1:9966</code>
@@ -1182,42 +1177,42 @@ Content-Type: application/json
         </div>
       </div>
       <div class="row" style="gap:8px;flex-wrap:wrap">
-        <button class="btn accent" id="oobGen">＋ Generate payload URL</button>
+        <button class="btn btn-primary" id="oobGen">＋ Generate payload URL</button>
         <input id="oobUrl" class="btn" readonly style="flex:1;min-width:240px;background:var(--bg);border:1px solid var(--line);font-family:var(--mono);color:var(--accent)" aria-label="Generated OOB payload URL" placeholder="click Generate…">
         <button class="btn" id="oobCopy">⧉ Copy</button>
       </div>
-      <div class="row" style="gap:10px"><span style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3)">INTERACTIONS</span><span id="oobCount" class="count"></span><div class="spacer"></div><button class="btn danger" id="oobClear">Clear</button></div>
+      <div class="row" style="gap:10px"><span class="micro-label">INTERACTIONS</span><span id="oobCount" class="count"></span><div class="spacer"></div><button class="btn btn-danger" id="oobClear">Clear</button></div>
       <div id="oobList"><div class="hint">No interactions yet — callbacks to a generated URL appear here live.</div></div>
     </div>
   </div>
 </div>
-<div id="projModal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:200;align-items:center;justify-content:center">
-  <div role="dialog" aria-modal="true" aria-labelledby="projModalTitle" style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;max-width:560px;max-height:86vh;width:94%;display:flex;flex-direction:column;box-shadow:0 20px 60px var(--shadow)">
-    <div class="row" style="padding:12px 16px;border-bottom:1px solid var(--line)">
-      <span id="projModalTitle" style="font-weight:700;color:var(--accent)">◧ Projects</span>
+<div id="projModal" class="modal-overlay" style="display:none">
+  <div role="dialog" aria-modal="true" aria-labelledby="projModalTitle" class="modal-shell" style="max-width:560px;max-height:86vh;width:94%">
+    <div class="row modal-shell-head">
+      <span id="projModalTitle" class="modal-shell-title">◧ Projects</span>
       <div class="spacer"></div><button class="btn" id="pmClose">✕</button>
     </div>
     <div style="padding:14px;display:flex;flex-direction:column;gap:14px;min-height:0;overflow:auto">
       <div class="field" style="margin:0"><label>Active project</label><div style="font-size:13px"><b id="pmCurrent" style="color:var(--accent)">default</b> · <span id="pmDir" style="color:var(--fg3);font-family:var(--mono);font-size:11px"></span></div></div>
       <div>
-        <div style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3);margin-bottom:6px">SWITCH TO A SAVED PROJECT</div>
+        <div class="micro-label" style="margin-bottom:6px">SWITCH TO A SAVED PROJECT</div>
         <div id="pmList" style="display:flex;flex-direction:column;gap:6px"></div>
       </div>
       <div>
-        <div style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3);margin-bottom:6px">CREATE / OPEN A NEW PROJECT</div>
+        <div class="micro-label" style="margin-bottom:6px">CREATE / OPEN A NEW PROJECT</div>
         <div class="row" style="gap:8px;flex-wrap:wrap">
-          <input id="pmNew" class="btn" style="flex:1;min-width:200px;background:var(--bg3)" placeholder="acme-engagement" spellcheck="false" aria-label="New project name">
-          <button class="btn accent" id="pmNewBtn">＋ Create &amp; open</button>
+          <input id="pmNew" class="btn btn-field field-grow" style="min-width:200px" placeholder="acme-engagement" spellcheck="false" aria-label="New project name">
+          <button class="btn btn-primary" id="pmNewBtn">＋ Create &amp; open</button>
         </div>
-        <input id="pmNewPath" class="btn" style="width:100%;margin-top:6px;background:var(--bg3);font-family:var(--mono);font-size:11px" placeholder="save to a specific folder instead (optional)" spellcheck="false" aria-label="Custom save location">
+        <input id="pmNewPath" class="btn btn-field font-mono" style="width:100%;margin-top:6px;font-size:11px" placeholder="save to a specific folder instead (optional)" spellcheck="false" aria-label="Custom save location">
         <p class="hint" id="pmSwitchNote" style="display:none;color:var(--accent)"></p>
       </div>
       <div id="pmNote" class="hint" style="display:none;color:var(--accent)"></div>
     </div>
   </div>
 </div>
-<div id="authzModal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:200;align-items:center;justify-content:center">
-  <div role="dialog" aria-modal="true" aria-labelledby="authzModalTitle" style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;max-width:760px;max-height:88vh;width:94%;display:flex;flex-direction:column;box-shadow:0 20px 60px var(--shadow)">
+<div id="authzModal" class="modal-overlay" style="display:none">
+  <div role="dialog" aria-modal="true" aria-labelledby="authzModalTitle" class="modal-shell" style="max-width:760px;max-height:88vh;width:94%">
     <div class="row" style="padding:12px 16px;border-bottom:1px solid var(--line)">
       <span id="authzModalTitle" style="font-weight:700;color:var(--accent)">🔓 Authorization test</span>
       <span class="hint" style="margin-left:10px">compare access across roles</span>
@@ -1230,7 +1225,7 @@ Content-Type: application/json
         <button type="button" data-m="scope" aria-pressed="false">All in-scope</button>
         <button type="button" data-m="crosshost" aria-pressed="false" title="Replay this endpoint to every in-scope host with its JWT — detects cross-environment token confusion">Cross-host JWT</button>
       </div>
-      <input id="authzMax" class="btn" style="display:none;width:130px;background:var(--bg3)" aria-label="Authz — max endpoints" placeholder="max endpoints (30)" title="Bulk mode only">
+      <input id="authzMax" class="btn btn-field" style="display:none;width:130px" aria-label="Authz — max endpoints" placeholder="max endpoints (30)" title="Bulk mode only">
       <div id="authzScopePanel" style="display:none;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--bg)"></div>
       <div id="authzCookieHint" class="hint" style="display:none;line-height:1.5"></div>
       <div id="authzIds" style="display:flex;flex-direction:column;gap:8px"></div>
@@ -1240,9 +1235,9 @@ Content-Type: application/json
         <button class="btn" id="authzCheck" title="Replay the selected flow as each identity — 401/403 means the session may be expired">Check sessions</button>
         <button class="btn" id="authzSave">Save identities</button>
         <div class="spacer"></div>
-        <button class="btn accent" id="authzRun">Run ▸</button>
+        <button class="btn btn-primary" id="authzRun">Run ▸</button>
       </div>
-      <div style="font-size:9px;font-weight:700;letter-spacing:.6px;color:var(--fg3)">RESULTS</div>
+      <div class="micro-label">RESULTS</div>
       <div id="authzResults"><div class="hint">Run to compare access across roles.</div></div>
     </div>
   </div>
@@ -1291,17 +1286,17 @@ Content-Type: application/json
     </div>
   </div>
 </div>
-<div id="compareModal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:200;align-items:center;justify-content:center">
-  <div role="dialog" aria-modal="true" aria-labelledby="compareTitle" style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;max-width:900px;max-height:88vh;width:94%;display:flex;flex-direction:column;box-shadow:0 20px 60px var(--shadow)">
-    <div class="row" style="padding:12px 16px;border-bottom:1px solid var(--line)">
-      <span id="compareTitle" style="font-weight:700;color:var(--accent)">Compare responses</span>
+<div id="compareModal" class="modal-overlay" style="display:none">
+  <div role="dialog" aria-modal="true" aria-labelledby="compareTitle" class="modal-shell" style="max-width:900px;max-height:88vh;width:94%">
+    <div class="row modal-shell-head">
+      <span id="compareTitle" class="modal-shell-title">Compare responses</span>
       <div class="spacer"></div><button class="btn" id="compareClose" aria-label="Close">✕</button>
     </div>
     <div id="compareBody" style="padding:12px 16px;overflow:auto;min-height:0;flex:1"></div>
   </div>
 </div>
-<div id="decModal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:200;align-items:center;justify-content:center">
-  <div role="dialog" aria-modal="true" aria-labelledby="decModalTitle" style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;max-width:760px;max-height:86vh;width:92%;display:flex;flex-direction:column;box-shadow:0 20px 60px var(--shadow)">
+<div id="decModal" class="modal-overlay" style="display:none">
+  <div role="dialog" aria-modal="true" aria-labelledby="decModalTitle" class="modal-shell" style="max-width:760px;max-height:86vh;width:92%">
     <div class="row" style="padding:12px 16px;border-bottom:1px solid var(--line)">
       <span id="decModalTitle" style="font-weight:700;color:var(--accent)">🧰 Decoder</span>
       <span class="hint" style="margin-left:10px">↓ decode · ↑ encode</span>
@@ -1319,22 +1314,22 @@ Content-Type: application/json
     </div>
   </div>
 </div>
-<div id="confirmModal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:240;align-items:center;justify-content:center">
-  <div role="dialog" aria-modal="true" aria-labelledby="confirmTitle" style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;width:420px;max-width:92%;box-shadow:0 20px 60px var(--shadow);overflow:hidden">
+<div id="confirmModal" class="modal-overlay modal-overlay-high" style="display:none">
+  <div role="dialog" aria-modal="true" aria-labelledby="confirmTitle" class="modal-shell" style="width:420px;max-width:92%">
     <div style="padding:14px 16px 0"><div id="confirmTitle" style="font-weight:700;color:var(--fg);font-size:13px">Confirm</div></div>
     <div style="padding:12px 16px;font-size:12px;line-height:1.6;color:var(--fg2)" id="confirmMsg"></div>
-    <div class="row" style="gap:8px;justify-content:flex-end;padding:0 16px 14px"><button class="btn" id="confirmCancel">Cancel</button><button class="btn accent" id="confirmOk">OK</button></div>
+    <div class="row" style="gap:8px;justify-content:flex-end;padding:0 16px 14px"><button class="btn" id="confirmCancel">Cancel</button><button class="btn btn-primary" id="confirmOk">OK</button></div>
   </div>
 </div>
-<div id="promptModal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:240;align-items:center;justify-content:center">
-  <div role="dialog" aria-modal="true" aria-labelledby="promptTitle" style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;width:420px;max-width:92%;box-shadow:0 20px 60px var(--shadow);overflow:hidden">
+<div id="promptModal" class="modal-overlay modal-overlay-high" style="display:none">
+  <div role="dialog" aria-modal="true" aria-labelledby="promptTitle" class="modal-shell" style="width:420px;max-width:92%">
     <div style="padding:14px 16px 0"><div id="promptTitle" style="font-weight:700;color:var(--fg);font-size:13px">Enter a value</div></div>
-    <div style="padding:12px 16px"><input id="promptInput" class="btn" style="width:100%;background:var(--bg3);border:1px solid var(--line);font-size:13px;padding:9px 11px"></div>
-    <div class="row" style="gap:8px;justify-content:flex-end;padding:0 16px 14px"><button class="btn" id="promptCancel">Cancel</button><button class="btn accent" id="promptOk">OK</button></div>
+    <div style="padding:12px 16px"><input id="promptInput" class="btn btn-field" style="width:100%;border:1px solid var(--line);font-size:13px;padding:9px 11px"></div>
+    <div class="row" style="gap:8px;justify-content:flex-end;padding:0 16px 14px"><button class="btn" id="promptCancel">Cancel</button><button class="btn btn-primary" id="promptOk">OK</button></div>
   </div>
 </div>
-<div id="setupModal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:230;align-items:center;justify-content:center">
-  <div role="dialog" aria-modal="true" aria-labelledby="setupTitle" style="background:var(--bg2);border:1px solid var(--line2);border-radius:12px;width:min(580px,94%);max-height:88vh;display:flex;flex-direction:column;box-shadow:0 20px 60px var(--shadow)">
+<div id="setupModal" class="modal-overlay modal-overlay-high" style="display:none">
+  <div role="dialog" aria-modal="true" aria-labelledby="setupTitle" class="modal-shell" style="width:min(580px,94%);max-height:88vh">
     <div class="row" style="padding:14px 16px;border-bottom:1px solid var(--line);gap:10px">
       <span id="setupTitle" style="font-weight:700;color:var(--accent)">🚀 Welcome to Interseptor</span>
       <span class="hint" id="setupStep"></span>
@@ -1342,10 +1337,10 @@ Content-Type: application/json
       <button class="btn" id="setupSkip" title="Skip the guided setup — reopen anytime from Settings">Skip</button>
     </div>
     <div id="setupBody" style="padding:18px 20px;overflow:auto;min-height:0;flex:1;font-size:13px;line-height:1.6"></div>
-    <div class="row" style="gap:8px;padding:10px 16px;border-top:1px solid var(--line)">
+    <div class="row modal-shell-foot" style="padding:10px 16px">
       <button class="btn" id="setupBack" style="display:none">← Back</button>
       <div class="spacer"></div>
-      <button class="btn accent" id="setupNext">Next ▸</button>
+      <button class="btn btn-primary" id="setupNext">Next ▸</button>
     </div>
   </div>
 </div>
