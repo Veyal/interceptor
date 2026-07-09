@@ -129,7 +129,8 @@
       <button class="uisw" id="notesFilter" title="Flows with notes">📝 notes</button>
       <button class="uisw" id="hideTlsFilter" title="Hide TLS failures">⛔ PIN</button>
       <button class="uisw" id="scopeToggle" title="In-scope only" aria-pressed="false" aria-label="Filter history to in-scope flows only">◎ scope</button>
-      <button class="uisw" id="manualFilter" title="Show manual / proxy-captured flows">Manual</button>
+      <button class="uisw" id="manualFilter" title="Show manual / proxy-captured flows" aria-pressed="true">Manual</button>
+      <button class="uisw" id="aiFilter" title="Show AI / MCP-sent flows" aria-pressed="true">AI</button>
     </div>
     <div id="chips"></div>
     <div id="tagBar" class="tagbar" style="display:none" aria-label="Filter by tag"></div>
@@ -425,7 +426,7 @@ Content-Type: application/json
       <button type="button" class="uisw on" id="mapCollapseIdentical" title="Collapse endpoints on the same host that share the latest response body (byte-exact) or a soft-404 signature — click +N to expand">Collapsing identical</button>
       <div class="spacer"></div>
       <button class="btn" id="mapExpand">Expand all</button>
-      <button class="btn" id="mapFit" title="Fit graph to view" style="display:none" aria-label="Fit graph to view">⤢ Fit</button>
+      <button class="btn" id="mapFit" title="Fit graph to view (pinch or Ctrl+scroll to zoom; scroll to pan)" style="display:none" aria-label="Fit graph to view">⤢ Fit</button>
       <button class="btn" id="mapRefresh" title="Rebuild from history" aria-label="Rebuild endpoint map from history">↻</button>
     </div>
     <div id="mapCrumb" class="map-crumb" style="display:none"></div>

@@ -16,7 +16,7 @@ type Finding struct {
 	TS        int64          `json:"ts"`        // created, unix millis
 	UpdatedTS int64          `json:"updatedTs"` // last modified, unix millis
 	Severity  string         `json:"severity"`  // Critical | High | Medium | Low | Info
-	Status    string         `json:"status"`    // open | verified | false_positive | wont_fix | fixed
+	Status    string         `json:"status"`    // open | needs_verification | verified | false_positive | wont_fix | fixed
 	Source    string         `json:"source"`    // human | ai | scanner
 	Title     string         `json:"title"`
 	Target    string         `json:"target"`
@@ -25,9 +25,12 @@ type Finding struct {
 	Fix       string         `json:"fix"`      // back-compat: kept but superseded by Impact
 	Impact    string         `json:"impact"`   // security impact — what an attacker gains / business consequence
 	Cvss      string         `json:"cvss,omitempty"` // CVSS score or vector string, e.g. "7.5" or "CVSS:3.1/AV:N/..."
-	Body      string         `json:"body,omitempty"` // stored JSON blocks (use Blocks for rendering)
-	Flows     []FindingFlow  `json:"flows"`           // attached flow metadata (for list sidebar count)
-	Blocks    []FindingBlock `json:"blocks"`          // ordered narrative body (source of truth for UI)
+	// VerificationInstructions tells a human reviewer exactly what to check when
+	// Status is needs_verification (e.g. "download X and run file on it").
+	VerificationInstructions string         `json:"verificationInstructions,omitempty"`
+	Body                     string         `json:"body,omitempty"` // stored JSON blocks (use Blocks for rendering)
+	Flows                    []FindingFlow  `json:"flows"`           // attached flow metadata (for list sidebar count)
+	Blocks                   []FindingBlock `json:"blocks"`          // ordered narrative body (source of truth for UI)
 }
 
 // FindingBlock is one element in a finding's narrative body.
@@ -266,6 +269,8 @@ func normalizeFindingStatus(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "verified":
 		return "verified"
+	case "needs_verification", "needs-verification", "needsverification":
+		return "needs_verification"
 	case "false_positive", "false-positive", "fp":
 		return "false_positive"
 	case "wont_fix", "wontfix", "won't_fix":
@@ -301,9 +306,9 @@ func (s *Store) CreateFinding(f *Finding) (int64, error) {
 		f.Body = initialBody(f.Detail, f.Evidence)
 	}
 	res, err := s.db.Exec(
-		`INSERT INTO findings (ts, updated_ts, severity, status, source, title, target, detail, evidence, fix, body, impact, cvss)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		f.TS, f.UpdatedTS, f.Severity, f.Status, f.Source, f.Title, f.Target, f.Detail, f.Evidence, f.Fix, f.Body, f.Impact, f.Cvss)
+		`INSERT INTO findings (ts, updated_ts, severity, status, source, title, target, detail, evidence, fix, body, impact, cvss, verification_instructions)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		f.TS, f.UpdatedTS, f.Severity, f.Status, f.Source, f.Title, f.Target, f.Detail, f.Evidence, f.Fix, f.Body, f.Impact, f.Cvss, f.VerificationInstructions)
 	if err != nil {
 		return 0, err
 	}
@@ -318,7 +323,7 @@ func (s *Store) CreateFinding(f *Finding) (int64, error) {
 // is updated (MCP backward-compat: AI updates detail → UI sees the change).
 // When body is set, detail is synced from its first text block so MCP list_findings
 // still shows meaningful text.
-func (s *Store) UpdateFinding(id int64, severity, status, title, target, detail, evidence, fix, body, impact, cvss *string) error {
+func (s *Store) UpdateFinding(id int64, severity, status, title, target, detail, evidence, fix, body, impact, cvss, verificationInstructions *string) error {
 	// If detail changes and there is an existing body, sync the first text block.
 	if detail != nil && body == nil {
 		var existBody string
@@ -376,6 +381,10 @@ func (s *Store) UpdateFinding(id int64, severity, status, title, target, detail,
 	if cvss != nil {
 		sets = append(sets, "cvss=?")
 		args = append(args, *cvss)
+	}
+	if verificationInstructions != nil {
+		sets = append(sets, "verification_instructions=?")
+		args = append(args, *verificationInstructions)
 	}
 	args = append(args, id)
 	_, err := s.db.Exec(`UPDATE findings SET `+strings.Join(sets, ", ")+` WHERE id=?`, args...)
@@ -494,13 +503,14 @@ func (s *Store) findingFlows(findingID int64) ([]FindingFlow, error) {
 func scanFinding(sc scanner) (*Finding, error) {
 	var f Finding
 	if err := sc.Scan(&f.ID, &f.TS, &f.UpdatedTS, &f.Severity, &f.Status, &f.Source,
-		&f.Title, &f.Target, &f.Detail, &f.Evidence, &f.Fix, &f.Body, &f.Impact, &f.Cvss); err != nil {
+		&f.Title, &f.Target, &f.Detail, &f.Evidence, &f.Fix, &f.Body, &f.Impact, &f.Cvss,
+		&f.VerificationInstructions); err != nil {
 		return nil, err
 	}
 	return &f, nil
 }
 
-const findingCols = `id, ts, updated_ts, severity, status, source, title, target, detail, evidence, fix, body, impact, cvss`
+const findingCols = `id, ts, updated_ts, severity, status, source, title, target, detail, evidence, fix, body, impact, cvss, verification_instructions`
 
 // GetFinding loads one finding with its narrative body blocks and PoC flow list.
 func (s *Store) GetFinding(id int64) (*Finding, error) {

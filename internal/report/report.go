@@ -206,7 +206,7 @@ func summaryTable(total int, counts, statusCounts map[string]int) string {
 	// Status breakdown, in a stable, readable order.
 	b.WriteString("\n| Status | Count |\n")
 	b.WriteString("| --- | --- |\n")
-	for _, st := range []string{"verified", "open", "wont_fix", "fixed"} {
+	for _, st := range []string{"verified", "needs_verification", "open", "wont_fix", "fixed"} {
 		if statusCounts[st] > 0 {
 			fmt.Fprintf(&b, "| %s | %d |\n", st, statusCounts[st])
 		}
@@ -215,7 +215,7 @@ func summaryTable(total int, counts, statusCounts map[string]int) string {
 	var extra []string
 	for st := range statusCounts {
 		switch st {
-		case "verified", "open", "wont_fix", "fixed":
+		case "verified", "needs_verification", "open", "wont_fix", "fixed":
 		default:
 			extra = append(extra, st)
 		}
@@ -238,6 +238,9 @@ func renderFinding(b *strings.Builder, n int, f store.Finding) {
 	fmt.Fprintf(b, "\n### %d. %s\n", n, sanitizeLine(f.Title))
 	if f.Status != "" {
 		b.WriteString("- **Status:** " + sanitizeLine(f.Status) + "\n")
+	}
+	if f.VerificationInstructions != "" {
+		b.WriteString("- **Verification:** " + sanitizeLine(f.VerificationInstructions) + "\n")
 	}
 	if f.Target != "" {
 		b.WriteString("- **Target:** `" + code(f.Target) + "`\n")

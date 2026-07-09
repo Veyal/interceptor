@@ -6,7 +6,7 @@ import { flowPopup } from './flowmodal.js';
 // Each finding has a narrative body — an ordered sequence of text blocks (markdown)
 // and flow-reference blocks (PoC request/response) interleaved freely, like a report.
 
-const STATUSES = ['open', 'verified', 'false_positive', 'wont_fix', 'fixed'];
+const STATUSES = ['open', 'needs_verification', 'verified', 'false_positive', 'wont_fix', 'fixed'];
 let findings = [], selFinding = null;
 
 // Body editor state for the active finding.
@@ -21,7 +21,7 @@ try { findDetailView = sessionStorage.getItem('findView') || 'report'; } catch {
 let bodyEditing = false;
 
 const sevColor = s => ({ Critical: 'var(--red)', High: 'var(--red)', Medium: 'var(--amber)', Low: 'var(--blue)', Info: 'var(--fg3)' }[s] || 'var(--fg3)');
-const statusLabel = s => (s || '').replace(/_/g, ' ');
+const statusLabel = s => ({ needs_verification: 'needs verification' }[s] || (s || '').replace(/_/g, ' '));
 
 function textChainLabel(md) {
   return (md || '').replace(/```[\s\S]*?```/g, ' ').replace(/[#*_`~\[\]()]/g, '').replace(/\s+/g, ' ').trim();
@@ -47,7 +47,10 @@ function findingIsEmpty(f) {
 }
 
 function findingListMeta(f) {
-  const parts = [esc(statusLabel(f.status))];
+  const st = f.status === 'needs_verification'
+    ? '<span class="find-needs-verif" title="Needs human verification">⚠ needs verification</span>'
+    : esc(statusLabel(f.status));
+  const parts = [st];
   const steps = findingStepCount(f);
   const pocs = findingPocCount(f);
   if (steps) parts.push(steps + ' step' + (steps === 1 ? '' : 's'));
@@ -71,7 +74,7 @@ function renderFindings() {
     selFinding = null; renderFindingDetail(); return;
   }
   if (!selFinding || !findings.some(f => f.id === selFinding)) selFinding = findings[0].id;
-  box.innerHTML = findings.map(f => `<div class="find-row${f.id === selFinding ? ' sel' : ''}${findingIsEmpty(f) ? ' find-row-empty' : ''}" data-id="${f.id}">
+  box.innerHTML = findings.map(f => `<div class="find-row${f.id === selFinding ? ' sel' : ''}${findingIsEmpty(f) ? ' find-row-empty' : ''}${f.status === 'needs_verification' ? ' find-row-needs-verif' : ''}" data-id="${f.id}">
     <span class="sev" style="color:${sevColor(f.severity)}">${esc(f.severity)}</span>
     <span class="find-title">${esc(f.title)}</span>
     <span class="find-meta">${findingListMeta(f)}</span>
@@ -384,6 +387,11 @@ function renderFindingDetail() {
     const miss = (f.blocks || []).filter(b => b.type === 'flow' && b.missing).length;
     return miss ? `<div class="find-missing-banner">⚠ ${miss} PoC flow${miss === 1 ? '' : 's'} deleted from history — re-capture the endpoint${miss === 1 ? '' : 's'} to restore evidence.</div>` : '';
   })();
+  const verifBanner = (f.status === 'needs_verification' || f.verificationInstructions)
+    ? `<div class="find-verif-banner" role="status">
+        <div class="find-verif-title">⚠ Needs human verification</div>
+        <textarea id="findVerifInstr" class="find-verif-text" rows="3" placeholder="What should the human check? Exact steps…">${esc(f.verificationInstructions || '')}</textarea>
+      </div>` : '';
   box.innerHTML = `<article class="find-article${findDetailView === 'chain' ? ' find-chain-active' : ''}">
     <header class="find-header">
       <div class="find-header-top">
@@ -404,6 +412,7 @@ function renderFindingDetail() {
       </div>
     </header>
     ${missBanner}
+    ${verifBanner}
     <div class="find-view-bar">
       <div class="seg find-view-seg" id="findViewSeg" role="tablist" aria-label="Finding view">
         <button type="button" data-view="report"${findDetailView === 'report' ? ' class="on"' : ''}>Edit</button>
@@ -442,9 +451,22 @@ function renderFindingDetail() {
     catch (err) { toast(err.message); }
   };
   $('#findStatus').onchange = async e => {
-    try { await api('/api/findings/' + f.id, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: e.target.value }) }); f.status = e.target.value; toast('status: ' + statusLabel(e.target.value)); }
-    catch (err) { toast(err.message); }
+    const status = e.target.value;
+    try {
+      await api('/api/findings/' + f.id, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status }) });
+      f.status = status;
+      toast('status: ' + statusLabel(status));
+      renderFindings();
+    } catch (err) { toast(err.message); }
   };
+  $('#findVerifInstr')?.addEventListener('blur', async () => {
+    const verificationInstructions = $('#findVerifInstr').value;
+    if (verificationInstructions === (f.verificationInstructions || '')) return;
+    try {
+      await api('/api/findings/' + f.id, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ verificationInstructions }) });
+      f.verificationInstructions = verificationInstructions;
+    } catch (err) { toast(err.message); }
+  });
   $('#findDelete').onclick = async () => {
     try { await api('/api/findings/' + f.id, { method: 'DELETE' }); selFinding = null; toast('finding deleted'); loadFindings(); }
     catch (err) { toast(err.message); }

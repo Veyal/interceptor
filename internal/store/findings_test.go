@@ -35,7 +35,7 @@ func TestFindingImpactRoundTrip(t *testing.T) {
 
 	// Update impact.
 	newImpact := "attacker gains admin access — full account takeover"
-	if err := s.UpdateFinding(id, nil, nil, nil, nil, nil, nil, nil, nil, &newImpact, nil); err != nil {
+	if err := s.UpdateFinding(id, nil, nil, nil, nil, nil, nil, nil, nil, &newImpact, nil, nil); err != nil {
 		t.Fatalf("UpdateFinding impact: %v", err)
 	}
 	got2, err := s.GetFinding(id)
@@ -104,7 +104,7 @@ func TestFindingsCRUDAndPoCFlows(t *testing.T) {
 
 	// Update status; list filter by status.
 	verified := "verified"
-	if err := s.UpdateFinding(id, nil, &verified, nil, nil, nil, nil, nil, nil, nil, nil); err != nil {
+	if err := s.UpdateFinding(id, nil, &verified, nil, nil, nil, nil, nil, nil, nil, nil, nil); err != nil {
 		t.Fatalf("UpdateFinding: %v", err)
 	}
 	open, _ := s.ListFindings("", "open")
@@ -279,7 +279,7 @@ func TestFindingCvssRoundTrip(t *testing.T) {
 	}
 
 	vector := "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
-	if err := s.UpdateFinding(id, nil, nil, nil, nil, nil, nil, nil, nil, nil, &vector); err != nil {
+	if err := s.UpdateFinding(id, nil, nil, nil, nil, nil, nil, nil, nil, nil, &vector, nil); err != nil {
 		t.Fatalf("UpdateFinding cvss: %v", err)
 	}
 	got2, err := s.GetFinding(id)
@@ -318,7 +318,7 @@ func TestUpdateFindingBodyPreservesFlowOrder(t *testing.T) {
 	// Body is now: [text:"original detail", flow:f1, flow:f2]
 	// Update detail only (no body arg) — must update in-place, not append or reorder.
 	newDetail := "updated detail"
-	if err := s.UpdateFinding(id, nil, nil, nil, nil, &newDetail, nil, nil, nil, nil, nil); err != nil {
+	if err := s.UpdateFinding(id, nil, nil, nil, nil, &newDetail, nil, nil, nil, nil, nil, nil); err != nil {
 		t.Fatalf("UpdateFinding detail: %v", err)
 	}
 
@@ -415,7 +415,7 @@ func TestUpdateFindingWithBodyArg(t *testing.T) {
 	}
 
 	newBody := `[{"type":"text","md":"first block"},{"type":"text","md":"second block"}]`
-	if err := s.UpdateFinding(id, nil, nil, nil, nil, nil, nil, nil, &newBody, nil, nil); err != nil {
+	if err := s.UpdateFinding(id, nil, nil, nil, nil, nil, nil, nil, &newBody, nil, nil, nil); err != nil {
 		t.Fatalf("UpdateFinding body: %v", err)
 	}
 
@@ -467,5 +467,71 @@ func TestEmptyFindingJSONSlices(t *testing.T) {
 	}
 	if strings.Contains(string(b), `"blocks":null`) {
 		t.Fatalf("blocks marshaled as null: %s", b)
+	}
+}
+
+func TestNormalizeFindingStatusNeedsVerification(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"needs_verification", "needs_verification"},
+		{"needs-verification", "needs_verification"},
+		{"needsVerification", "needs_verification"},
+		{"NEEDS_VERIFICATION", "needs_verification"},
+		{"open", "open"},
+		{"verified", "verified"},
+		{"", "open"},
+		{"bogus", "open"},
+	}
+	for _, c := range cases {
+		if got := normalizeFindingStatus(c.in); got != c.want {
+			t.Fatalf("normalizeFindingStatus(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestFindingVerificationInstructionsRoundTrip(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	id, err := s.CreateFinding(&Finding{
+		Severity:                  "Medium",
+		Status:                    "needs_verification",
+		Title:                     "OBS UUID files may contain PII",
+		VerificationInstructions:  "Download the object and run `file` on it.",
+	})
+	if err != nil {
+		t.Fatalf("CreateFinding: %v", err)
+	}
+	got, err := s.GetFinding(id)
+	if err != nil {
+		t.Fatalf("GetFinding: %v", err)
+	}
+	if got.Status != "needs_verification" {
+		t.Fatalf("status = %q, want needs_verification", got.Status)
+	}
+	if got.VerificationInstructions != "Download the object and run `file` on it." {
+		t.Fatalf("instructions = %q", got.VerificationInstructions)
+	}
+
+	updated := "Also check EXIF for GPS."
+	if err := s.UpdateFinding(id, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &updated); err != nil {
+		t.Fatalf("UpdateFinding: %v", err)
+	}
+	got, err = s.GetFinding(id)
+	if err != nil {
+		t.Fatalf("GetFinding after update: %v", err)
+	}
+	if got.VerificationInstructions != updated {
+		t.Fatalf("after update instructions = %q, want %q", got.VerificationInstructions, updated)
+	}
+
+	listed, err := s.ListFindings("", "needs_verification")
+	if err != nil {
+		t.Fatalf("ListFindings: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != id {
+		t.Fatalf("ListFindings(needs_verification) = %+v", listed)
 	}
 }

@@ -921,15 +921,38 @@ export function mapFitNow(){
 $('#mapViewSeg') && $('#mapViewSeg').querySelectorAll('button').forEach(b => b.onclick = () => setMapView(b.dataset.v));
 $('#mapFit') && ($('#mapFit').onclick = mapFitNow);
 
+// Graph wheel: pinch (trackpad) and Ctrl/Cmd+scroll zoom; plain scroll pans.
+// Browsers fire trackpad pinch as wheel events with ctrlKey set, so the same
+// gate covers both intentional zoom gestures without stealing normal scroll.
+export function mapGraphWheel(e, zoom, apply){
+  const pinchOrMod = e.ctrlKey || e.metaKey;
+  if(pinchOrMod){
+    e.preventDefault();
+    const r = e.currentTarget.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    // ctrlKey pinch often reports larger deltaY; normalize so one notch ≈ 10%.
+    const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+    const f = Math.exp(-dy * 0.01);
+    const nk = Math.max(0.1, Math.min(4, zoom.k * f));
+    zoom.x = mx - (mx - zoom.x) * (nk / zoom.k);
+    zoom.y = my - (my - zoom.y) * (nk / zoom.k);
+    zoom.k = nk;
+    apply();
+    return 'zoom';
+  }
+  e.preventDefault();
+  const sx = e.deltaMode === 1 ? 16 : 1;
+  zoom.x -= (e.deltaX || 0) * sx;
+  zoom.y -= (e.deltaY || 0) * sx;
+  apply();
+  return 'pan';
+}
+
 (function(){
   const svg = $('#mapGraphSvg'); if(!svg) return;
   let drag = null;
   svg.addEventListener('wheel', e => {
-    e.preventDefault();
-    const z = mapState.zoom, r = svg.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
-    const f = e.deltaY < 0 ? 1.1 : 1 / 1.1, nk = Math.max(0.1, Math.min(4, z.k * f));
-    z.x = mx - (mx - z.x) * (nk / z.k); z.y = my - (my - z.y) * (nk / z.k); z.k = nk;
-    mapApplyZoom();
+    mapGraphWheel(e, mapState.zoom, mapApplyZoom);
   }, { passive: false });
   svg.addEventListener('mousedown', e => {
     if(e.target.closest('.g-click')) return;

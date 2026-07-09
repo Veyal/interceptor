@@ -131,6 +131,8 @@ func (h *Hub) registerToolsRoutes(tools *toolsAPI) {
 	h.mux.HandleFunc("GET /api/intruder/state", tools.intruderState)
 	h.mux.HandleFunc("POST /api/ws/send", tools.wsSend)
 	h.mux.HandleFunc("POST /api/decode", tools.decode)
+	h.mux.HandleFunc("POST /api/flows/{id}/replay", tools.replayFlow)
+	h.mux.HandleFunc("GET /replay/{id}", tools.replayPage)
 }
 
 func (h *Hub) registerScannerRoutes(scan *scannerAPI) {

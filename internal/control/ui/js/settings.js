@@ -1,5 +1,5 @@
 import { $, $$, esc, escAttr, state, toast, api, fmtBytes, uiConfirm, openModal, closeModal, copyText, setSeg, syncUiSelectStyles } from './core.js';
-import { loadFlows, loadScope, syncSourceFilters } from './proxy.js';
+import { loadFlows, loadScope } from './proxy.js';
 import { loadRules } from './intercept.js';
 
 /* ---- JWT expiry countdown ---- */
@@ -369,7 +369,8 @@ export function applyAiDisabledUI(){
     if(mcpBtn&&mcpBtn.classList.contains('on'))document.querySelector('#apiSub button[data-s="keys"]')?.click();
     state.actUnseen=0;
     const b=$('#actBadge');if(b)b.style.display='none';
-    if(state.showAI){state.showAI=false;syncSourceFilters();}
+    // Keep History AI source filter as-is — FlagAI marks MCP/agent traffic,
+    // independent of whether BYO-key AI assist is enabled.
   }
 }
 

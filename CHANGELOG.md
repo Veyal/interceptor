@@ -9,8 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Replay link — re-fire any captured request from a URL.** The History right-click menu gains "Copy replay link · current session" and "Copy replay link · flow's session". Opening the copied link (`GET /replay/{id}?session=…`) shows a small confirm page that previews the request; clicking **Replay now** re-sends it as a new Repeater flow via `POST /api/flows/{id}/replay`. `session=flow` (default) replays exactly as captured — its own headers, no session override; `session=current` runs it under the active session/auth (subject to the usual session-scope guard). The link is a deliberately side-effect-free GET — nothing sends until you confirm on the page — so a site that merely opens the URL can't fire the request. Handy for re-triggering a POST you can't reproduce from a browser URL bar. (`internal/control/replay.go`, `internal/control/routes_register.go`, `internal/control/api.go`, `internal/control/ui/js/proxy.js`.)
+- **Esc closes the Proxy inspector.** Pressing Escape collapses the request/response detail pane, after first dismissing any open modal or context menu. (`internal/control/ui/js/proxy.js`.)
+- **Finding status `needs_verification` + `verificationInstructions`.** Agents can mark a finding as needing human review and leave exact check steps (download this object, run `file`, try the full Shiro key list, …). The Findings list shows an amber ⚠ indicator; the detail pane surfaces an editable instructions banner. Wired through store/API/MCP/`create_finding`/`update_finding`/`list_findings`, project merge, and Markdown reports. Fixes [#3](https://github.com/Veyal/interseptor/issues/3). (`internal/store/findings.go`, `internal/control/findings.go`, `internal/mcp/mcp.go`, `internal/control/ui/js/findings.js`, `internal/report/report.go`.)
+
 ### Changed
+- **Map graph zoom is pinch / Ctrl+scroll only.** Plain scroll (and two-finger trackpad scroll) now pans the graph instead of zooming; zoom requires a trackpad pinch or Ctrl/Cmd+scroll (same gesture browsers already use for page zoom). (`internal/control/ui/js/map.js`.)
 - **Dev-build fallback version advanced to the published `1.1.0`.** Now that v1.1.0 is released, `internal/version/version.go`'s fallback `Version` constant (which dev builds report when no git tag is baked in) moved from `1.0.0` to `1.1.0`. Follows the documented post-release step in CONTRIBUTING.md §"Cutting a release".
+
+### Fixed
+- **Proxy History source filters: AI toggle restored.** A UI density pass left only a non-toggleable **Manual** chip; the independent **AI** chip (and the ability to turn Manual off) is back — both on by default, at least one must stay on. Matches the `?manual=` / `?ai=` API and the earlier Manual+AI filter design. (`internal/control/ui/index.html`, `internal/control/ui/js/proxy.js`.)
 
 ## [1.1.0] - 2026-07-09
 

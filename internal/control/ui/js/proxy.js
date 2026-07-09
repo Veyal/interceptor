@@ -522,6 +522,14 @@ export function syncInspectorVisibility(){
   if(spl)spl.style.display=has?'':'none';
   if(nb&&!has)nb.style.display='none';
 }
+// Drop the single-flow selection and collapse the request/response inspector.
+// Returns whether it had anything open, so the Escape handler can chain cleanly.
+export function closeInspector(){
+  if(state.selId==null)return false;
+  state.selId=null;state.detail=null;
+  renderRows();
+  return true;
+}
 // flowVirt owns the Proxy history table's windowed-rendering bookkeeping
 // (scroll binding + rAF coalescing); computeWindow() below runs the same
 // windowing math the hand-rolled version used (start/end/topPad/bottomPad),
@@ -916,19 +924,22 @@ $('#scopeToggle').onclick=()=>{
   loadFlows();
 };
 function syncSourceFilters(){
-  const mf=$('#manualFilter'); if(!mf)return;
-  mf.classList.toggle('on',state.showManual);
-  mf.setAttribute('aria-pressed',state.showManual?'true':'false');
+  const mf=$('#manualFilter'), af=$('#aiFilter');
+  if(mf){mf.classList.toggle('on',state.showManual);mf.setAttribute('aria-pressed',state.showManual?'true':'false');}
+  if(af){af.classList.toggle('on',state.showAI);af.setAttribute('aria-pressed',state.showAI?'true':'false');}
 }
 export { syncSourceFilters };
 function toggleSourceFilter(which){
   const nextManual=which==='manual'?!state.showManual:state.showManual;
-  if(!nextManual){toast('Manual flows are always shown — filter AI/other sources via the tag bar');return;}
-  if(which==='manual')state.showManual=nextManual;
+  const nextAI=which==='ai'?!state.showAI:state.showAI;
+  if(!nextManual&&!nextAI){toast('Keep at least one of Manual or AI on');return;}
+  state.showManual=nextManual;
+  state.showAI=nextAI;
   syncSourceFilters();
   loadFlows();
 }
 $('#manualFilter')&&($('#manualFilter').onclick=()=>toggleSourceFilter('manual'));
+$('#aiFilter')&&($('#aiFilter').onclick=()=>toggleSourceFilter('ai'));
 syncSourceFilters();
 export async function saveNote(){
   if(!state.selId)return;
@@ -1140,6 +1151,12 @@ function deleteHost(f){
   };
 }
 
+// A replay link opens Interseptor's confirm page (GET /replay/{id}); clicking
+// "Replay now" there re-sends this exact request — the easy way to re-fire a POST
+// you can't reproduce from a browser URL bar. session=current runs it under the
+// active session/auth; session=flow replays it exactly as captured.
+function replayLink(f,session){return location.origin+'/replay/'+f.id+'?session='+session;}
+function copyReplayLink(f,session){copyText(replayLink(f,session),'replay link copied');}
 // flowGlobalSection — the flow-wide actions present in every history/inspector
 // menu regardless of which column was clicked (send, copy, AI, authz).
 function flowGlobalSection(f,head){
@@ -1148,6 +1165,8 @@ function flowGlobalSection(f,head){
     {label:'Send to Intruder',act:()=>sendToIntruder(f)},
     {label:'Copy URL',act:()=>copyURL(f)},
     {label:'Copy as cURL',act:()=>copyCurl(f)},
+    {label:'Copy replay link · current session',act:()=>copyReplayLink(f,'current')},
+    {label:"Copy replay link · flow's session",act:()=>copyReplayLink(f,'flow')},
   ];
   if(!state.aiDisabled){
     items.push({sep:true},
@@ -1263,7 +1282,7 @@ export function showInspectorCtx(x,y,side){
   openMenu(x,y,sections);
 }
 document.addEventListener('click',e=>{if(!ctx.contains(e.target))hideCtx();});
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(typeof closeModals==='function'&&closeModals())return;hideCtx();}});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(typeof closeModals==='function'&&closeModals())return;if(ctx.classList.contains('show')){hideCtx();return;}closeInspector();}});
 // Suppress the browser's native context menu app-wide, but keep it where it's
 // genuinely useful: editable fields (paste/cut) and over a live text selection (copy).
 document.addEventListener('contextmenu',e=>{
