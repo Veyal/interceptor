@@ -16,8 +16,8 @@ import (
 // report the real version from the module build info (the git tag) instead, so
 // this constant deliberately tracks the last *published* release — bumping it
 // ahead of the tag would break the update-check test, which verifies the named
-// release actually exists on GitHub.
-const Version = "1.0.0"
+// release actually exists on GitHub. See CONTRIBUTING.md §"Cutting a release".
+const Version = "0.29.0"
 
 // Repo is the GitHub owner/name used for the update check.
 const Repo = "Veyal/interseptor"
