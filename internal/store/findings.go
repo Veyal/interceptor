@@ -1,10 +1,17 @@
 package store
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
+
+// ErrFlowNotFound is returned by AttachFlow when the referenced flow id has no
+// row in the flows table (typo, purged, or never captured).
+var ErrFlowNotFound = errors.New("flow not found")
 
 // Finding is a curated vulnerability write-up for a project. Unlike a scanner
 // Issue (auto-generated, ephemeral), a Finding is persistent and human/AI-curated:
@@ -12,33 +19,36 @@ import (
 // sequence of text blocks (markdown) and flow-reference blocks (clickable PoC
 // request/response), freely interleaved.
 type Finding struct {
-	ID        int64          `json:"id"`
-	TS        int64          `json:"ts"`        // created, unix millis
-	UpdatedTS int64          `json:"updatedTs"` // last modified, unix millis
-	Severity  string         `json:"severity"`  // Critical | High | Medium | Low | Info
-	Status    string         `json:"status"`    // open | needs_verification | verified | false_positive | wont_fix | fixed
-	Source    string         `json:"source"`    // human | ai | scanner
-	Title     string         `json:"title"`
-	Target    string         `json:"target"`
-	Detail    string         `json:"detail"`   // legacy / MCP compat: first text block synced here
-	Evidence  string         `json:"evidence"` // legacy only
-	Fix       string         `json:"fix"`      // back-compat: kept but superseded by Impact
-	Impact    string         `json:"impact"`   // security impact — what an attacker gains / business consequence
-	Cvss      string         `json:"cvss,omitempty"` // CVSS score or vector string, e.g. "7.5" or "CVSS:3.1/AV:N/..."
+	ID        int64  `json:"id"`
+	TS        int64  `json:"ts"`        // created, unix millis
+	UpdatedTS int64  `json:"updatedTs"` // last modified, unix millis
+	Severity  string `json:"severity"`  // Critical | High | Medium | Low | Info
+	Status    string `json:"status"`    // open | needs_verification | verified | false_positive | wont_fix | fixed
+	Source    string `json:"source"`    // human | ai | scanner
+	Title     string `json:"title"`
+	Target    string `json:"target"`
+	Detail    string `json:"detail"`         // legacy / MCP compat: first text block synced here
+	Evidence  string `json:"evidence"`       // legacy only
+	Fix       string `json:"fix"`            // back-compat: kept but superseded by Impact
+	Impact    string `json:"impact"`         // security impact — what an attacker gains / business consequence
+	Cvss      string `json:"cvss,omitempty"` // CVSS score or vector string, e.g. "7.5" or "CVSS:3.1/AV:N/..."
 	// VerificationInstructions tells a human reviewer exactly what to check when
 	// Status is needs_verification (e.g. "download X and run file on it").
 	VerificationInstructions string         `json:"verificationInstructions,omitempty"`
 	Body                     string         `json:"body,omitempty"` // stored JSON blocks (use Blocks for rendering)
-	Flows                    []FindingFlow  `json:"flows"`           // attached flow metadata (for list sidebar count)
-	Blocks                   []FindingBlock `json:"blocks"`          // ordered narrative body (source of truth for UI)
+	Flows                    []FindingFlow  `json:"flows"`          // attached flow metadata (for list sidebar count)
+	Blocks                   []FindingBlock `json:"blocks"`         // ordered narrative body (source of truth for UI)
 }
 
 // FindingBlock is one element in a finding's narrative body.
 type FindingBlock struct {
-	Type   string `json:"type"`             // "text" or "flow"
-	MD     string `json:"md,omitempty"`     // type=="text": markdown content
-	FlowID int64  `json:"flowId,omitempty"` // type=="flow": attached flow
-	Note   string `json:"note,omitempty"`   // type=="flow": annotation
+	Type    string `json:"type"`              // "text", "flow", or "image"
+	MD      string `json:"md,omitempty"`      // type=="text": markdown content
+	FlowID  int64  `json:"flowId,omitempty"`  // type=="flow": attached flow
+	Note    string `json:"note,omitempty"`    // type=="flow": annotation
+	Hash    string `json:"hash,omitempty"`    // type=="image": content-addressed sha256
+	Mime    string `json:"mime,omitempty"`    // type=="image": sanitized MIME
+	Caption string `json:"caption,omitempty"` // type=="image": optional caption
 
 	// Enriched at read time from the flows JOIN — never stored in the body JSON.
 	Method string `json:"method,omitempty"`
@@ -46,10 +56,12 @@ type FindingBlock struct {
 	Path   string `json:"path,omitempty"`
 	Status int    `json:"status,omitempty"`
 
-	// Missing is set (type=="flow" only) when the referenced flow no longer exists
-	// in the flows table — e.g. it was purged via prune_history / GC. The block and
-	// its human annotation are preserved; the UI/report surface that the PoC
-	// evidence is gone rather than silently rendering an empty flow.
+	// URL is set at read time for image blocks (GET /api/findings/images/{hash}).
+	URL string `json:"url,omitempty"`
+
+	// Missing is set when referenced evidence is gone: a purged flow (type=="flow")
+	// or a missing body blob (type=="image"). The block and annotation/caption are
+	// preserved; the UI/report surface that the evidence is gone.
 	Missing bool `json:"missing,omitempty"`
 }
 
@@ -71,10 +83,13 @@ type FindingFlow struct {
 
 // blockRecord is the minimal form written to the body column (no enriched metadata).
 type blockRecord struct {
-	Type   string `json:"type"`
-	MD     string `json:"md,omitempty"`
-	FlowID int64  `json:"flowId,omitempty"`
-	Note   string `json:"note,omitempty"`
+	Type    string `json:"type"`
+	MD      string `json:"md,omitempty"`
+	FlowID  int64  `json:"flowId,omitempty"`
+	Note    string `json:"note,omitempty"`
+	Hash    string `json:"hash,omitempty"`
+	Mime    string `json:"mime,omitempty"`
+	Caption string `json:"caption,omitempty"`
 }
 
 // marshalBody serializes blocks for storage, stripping enriched metadata.
@@ -84,7 +99,10 @@ func marshalBody(blocks []FindingBlock) string {
 	}
 	recs := make([]blockRecord, len(blocks))
 	for i, b := range blocks {
-		recs[i] = blockRecord{Type: b.Type, MD: b.MD, FlowID: b.FlowID, Note: b.Note}
+		recs[i] = blockRecord{
+			Type: b.Type, MD: b.MD, FlowID: b.FlowID, Note: b.Note,
+			Hash: b.Hash, Mime: b.Mime, Caption: b.Caption,
+		}
 	}
 	j, _ := json.Marshal(recs)
 	return string(j)
@@ -104,7 +122,10 @@ func buildBlocks(body, detail, evidence string, flows []FindingFlow) []FindingBl
 		if err := json.Unmarshal([]byte(body), &recs); err == nil && len(recs) > 0 {
 			blocks := make([]FindingBlock, len(recs))
 			for i, r := range recs {
-				blocks[i] = FindingBlock{Type: r.Type, MD: r.MD, FlowID: r.FlowID, Note: r.Note}
+				blocks[i] = FindingBlock{
+					Type: r.Type, MD: r.MD, FlowID: r.FlowID, Note: r.Note,
+					Hash: r.Hash, Mime: r.Mime, Caption: r.Caption,
+				}
 				if r.Type == "flow" {
 					if fl, ok := flowMeta[r.FlowID]; ok {
 						blocks[i].Method = fl.Method
@@ -412,12 +433,23 @@ func (s *Store) DeleteFinding(id int64) error {
 // which to insert the flow block; pass -1 to append at the end. Idempotent on
 // re-attach — updates the note in both tables and in the body block (position
 // unchanged if the block already exists).
+//
+// Returns ErrFlowNotFound when flowID has no row in flows — callers must not
+// create orphan PoC attachments that later render as Missing.
 func (s *Store) AttachFlow(findingID, flowID int64, note string, pos int) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+
+	var exists int
+	if err := tx.QueryRow(`SELECT 1 FROM flows WHERE id=?`, flowID).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: %d", ErrFlowNotFound, flowID)
+		}
+		return err
+	}
 
 	var nextOrd int
 	_ = tx.QueryRow(`SELECT COALESCE(MAX(ord)+1, 0) FROM finding_flows WHERE finding_id=?`, findingID).Scan(&nextOrd)
@@ -528,6 +560,7 @@ func (s *Store) GetFinding(id int64) (*Finding, error) {
 	if f.Blocks == nil {
 		f.Blocks = []FindingBlock{}
 	}
+	s.enrichImageBlocks(f.Blocks)
 	return f, nil
 }
 
@@ -581,6 +614,7 @@ func (s *Store) ListFindings(severity, status string) ([]Finding, error) {
 			if out[i].Blocks == nil {
 				out[i].Blocks = []FindingBlock{}
 			}
+			s.enrichImageBlocks(out[i].Blocks)
 		}
 	}
 	return out, nil

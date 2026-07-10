@@ -116,12 +116,14 @@ func (h *Hub) registerScopeRoutes(sc *scopeAPI) {
 func (h *Hub) registerFindingsRoutes(fd *findingsAPI) {
 	h.mux.HandleFunc("GET /api/findings", fd.listFindings)
 	h.mux.HandleFunc("GET /api/findings/report", fd.findingsReport)
+	h.mux.HandleFunc("GET /api/findings/images/{hash}", fd.getFindingImage)
 	h.mux.HandleFunc("POST /api/findings", fd.createFinding)
 	h.mux.HandleFunc("GET /api/findings/{id}", fd.getFinding)
 	h.mux.HandleFunc("PATCH /api/findings/{id}", fd.updateFinding)
 	h.mux.HandleFunc("DELETE /api/findings/{id}", fd.deleteFinding)
 	h.mux.HandleFunc("POST /api/findings/{id}/flows", fd.attachFindingFlow)
 	h.mux.HandleFunc("DELETE /api/findings/{id}/flows/{flowId}", fd.detachFindingFlow)
+	h.mux.HandleFunc("POST /api/findings/{id}/images", fd.attachFindingImage)
 }
 
 func (h *Hub) registerToolsRoutes(tools *toolsAPI) {

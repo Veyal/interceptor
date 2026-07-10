@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -533,5 +534,77 @@ func TestFindingVerificationInstructionsRoundTrip(t *testing.T) {
 	}
 	if len(listed) != 1 || listed[0].ID != id {
 		t.Fatalf("ListFindings(needs_verification) = %+v", listed)
+	}
+}
+
+// TestAttachFlowRejectsMissingFlowID verifies AttachFlow fails when the flow
+// row does not exist — no orphan finding_flows row, no body block.
+func TestAttachFlowRejectsMissingFlowID(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	id, err := s.CreateFinding(&Finding{Severity: "High", Title: "no orphan", Target: "t.com"})
+	if err != nil {
+		t.Fatalf("CreateFinding: %v", err)
+	}
+	err = s.AttachFlow(id, 999999, "should fail", -1)
+	if err == nil {
+		t.Fatal("AttachFlow of nonexistent flowId should error")
+	}
+	if !errors.Is(err, ErrFlowNotFound) {
+		t.Fatalf("want ErrFlowNotFound, got %v", err)
+	}
+	got, err := s.GetFinding(id)
+	if err != nil {
+		t.Fatalf("GetFinding: %v", err)
+	}
+	if len(got.Flows) != 0 {
+		t.Fatalf("expected no attachment rows, got %+v", got.Flows)
+	}
+	for _, b := range got.Blocks {
+		if b.Type == "flow" {
+			t.Fatalf("expected no flow blocks, got %+v", got.Blocks)
+		}
+	}
+}
+
+// TestAttachFlowExistingFlowNotMissing verifies a successful attach enriches
+// the PoC and does not mark it Missing.
+func TestAttachFlowExistingFlowNotMissing(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	fid, _ := s.InsertFlow(&Flow{TS: time.UnixMilli(1), Method: "GET", Host: "t.com", Path: "/ok", Status: 200})
+	id, err := s.CreateFinding(&Finding{Severity: "High", Title: "present", Target: "t.com"})
+	if err != nil {
+		t.Fatalf("CreateFinding: %v", err)
+	}
+	if err := s.AttachFlow(id, fid, "baseline", -1); err != nil {
+		t.Fatalf("AttachFlow: %v", err)
+	}
+	got, err := s.GetFinding(id)
+	if err != nil {
+		t.Fatalf("GetFinding: %v", err)
+	}
+	if len(got.Flows) != 1 || got.Flows[0].Missing || got.Flows[0].Path != "/ok" {
+		t.Fatalf("expected enriched present flow, got %+v", got.Flows)
+	}
+	var saw bool
+	for _, b := range got.Blocks {
+		if b.Type == "flow" && b.FlowID == fid {
+			saw = true
+			if b.Missing || b.Method != "GET" || b.Host != "t.com" {
+				t.Fatalf("flow block not enriched: %+v", b)
+			}
+		}
+	}
+	if !saw {
+		t.Fatalf("flow block missing from body: %+v", got.Blocks)
 	}
 }

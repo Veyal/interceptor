@@ -276,6 +276,22 @@ func renderFinding(b *strings.Builder, n int, f store.Finding) {
 					line += " — " + sanitizeBody(bl.Note)
 				}
 				b.WriteString(line + "\n>\n")
+			} else if bl.Type == "image" {
+				cap := bl.Caption
+				if cap == "" {
+					cap = "screenshot"
+				}
+				if bl.Missing {
+					b.WriteString(fmt.Sprintf("> ⚠ Screenshot — evidence blob missing (`%s`)\n>\n", code(bl.Hash)))
+					continue
+				}
+				// Relative API URL works when the report is viewed from the control UI;
+				// offline MD exports keep the caption + hash for reference.
+				if bl.URL != "" {
+					b.WriteString(fmt.Sprintf("![%s](%s)\n\n", sanitizeLine(cap), bl.URL))
+				} else {
+					b.WriteString(fmt.Sprintf("**Screenshot:** %s (`%s`)\n\n", sanitizeLine(cap), code(bl.Hash)))
+				}
 			}
 		}
 		return

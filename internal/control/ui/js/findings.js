@@ -28,13 +28,13 @@ function textChainLabel(md) {
 }
 
 function findingPocCount(f) {
-  return (f.blocks || []).filter(b => b.type === 'flow').length || (f.flows || []).length || 0;
+  return (f.blocks || []).filter(b => b.type === 'flow' || b.type === 'image').length || (f.flows || []).length || 0;
 }
 
 function findingStepCount(f) {
   const blocks = f.blocks || [];
   if (blocks.length) {
-    return blocks.filter(b => (b.type === 'text' && textChainLabel(b.md)) || b.type === 'flow').length;
+    return blocks.filter(b => (b.type === 'text' && textChainLabel(b.md)) || b.type === 'flow' || b.type === 'image').length;
   }
   let n = 0;
   if (f.detail) n++;
@@ -163,6 +163,28 @@ function renderBlockEl(b, i, total) {
     </div>`;
   }
 
+  if (b.type === 'image') {
+    if (b.missing) {
+      return `<div class="find-block find-doc-image find-block-missing" data-i="${i}">
+        ${controls}
+        <blockquote class="find-poc-callout find-poc-missing">
+          <div>⚠ Screenshot — evidence blob missing</div>
+          <span class="hint">${esc(b.hash || '')}</span>
+        </blockquote>
+        <input class="find-poc-note-input block-caption" data-i="${i}" value="${escAttr(b.caption || '')}" placeholder="Caption (optional)">
+      </div>`;
+    }
+    const src = b.url || ('/api/findings/images/' + (b.hash || ''));
+    return `<div class="find-block find-doc-image" data-i="${i}">
+      ${controls}
+      <figure class="find-doc-figure">
+        <img class="md-img find-doc-img" src="${escAttr(src)}" alt="${escAttr(b.caption || 'screenshot')}">
+        <input class="find-poc-note-input block-caption" data-i="${i}" value="${escAttr(b.caption || '')}"
+          placeholder="Caption (optional)" onclick="event.stopPropagation()">
+      </figure>
+    </div>`;
+  }
+
   // flow block. A missing flow (purged from history via prune_history / GC) is
   // rendered as a dimmed, non-clickable "evidence deleted" callout — the reference
   // and any annotation are preserved so the human knows the PoC is gone.
@@ -207,11 +229,18 @@ function renderBodyEditor(container, fid) {
     ta.addEventListener('blur', () => finishTextEdit(block, ta, fid));
   });
 
-  // Flow note: save on blur.
+  // Flow note / image caption: save on blur.
   container.querySelectorAll('.block-note').forEach(inp => {
     inp.addEventListener('blur', () => {
       const i = Number(inp.dataset.i);
       if (bodyBlocks[i]) { bodyBlocks[i].note = inp.value; scheduleSave(fid); }
+    });
+    inp.addEventListener('click', e => e.stopPropagation());
+  });
+  container.querySelectorAll('.block-caption').forEach(inp => {
+    inp.addEventListener('blur', () => {
+      const i = Number(inp.dataset.i);
+      if (bodyBlocks[i]) { bodyBlocks[i].caption = inp.value; scheduleSave(fid); }
     });
     inp.addEventListener('click', e => e.stopPropagation());
   });
@@ -250,11 +279,11 @@ function renderBodyEditor(container, fid) {
 
 // ---- attack-chain timeline (ordered blocks → vertical step flow) ------------
 
-/** Visible steps for the chain: non-empty text, all flows, optional impact tail. */
+/** Visible steps for the chain: non-empty text, all flows/images, optional impact tail. */
 export function chainSteps(blocks, impact) {
   const steps = [];
   (blocks || []).forEach((b, i) => {
-    if (b.type === 'flow') steps.push({ b, i });
+    if (b.type === 'flow' || b.type === 'image') steps.push({ b, i });
     else if (b.type === 'text' && textChainLabel(b.md)) steps.push({ b, i });
   });
   if (impact && impact.trim()) steps.push({ b: { type: 'impact', md: impact.trim() }, i: -1 });
@@ -276,15 +305,33 @@ function chainFlowCard(b, i) {
     ${b.note ? `<div class="fc-step-note">${esc(b.note)}</div>` : ''}`;
 }
 
+function chainImageCard(b) {
+  if (b.missing) {
+    return `<blockquote class="find-poc-callout find-poc-missing">
+      <div>⚠ Screenshot — evidence blob missing</div>
+    </blockquote>
+    ${b.caption ? `<div class="fc-step-note">${esc(b.caption)}</div>` : ''}`;
+  }
+  const src = b.url || ('/api/findings/images/' + (b.hash || ''));
+  return `<figure class="find-doc-figure">
+    <img class="md-img find-doc-img" src="${escAttr(src)}" alt="${escAttr(b.caption || 'screenshot')}">
+    ${b.caption ? `<figcaption class="fc-step-note">${esc(b.caption)}</figcaption>` : ''}
+  </figure>`;
+}
+
 function chainStepHtml(item, num, isLast) {
   const { b, i } = item;
-  const kind = b.type === 'impact' ? 'impact' : b.type === 'flow' ? (b.missing ? 'missing' : 'flow') : 'text';
+  const kind = b.type === 'impact' ? 'impact'
+    : b.type === 'image' ? (b.missing ? 'missing' : 'image')
+    : b.type === 'flow' ? (b.missing ? 'missing' : 'flow') : 'text';
   const badgeLabel = b.type === 'impact' ? '!' : String(num);
   let card = '', attrs = `data-kind="${kind}" data-i="${i}"`;
   if (b.type === 'text') {
     card = `<div class="fc-card fc-card-text md">${renderMD(b.md)}</div>`;
   } else if (b.type === 'impact') {
     card = `<div class="fc-card fc-card-impact"><div class="fc-card-label">Impact</div><div class="fc-card-body">${esc(b.md)}</div></div>`;
+  } else if (b.type === 'image') {
+    card = `<div class="fc-card fc-card-image">${chainImageCard(b)}</div>`;
   } else {
     attrs += b.missing ? '' : ` data-flow="${b.flowId}"`;
     card = `<div class="fc-card fc-card-flow">${chainFlowCard(b, i)}</div>`;
@@ -358,6 +405,9 @@ function scheduleSave(fid) {
     if (b.md !== undefined) r.md = b.md;
     if (b.flowId) r.flowId = b.flowId;
     if (b.note) r.note = b.note;
+    if (b.hash) r.hash = b.hash;
+    if (b.mime) r.mime = b.mime;
+    if (b.caption) r.caption = b.caption;
     return r;
   });
   bodySaveTimer = setTimeout(() => flushBodySave(fid, snap), 700);
@@ -384,8 +434,12 @@ function renderFindingDetail() {
 
   const statusSel = STATUSES.map(s => `<option value="${s}"${s === f.status ? ' selected' : ''}>${esc(statusLabel(s))}</option>`).join('');
   const missBanner = (() => {
-    const miss = (f.blocks || []).filter(b => b.type === 'flow' && b.missing).length;
-    return miss ? `<div class="find-missing-banner">⚠ ${miss} PoC flow${miss === 1 ? '' : 's'} deleted from history — re-capture the endpoint${miss === 1 ? '' : 's'} to restore evidence.</div>` : '';
+    const missFlow = (f.blocks || []).filter(b => b.type === 'flow' && b.missing).length;
+    const missImg = (f.blocks || []).filter(b => b.type === 'image' && b.missing).length;
+    const parts = [];
+    if (missFlow) parts.push(`${missFlow} PoC flow${missFlow === 1 ? '' : 's'} deleted from history`);
+    if (missImg) parts.push(`${missImg} screenshot${missImg === 1 ? '' : 's'} missing`);
+    return parts.length ? `<div class="find-missing-banner">⚠ ${parts.join(' · ')} — restore evidence if needed.</div>` : '';
   })();
   const verifBanner = (f.status === 'needs_verification' || f.verificationInstructions)
     ? `<div class="find-verif-banner" role="status">
@@ -427,6 +481,8 @@ function renderFindingDetail() {
     <div class="find-doc-actions" id="findDocActions">
       <button class="btn" id="findAddText">＋ Paragraph</button>
       <button class="btn" id="findAddFlow" title="Attach request/response flows as PoC evidence">＋ PoC flow<span id="findPocReady" class="hint"></span></button>
+      <button class="btn" id="findAddImage" title="Attach a screenshot as evidence">＋ Screenshot</button>
+      <input type="file" id="findImageFile" accept="image/png,image/jpeg,image/gif,image/webp,image/bmp,image/avif" hidden>
     </div>
     <aside class="find-impact">
       <h3>Impact</h3>
@@ -482,6 +538,26 @@ function renderFindingDetail() {
     if (tas.length) tas[tas.length - 1].focus();
   };
   $('#findAddFlow').onclick = () => addPoCFlowsToFinding(f.id);
+  $('#findAddImage').onclick = () => $('#findImageFile')?.click();
+  $('#findImageFile').onchange = async e => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result);
+        r.onerror = () => reject(new Error('failed to read image'));
+        r.readAsDataURL(file);
+      });
+      await api('/api/findings/' + f.id + '/images', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ data: dataUrl, mime: file.type, caption: file.name }),
+      });
+      toast('screenshot attached');
+      await loadFindings();
+    } catch (err) { toast(err.message); }
+  };
   updateFindPocBtn();
   $('#findImpact')?.addEventListener('blur', async () => {
     const impact = $('#findImpact').value;

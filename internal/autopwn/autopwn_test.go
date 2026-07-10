@@ -54,9 +54,12 @@ func (f *fakeExec) Exec(ctx context.Context, call aiagent.ToolCall) (string, err
 
 // fakeSender scripts Gate-1 differential outcomes: it always returns the
 // exchange for the request's marker/URL so the oracle behaves deterministically.
+// When Store is set, each Send inserts a real flows row so AttachFlow (which
+// rejects nonexistent flow ids) can attach PoCs when filing findings.
 type fakeSender struct {
 	mu       sync.Mutex
 	respond  func(req verify.Request) verify.Exchange
+	Store    *store.Store
 	nextID   int64
 	seenURLs []string // every URL the verifier actually sent to
 }
@@ -68,7 +71,23 @@ func (f *fakeSender) Send(ctx context.Context, req verify.Request) verify.Exchan
 	f.seenURLs = append(f.seenURLs, req.URL)
 	ex := f.respond(req)
 	if ex.FlowID == 0 {
-		ex.FlowID = f.nextID
+		if f.Store != nil {
+			method := req.Method
+			if method == "" {
+				method = "GET"
+			}
+			id, err := f.Store.InsertFlow(&store.Flow{
+				TS: time.Now(), Method: method, Host: "victim.test",
+				Path: "/", Status: ex.Status, Flags: store.FlagActiveScan,
+			})
+			if err == nil {
+				ex.FlowID = id
+			} else {
+				ex.FlowID = f.nextID
+			}
+		} else {
+			ex.FlowID = f.nextID
+		}
 	}
 	return ex
 }
@@ -210,7 +229,7 @@ func baseDeps(t *testing.T, s *store.Store, w *doneWaiter, cands []Candidate) De
 			return &fakeCaller{turns: []aiagent.Turn{{Text: `{"result":"real","reasoning":"reproduced"}`}}}, nil
 		},
 		ToolExecutor: &fakeExec{},
-		VerifySender: &fakeSender{respond: reflectingResponder("XPWNX")},
+		VerifySender: &fakeSender{Store: s, respond: reflectingResponder("XPWNX")},
 		VerifyOOB:    &fakeOOB{},
 		CollectCandidates: func(ctx context.Context, e *Engine, plan Plan) []Candidate {
 			return cands
@@ -297,7 +316,7 @@ func TestGate1FailureNotFiled(t *testing.T) {
 	w := newDoneWaiter()
 	d := baseDeps(t, s, w, []Candidate{reflectedCandidate()})
 	// Sender never reflects the marker → Gate 1 fails.
-	d.VerifySender = &fakeSender{respond: func(req verify.Request) verify.Exchange {
+	d.VerifySender = &fakeSender{Store: s, respond: func(req verify.Request) verify.Exchange {
 		return verify.Exchange{Status: 200, Body: []byte("<html>ok</html>")}
 	}}
 	e := New(d)
@@ -389,7 +408,7 @@ func TestVerifiedBlindCandidateFiles(t *testing.T) {
 	c.OOBProbe = verify.Request{Method: "GET", URL: "https://victim.test/fetch?url=OOBPLACEHOLDER"}
 	c.OOBPlaceholder = "OOBPLACEHOLDER"
 
-	fs := &fakeSender{respond: reflectingResponder("XPWNX")}
+	fs := &fakeSender{Store: s, respond: reflectingResponder("XPWNX")}
 	d := baseDeps(t, s, w, []Candidate{c})
 	d.VerifySender = fs
 	d.OOB = catcher
@@ -469,7 +488,7 @@ func TestBlindCandidateSkippedWhenOOBBaseMissing(t *testing.T) {
 	c.Blind = true
 	c.OOBProbe = verify.Request{Method: "GET", URL: "https://victim.test/fetch?url=OOBPLACEHOLDER"}
 	c.OOBPlaceholder = "OOBPLACEHOLDER"
-	fs := &fakeSender{respond: reflectingResponder("XPWNX")}
+	fs := &fakeSender{Store: s, respond: reflectingResponder("XPWNX")}
 	d := baseDeps(t, s, w, []Candidate{c})
 	d.VerifySender = fs
 	d.OOB = oob.New()
@@ -638,7 +657,7 @@ func TestOutOfScopeAndOwnListenerCandidatesSkipped(t *testing.T) {
 	ownListener.Diff.Baseline.URL = "http://127.0.0.1:9966/search?q=baseline"
 	ownListener.Diff.Payload.URL = "http://127.0.0.1:9966/search?q=XPWNX"
 
-	fs := &fakeSender{respond: reflectingResponder("XPWNX")}
+	fs := &fakeSender{Store: s, respond: reflectingResponder("XPWNX")}
 	d := baseDeps(t, s, w, []Candidate{offScope, ownListener, inScope})
 	d.VerifySender = fs
 	// Own-listener predicate: treat the control port on loopback as own.

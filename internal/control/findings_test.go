@@ -1,6 +1,7 @@
 package control
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -453,5 +454,157 @@ func TestListFlowsTagFilter(t *testing.T) {
 	resp2.Body.Close()
 	if len(out2.Flows) != 0 {
 		t.Fatalf("tag=nonexistent should return 0 flows, got %d", len(out2.Flows))
+	}
+}
+
+// TestAttachFindingFlowRejectsMissingFlowID verifies POST .../flows returns 404
+// (not 200 with missing:true) when the flowId does not exist.
+func TestAttachFindingFlowRejectsMissingFlowID(t *testing.T) {
+	h, _, _ := newHub(t)
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	resp, _ := http.Post(ts.URL+"/api/findings", "application/json",
+		strings.NewReader(`{"title":"attach miss","detail":"intro"}`))
+	var created store.Finding
+	json.NewDecoder(resp.Body).Decode(&created)
+	resp.Body.Close()
+
+	req, _ := http.NewRequest(http.MethodPost,
+		ts.URL+"/api/findings/"+strconv.FormatInt(created.ID, 10)+"/flows",
+		strings.NewReader(`{"flowId":999999,"note":"nope"}`))
+	r, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode != http.StatusNotFound {
+		t.Fatalf("want 404 for missing flowId, got %d", r.StatusCode)
+	}
+}
+
+// TestAttachFindingFlowExistingFlowNotMissing verifies a successful attach
+// returns an enriched PoC that is not marked missing.
+func TestAttachFindingFlowExistingFlowNotMissing(t *testing.T) {
+	h, s, _ := newHub(t)
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	flowID, _ := s.InsertFlow(&store.Flow{TS: time.UnixMilli(1), Method: "GET", Host: "t.com", Path: "/ok", Status: 200})
+	resp, _ := http.Post(ts.URL+"/api/findings", "application/json",
+		strings.NewReader(`{"title":"attach ok","detail":"intro"}`))
+	var created store.Finding
+	json.NewDecoder(resp.Body).Decode(&created)
+	resp.Body.Close()
+
+	req, _ := http.NewRequest(http.MethodPost,
+		ts.URL+"/api/findings/"+strconv.FormatInt(created.ID, 10)+"/flows",
+		strings.NewReader(fmt.Sprintf(`{"flowId":%d,"note":"baseline"}`, flowID)))
+	r, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", r.StatusCode)
+	}
+	var out store.Finding
+	if err := json.NewDecoder(r.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Flows) != 1 || out.Flows[0].Missing || out.Flows[0].Path != "/ok" {
+		t.Fatalf("expected enriched present flow, got %+v", out.Flows)
+	}
+	for _, b := range out.Blocks {
+		if b.Type == "flow" && b.FlowID == flowID && b.Missing {
+			t.Fatalf("flow block should not be missing: %+v", b)
+		}
+	}
+}
+
+// TestAttachFindingImageRoundTrip uploads a tiny PNG and serves it back by hash.
+func TestAttachFindingImageRoundTrip(t *testing.T) {
+	h, _, _ := newHub(t)
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	resp, _ := http.Post(ts.URL+"/api/findings", "application/json",
+		strings.NewReader(`{"title":"img","detail":"intro"}`))
+	var created store.Finding
+	json.NewDecoder(resp.Body).Decode(&created)
+	resp.Body.Close()
+
+	// 1x1 PNG as data URL
+	const pngB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+	payload := fmt.Sprintf(`{"data":"data:image/png;base64,%s","caption":"xss alert","position":1}`, pngB64)
+	req, _ := http.NewRequest(http.MethodPost,
+		ts.URL+"/api/findings/"+strconv.FormatInt(created.ID, 10)+"/images",
+		strings.NewReader(payload))
+	r, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("attach image: %v", err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", r.StatusCode)
+	}
+	var out store.Finding
+	if err := json.NewDecoder(r.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	var hash, url string
+	for _, b := range out.Blocks {
+		if b.Type == "image" {
+			hash, url = b.Hash, b.URL
+			if b.Caption != "xss alert" || b.Missing {
+				t.Fatalf("image block: %+v", b)
+			}
+		}
+	}
+	if hash == "" || url == "" {
+		t.Fatalf("no image block: %+v", out.Blocks)
+	}
+
+	imgResp, err := http.Get(ts.URL + url)
+	if err != nil {
+		t.Fatalf("GET image: %v", err)
+	}
+	defer imgResp.Body.Close()
+	if imgResp.StatusCode != http.StatusOK {
+		t.Fatalf("GET image status %d", imgResp.StatusCode)
+	}
+	if ct := imgResp.Header.Get("Content-Type"); ct != "image/png" {
+		t.Fatalf("Content-Type = %q, want image/png", ct)
+	}
+	if imgResp.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatal("missing nosniff")
+	}
+}
+
+// TestUpdateFindingRejectsInlineImageData ensures body PATCH cannot embed base64.
+func TestUpdateFindingRejectsInlineImageData(t *testing.T) {
+	h, _, _ := newHub(t)
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	resp, _ := http.Post(ts.URL+"/api/findings", "application/json",
+		strings.NewReader(`{"title":"img reject"}`))
+	var created store.Finding
+	json.NewDecoder(resp.Body).Decode(&created)
+	resp.Body.Close()
+
+	bodyJSON, _ := json.Marshal(map[string]string{
+		"body": `[{"type":"image","data":"AAAA","caption":"nope"}]`,
+	})
+	req, _ := http.NewRequest(http.MethodPatch,
+		ts.URL+"/api/findings/"+strconv.FormatInt(created.ID, 10),
+		bytes.NewReader(bodyJSON))
+	r, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("patch: %v", err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode != http.StatusRequestEntityTooLarge && r.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 413/400 for inline image data, got %d", r.StatusCode)
 	}
 }

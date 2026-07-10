@@ -128,11 +128,11 @@ func (s *Store) DeleteFlowsByHost(hosts []string, keepOnly bool) (int64, error) 
 	return n, nil
 }
 
-// GCBodies reclaims body files that are no longer referenced by any flow.
-// It walks bodiesDir, collects every file whose name looks like a content hash
-// (a 64-hex-char sha256 stored under a two-level prefix directory), queries the
-// flows table for all referenced hashes, and removes any file whose hash is not
-// among them.
+// GCBodies reclaims body files that are no longer referenced by any flow or
+// finding image block. It walks bodiesDir, collects every file whose name looks
+// like a content hash (a 64-hex-char sha256 stored under a two-level prefix
+// directory), queries flows + finding image hashes, and removes any file whose
+// hash is not among them.
 //
 // GCBodies returns the number of files removed and the total bytes freed.
 // It is safe to call while the store is in use: it never removes a file that
@@ -162,6 +162,15 @@ func (s *Store) GCBodies() (removedFiles int64, freedBytes int64, err error) {
 	}
 	if err := rows.Close(); err != nil {
 		return 0, 0, fmt.Errorf("store.GCBodies: close rows: %w", err)
+	}
+	// Finding screenshot/evidence images live in the same bodiesDir; keep them
+	// alive even when no flow references the hash.
+	imgRefs, err := s.FindingImageHashes()
+	if err != nil {
+		return 0, 0, fmt.Errorf("store.GCBodies: finding image refs: %w", err)
+	}
+	for h := range imgRefs {
+		referenced[h] = struct{}{}
 	}
 
 	// 2. Walk bodiesDir and remove any content-hash file that is not referenced.

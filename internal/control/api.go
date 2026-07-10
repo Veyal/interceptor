@@ -73,7 +73,7 @@ type apiRoute struct {
 }
 
 var apiRoutes = []apiRoute{
-	{"GET", "/api/flows", "List captured proxy flows (filters: method, host, search, searchScope=body, hasNote=1, scheme, status, before, limit)"},
+	{"GET", "/api/flows", "List captured proxy flows (filters: method, host, search, searchScope=body, hasNote=1, scheme, status, before, limit, includeTools=1). By default excludes Repeater/Intruder/ActiveScan (History-shaped); includeTools=1 returns all sources"},
 	{"GET", "/api/flows/{id}", "Flow detail (headers, body hashes, flags)"},
 	{"GET", "/api/flows/{id}/raw", "Reconstructed raw request/response (?side=req|res)"},
 	{"GET", "/api/flows/{id}/body", "Body bytes only (?side=req|res) — for download with MIME extension"},
@@ -122,12 +122,14 @@ var apiRoutes = []apiRoute{
 	{"POST", "/api/active-checks/test", "Compile + dry-run an active check against a flow's injection points (sends real, bounded probes). Response: {finding} or {note}"},
 	{"GET", "/api/findings", "List curated findings (optional ?severity=&status=)"},
 	{"GET", "/api/findings/report", "Curated findings as a Markdown/HTML report"},
-	{"POST", "/api/findings", "Create a curated finding. Body: {title, severity?, status?, target?, detail?, evidence?, impact?, cvss?, verificationInstructions?, body?, flowIds?} — title required; status may be open|needs_verification|verified|false_positive|wont_fix|fixed; verificationInstructions is what the human should check when status is needs_verification; body is a JSON-blocks array string [{type:'text',md}|{type:'flow',flowId,note}] for the interleaved text/flow narrative; flowIds optionally attaches PoC flows on create"},
+	{"POST", "/api/findings", "Create a curated finding. Body: {title, severity?, status?, target?, detail?, evidence?, impact?, cvss?, verificationInstructions?, body?, flowIds?} — title required; status may be open|needs_verification|verified|false_positive|wont_fix|fixed; verificationInstructions is what the human should check when status is needs_verification; body is a JSON-blocks array string [{type:'text',md}|{type:'flow',flowId,note}|{type:'image',hash,mime,caption}] for the interleaved narrative; flowIds optionally attaches PoC flows on create. Image bytes must be uploaded via POST /api/findings/{id}/images (not embedded as data/path in body)"},
 	{"GET", "/api/findings/{id}", "Get one finding"},
 	{"PATCH", "/api/findings/{id}", "Update a finding (only fields sent are changed). Body: any subset of {severity, status, title, target, detail, evidence, impact, cvss, verificationInstructions, body}"},
 	{"DELETE", "/api/findings/{id}", "Permanently delete a finding"},
-	{"POST", "/api/findings/{id}/flows", "Attach a flow as PoC evidence to a finding. Body: {flowId, note?, position?} — position is a 0-based block index to insert at; omit/-1 appends"},
+	{"POST", "/api/findings/{id}/flows", "Attach a flow as PoC evidence to a finding. Body: {flowId, note?, position?} — position is a 0-based block index to insert at; omit/-1 appends. Returns 404 if flowId does not exist"},
 	{"DELETE", "/api/findings/{id}/flows/{flowId}", "Detach a PoC flow from a finding"},
+	{"POST", "/api/findings/{id}/images", "Upload and attach a screenshot/image as finding evidence. Body: {data, mime?, caption?, position?} — data is raw base64 or a data: URL (max 5 MiB); position is a 0-based block index; omit/-1 appends. Response: full finding with enriched image block (url, hash)"},
+	{"GET", "/api/findings/images/{hash}", "Serve a content-addressed finding image by sha256 hash"},
 	{"GET", "/api/views", "List saved history views"},
 	{"POST", "/api/views", "Save the current filters as a named view. Body: {name, data} — data is an arbitrary JSON filter-state blob"},
 	{"DELETE", "/api/views/{id}", "Delete a saved view"},
@@ -288,6 +290,7 @@ var mcpDescriptor = map[string]any{
 		{"name": "list_findings", "desc": "List findings (with PoC flows), filter by severity/status"},
 		{"name": "update_finding", "desc": "Update a finding's status, impact, or any field (e.g. mark verified)"},
 		{"name": "add_finding_poc", "desc": "Attach a request/response flow to a finding as PoC evidence"},
+		{"name": "add_finding_image", "desc": "Attach a screenshot/image (base64) to a finding as evidence"},
 		{"name": "remove_finding_poc", "desc": "Detach a PoC flow from a finding"},
 		{"name": "delete_finding", "desc": "Permanently delete a finding (cannot be undone)"},
 		{"name": "export_report", "desc": "Engagement report (curated findings + PoCs; passive scan omitted unless includeIssues=true). format=html optional"},

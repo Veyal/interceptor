@@ -555,3 +555,93 @@ func TestBoundJSON(t *testing.T) {
 		t.Fatalf("non-JSON should be byte-truncated, got len=%d", len(out))
 	}
 }
+
+// TestListFlowsMCPDefaultsIncludeTools verifies list_flows always asks the
+// control API for tool traffic (includeTools=1) so agents see active-scan /
+// repeater rows that History hides by default.
+func TestListFlowsMCPDefaultsIncludeTools(t *testing.T) {
+	var gotInclude string
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/flows" {
+			gotInclude = r.URL.Query().Get("includeTools")
+			io.WriteString(w, `{"flows":[],"truncated":false}`)
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer mock.Close()
+
+	s := New(mock.URL)
+	s.report = func(Activity) {}
+
+	script := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_flows","arguments":{"limit":5}}}` + "\n"
+	var out bytes.Buffer
+	if err := s.Serve(strings.NewReader(script), &out); err != nil {
+		t.Fatalf("Serve: %v", err)
+	}
+	if gotInclude != "1" {
+		t.Fatalf("list_flows should default includeTools=1, got %q", gotInclude)
+	}
+}
+
+// TestListFlowsMCPIncludeToolsFalse allows agents to opt into History-shaped
+// filtering by passing includeTools:false.
+func TestListFlowsMCPIncludeToolsFalse(t *testing.T) {
+	var gotInclude string
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/flows" {
+			gotInclude = r.URL.Query().Get("includeTools")
+			io.WriteString(w, `{"flows":[]}`)
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer mock.Close()
+
+	s := New(mock.URL)
+	s.report = func(Activity) {}
+
+	script := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_flows","arguments":{"includeTools":false}}}` + "\n"
+	var out bytes.Buffer
+	if err := s.Serve(strings.NewReader(script), &out); err != nil {
+		t.Fatalf("Serve: %v", err)
+	}
+	if gotInclude != "" && gotInclude != "0" {
+		t.Fatalf("includeTools:false should omit or set 0, got %q", gotInclude)
+	}
+}
+
+// TestAddFindingImageForwardsToREST verifies add_finding_image posts to
+// /api/findings/{id}/images with data/caption/position.
+func TestAddFindingImageForwardsToREST(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]any
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/images") {
+			gotPath = r.URL.Path
+			json.NewDecoder(r.Body).Decode(&gotBody)
+			io.WriteString(w, `{"id":7,"title":"t","blocks":[{"type":"image","hash":"aa","caption":"cap"}]}`)
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer mock.Close()
+
+	s := New(mock.URL)
+	s.report = func(Activity) {}
+
+	script := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"add_finding_image","arguments":{"findingId":7,"data":"AAAA","mime":"image/png","caption":"cap","position":2}}}` + "\n"
+	var out bytes.Buffer
+	if err := s.Serve(strings.NewReader(script), &out); err != nil {
+		t.Fatalf("Serve: %v", err)
+	}
+	if gotPath != "/api/findings/7/images" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotBody["data"] != "AAAA" || gotBody["caption"] != "cap" {
+		t.Fatalf("body = %+v", gotBody)
+	}
+	if gotBody["position"] != float64(2) {
+		t.Fatalf("position = %v", gotBody["position"])
+	}
+}

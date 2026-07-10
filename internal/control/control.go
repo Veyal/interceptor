@@ -59,19 +59,19 @@ type MultiProxyRebinder interface {
 // Hub is the control-plane HTTP handler and live-event broadcaster. It also
 // implements the proxy's Events sink (FlowCaptured).
 type Hub struct {
-	st     *store.Store
-	eng    *intercept.Engine
-	ca     *tlsca.CA
+	st         *store.Store
+	eng        *intercept.Engine
+	ca         *tlsca.CA
 	rebind     Rebinder // proxy listener
 	ctrlRebind Rebinder // control UI/API listener
 	// SyncSelfPorts updates proxy SelfPorts and hub control address after a listener rebind.
 	SyncSelfPorts func()
-	snd    *sender.Sender
-	intr   *intruder.Engine
-	sc     *scope.Engine
-	oob    *oob.Catcher
-	hi     *humanInput // pending AI→human input prompts (request_human_input)
-	mux    *http.ServeMux
+	snd           *sender.Sender
+	intr          *intruder.Engine
+	sc            *scope.Engine
+	oob           *oob.Catcher
+	hi            *humanInput // pending AI→human input prompts (request_human_input)
+	mux           *http.ServeMux
 
 	// Upstream applies a chained upstream-proxy URL ("" = direct). Set by cmd.
 	Upstream func(string) error
@@ -220,20 +220,20 @@ func (h *Hub) loopbackControlBase() string {
 // ---- DTOs ----
 
 type flowJSON struct {
-	ID         int64  `json:"id"`
-	TS         int64  `json:"ts"`
-	Method     string `json:"method"`
-	Scheme     string `json:"scheme"`
-	Host       string `json:"host"`
-	Port       int    `json:"port"`
-	Path       string `json:"path"`
-	Status     int    `json:"status"`
-	Mime       string `json:"mime"`
-	ReqLen     int64  `json:"reqLen"`
-	ResLen     int64  `json:"resLen"`
-	DurationMs int64  `json:"durationMs"`
-	ClientAddr string `json:"clientAddr"`
-	Error      string `json:"error"`
+	ID         int64    `json:"id"`
+	TS         int64    `json:"ts"`
+	Method     string   `json:"method"`
+	Scheme     string   `json:"scheme"`
+	Host       string   `json:"host"`
+	Port       int      `json:"port"`
+	Path       string   `json:"path"`
+	Status     int      `json:"status"`
+	Mime       string   `json:"mime"`
+	ReqLen     int64    `json:"reqLen"`
+	ResLen     int64    `json:"resLen"`
+	DurationMs int64    `json:"durationMs"`
+	ClientAddr string   `json:"clientAddr"`
+	Error      string   `json:"error"`
 	Flags      int64    `json:"flags"`
 	Note       string   `json:"note"`
 	Tags       []string `json:"tags,omitempty"`
@@ -281,21 +281,21 @@ type settingsJSON struct {
 	ProxyAddr                string   `json:"proxyAddr"`
 	ProxyAddrs               []string `json:"proxyAddrs,omitempty"`
 	ControlAddr              string   `json:"controlAddr"`
-	InterceptEnabled         bool   `json:"interceptEnabled"`
-	UpstreamProxy            string `json:"upstreamProxy"`
-	AiProvider               string `json:"aiProvider"`
-	AiModel                  string `json:"aiModel"`
-	AiEndpoint               string `json:"aiEndpoint"`
-	AiHasKey                 bool   `json:"aiHasKey"` // never returns the key itself
-	AiDisabled               bool   `json:"aiDisabled"`
-	OobEnabled               bool   `json:"oobEnabled"`
-	CaptureScopeOnly         bool   `json:"captureScopeOnly"`
-	SuppressBrowserTelemetry bool   `json:"suppressBrowserTelemetry"`
-	InvisibleProxy           bool   `json:"invisibleProxy"`
+	InterceptEnabled         bool     `json:"interceptEnabled"`
+	UpstreamProxy            string   `json:"upstreamProxy"`
+	AiProvider               string   `json:"aiProvider"`
+	AiModel                  string   `json:"aiModel"`
+	AiEndpoint               string   `json:"aiEndpoint"`
+	AiHasKey                 bool     `json:"aiHasKey"` // never returns the key itself
+	AiDisabled               bool     `json:"aiDisabled"`
+	OobEnabled               bool     `json:"oobEnabled"`
+	CaptureScopeOnly         bool     `json:"captureScopeOnly"`
+	SuppressBrowserTelemetry bool     `json:"suppressBrowserTelemetry"`
+	InvisibleProxy           bool     `json:"invisibleProxy"`
 	TLSBypassHosts           []string `json:"tlsBypassHosts"`
 	AutoBypassOnPinFailure   bool     `json:"autoBypassOnPinFailure"`
-	DeviceProxy              string `json:"deviceProxy,omitempty"`
-	DeviceProxyMode          string `json:"deviceProxyMode,omitempty"`
+	DeviceProxy              string   `json:"deviceProxy,omitempty"`
+	DeviceProxyMode          string   `json:"deviceProxyMode,omitempty"`
 }
 
 // tlsBypassSettingKey stores the newline-separated host patterns that bypass MITM.
@@ -590,12 +590,17 @@ func (h *flowAPI) listFlows(w http.ResponseWriter, r *http.Request) {
 		limit = 200
 	}
 	f := store.FlowFilter{
-		Limit:        limit + 1, // fetch one extra to detect truncation
-		Method:       q.Get("method"),
-		Host:         q.Get("host"),
-		Search:       q.Get("search"),
-		Scheme:       q.Get("scheme"),
-		ExcludeFlags: store.FlagRepeater | store.FlagIntruder | store.FlagActiveScan, // these have their own views
+		Limit:  limit + 1, // fetch one extra to detect truncation
+		Method: q.Get("method"),
+		Host:   q.Get("host"),
+		Search: q.Get("search"),
+		Scheme: q.Get("scheme"),
+	}
+	// History hides Repeater/Intruder/ActiveScan by default (they have their own
+	// views). includeTools=1 is the escape hatch for MCP agents / triage that
+	// need to see tool-generated traffic alongside proxy captures.
+	if q.Get("includeTools") != "1" {
+		f.ExcludeFlags = store.FlagRepeater | store.FlagIntruder | store.FlagActiveScan
 	}
 	f.SortKey, f.SortDir = parseFlowSortQuery(q)
 	if curID := int64(atoiOr(q.Get("curId"), 0)); curID > 0 {
@@ -1324,17 +1329,17 @@ func (h *Hub) persistSetting(w http.ResponseWriter, key, val string) bool {
 
 func (h *settingsAPI) putSettings(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		ProxyAddr                string   `json:"proxyAddr"`
-		ProxyAddrs               []string `json:"proxyAddrs"`
-		ControlAddr              string   `json:"controlAddr"`
-		UpstreamProxy            *string `json:"upstreamProxy"` // pointer so "" can clear it
-		AiProvider               *string `json:"aiProvider"`
-		AiApiKey                 *string `json:"aiApiKey"`
-		AiModel                  *string `json:"aiModel"`
-		AiEndpoint               *string `json:"aiEndpoint"`
-		AiDisabled               *bool   `json:"aiDisabled"`
-		OobEnabled               *bool   `json:"oobEnabled"`
-		CaptureScopeOnly         *bool   `json:"captureScopeOnly"`
+		ProxyAddr                string    `json:"proxyAddr"`
+		ProxyAddrs               []string  `json:"proxyAddrs"`
+		ControlAddr              string    `json:"controlAddr"`
+		UpstreamProxy            *string   `json:"upstreamProxy"` // pointer so "" can clear it
+		AiProvider               *string   `json:"aiProvider"`
+		AiApiKey                 *string   `json:"aiApiKey"`
+		AiModel                  *string   `json:"aiModel"`
+		AiEndpoint               *string   `json:"aiEndpoint"`
+		AiDisabled               *bool     `json:"aiDisabled"`
+		OobEnabled               *bool     `json:"oobEnabled"`
+		CaptureScopeOnly         *bool     `json:"captureScopeOnly"`
 		SuppressBrowserTelemetry *bool     `json:"suppressBrowserTelemetry"`
 		InvisibleProxy           *bool     `json:"invisibleProxy"`
 		TLSBypassHosts           *[]string `json:"tlsBypassHosts"`

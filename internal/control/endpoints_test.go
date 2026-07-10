@@ -325,3 +325,115 @@ func TestListFlowsBadLimit(t *testing.T) {
 		}
 	}
 }
+
+// TestListFlowsExcludesActiveScanByDefault verifies History-shaped GET /api/flows
+// hides FlagActiveScan (and Repeater/Intruder) rows while host_stats still counts them.
+func TestListFlowsExcludesActiveScanByDefault(t *testing.T) {
+	h, s, _ := newHub(t)
+	proxyID, _ := s.InsertFlow(&store.Flow{TS: time.UnixMilli(1), Method: "GET", Host: "a.com", Path: "/proxy", Status: 200})
+	_, _ = s.InsertFlow(&store.Flow{TS: time.UnixMilli(2), Method: "GET", Host: "a.com", Path: "/scan", Status: 200, Flags: store.FlagActiveScan})
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/flows")
+	if err != nil {
+		t.Fatalf("GET /api/flows: %v", err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Flows []struct {
+			ID   int64  `json:"id"`
+			Path string `json:"path"`
+		} `json:"flows"`
+		Truncated bool `json:"truncated"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Flows) != 1 || out.Flows[0].ID != proxyID || out.Flows[0].Path != "/proxy" {
+		t.Fatalf("default list should return only proxy flow, got %+v", out.Flows)
+	}
+
+	statsResp, err := http.Get(ts.URL + "/api/hosts/stats")
+	if err != nil {
+		t.Fatalf("GET /api/hosts/stats: %v", err)
+	}
+	defer statsResp.Body.Close()
+	var stats struct {
+		TotalFlows int64 `json:"totalFlows"`
+	}
+	if err := json.NewDecoder(statsResp.Body).Decode(&stats); err != nil {
+		t.Fatal(err)
+	}
+	if stats.TotalFlows != 2 {
+		t.Fatalf("host_stats should count both flows, got totalFlows=%d", stats.TotalFlows)
+	}
+}
+
+// TestListFlowsIncludeToolsQuery returns tool traffic (active-scan/repeater/intruder)
+// when includeTools=1 is set — the escape hatch MCP agents need after a scan.
+func TestListFlowsIncludeToolsQuery(t *testing.T) {
+	h, s, _ := newHub(t)
+	_, _ = s.InsertFlow(&store.Flow{TS: time.UnixMilli(1), Method: "GET", Host: "a.com", Path: "/proxy", Status: 200})
+	_, _ = s.InsertFlow(&store.Flow{TS: time.UnixMilli(2), Method: "GET", Host: "a.com", Path: "/scan", Status: 200, Flags: store.FlagActiveScan})
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/flows?includeTools=1")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Flows []struct {
+			Path string `json:"path"`
+		} `json:"flows"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Flows) != 2 {
+		t.Fatalf("includeTools=1 should return both flows, got %+v", out.Flows)
+	}
+}
+
+// TestListFlowsEmptyWhenOnlyActiveScan documents issue #5: a session that is
+// only tool traffic yields an empty History list (truncated:false) unless
+// includeTools=1 is set.
+func TestListFlowsEmptyWhenOnlyActiveScan(t *testing.T) {
+	h, s, _ := newHub(t)
+	_, _ = s.InsertFlow(&store.Flow{TS: time.UnixMilli(1), Method: "GET", Host: "a.com", Path: "/scan", Status: 200, Flags: store.FlagActiveScan})
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/flows")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Flows     []any `json:"flows"`
+		Truncated bool  `json:"truncated"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Flows) != 0 || out.Truncated {
+		t.Fatalf("default list of only active-scan flows should be empty truncated=false, got %+v", out)
+	}
+
+	resp2, err := http.Get(ts.URL + "/api/flows?includeTools=1")
+	if err != nil {
+		t.Fatalf("GET includeTools: %v", err)
+	}
+	defer resp2.Body.Close()
+	var out2 struct {
+		Flows []any `json:"flows"`
+	}
+	if err := json.NewDecoder(resp2.Body).Decode(&out2); err != nil {
+		t.Fatal(err)
+	}
+	if len(out2.Flows) != 1 {
+		t.Fatalf("includeTools=1 should return the scan flow, got %+v", out2.Flows)
+	}
+}

@@ -344,3 +344,23 @@ func TestProjectImpactRendering(t *testing.T) {
 		t.Fatalf("passive issue Remediation missing from appendix:\n%s", appendix)
 	}
 }
+
+func TestProjectRendersImageBlock(t *testing.T) {
+	findings := []store.Finding{
+		{ID: 1, Severity: "High", Status: "open", Title: "XSS with screenshot",
+			Blocks: []store.FindingBlock{
+				{Type: "text", MD: "Alert fired."},
+				{Type: "image", Hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+					Mime: "image/png", Caption: "XSS alert", URL: "/api/findings/images/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+				{Type: "image", Hash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+					Caption: "gone", Missing: true},
+			}},
+	}
+	out := Project(findings, nil)
+	if !strings.Contains(out, "![XSS alert](/api/findings/images/") {
+		t.Fatalf("image markdown absent:\n%s", out)
+	}
+	if !strings.Contains(out, "⚠ Screenshot — evidence blob missing") {
+		t.Fatalf("missing image note absent:\n%s", out)
+	}
+}

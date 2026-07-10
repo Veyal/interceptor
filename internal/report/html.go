@@ -141,7 +141,9 @@ func markdownToHTML(md string) string {
 			out = append(out, "<li>"+inlineMD(strings.TrimPrefix(trim, "- "))+"</li>")
 		default:
 			closeList()
-			if strings.HasPrefix(trim, "_") && strings.HasSuffix(trim, "_") {
+			if alt, src, ok := parseMDImage(trim); ok {
+				out = append(out, `<p><img src="`+htmlEsc(src)+`" alt="`+htmlEsc(alt)+`" style="max-width:100%"></p>`)
+			} else if strings.HasPrefix(trim, "_") && strings.HasSuffix(trim, "_") {
 				out = append(out, "<p class=\"meta\">"+inlineMD(trim)+"</p>")
 			} else {
 				out = append(out, "<p>"+inlineMD(trim)+"</p>")
@@ -202,4 +204,24 @@ func htmlEsc(s string) string {
 	s = strings.ReplaceAll(s, ">", "&gt;")
 	s = strings.ReplaceAll(s, "\"", "&quot;")
 	return s
+}
+
+// parseMDImage recognizes a whole-line markdown image ![alt](src).
+func parseMDImage(line string) (alt, src string, ok bool) {
+	if !strings.HasPrefix(line, "![") {
+		return "", "", false
+	}
+	endAlt := strings.Index(line, "](")
+	if endAlt < 0 {
+		return "", "", false
+	}
+	if !strings.HasSuffix(line, ")") {
+		return "", "", false
+	}
+	alt = line[2:endAlt]
+	src = line[endAlt+2 : len(line)-1]
+	if src == "" {
+		return "", "", false
+	}
+	return alt, src, true
 }

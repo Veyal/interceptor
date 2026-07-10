@@ -2,7 +2,9 @@ package control
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -35,14 +37,27 @@ func checkFindingBodySize(body, detail, evidence, fix string) string {
 			return "finding body too large (max 1 MiB)"
 		}
 		// Validate individual text block sizes within the body JSON.
+		// Image blocks must reference a content hash — never embed base64/path
+		// (use POST /api/findings/{id}/images instead).
 		var blocks []struct {
 			Type string `json:"type"`
 			MD   string `json:"md,omitempty"`
+			Data string `json:"data,omitempty"`
+			Path string `json:"path,omitempty"`
+			Hash string `json:"hash,omitempty"`
 		}
 		if err := json.Unmarshal([]byte(body), &blocks); err == nil {
 			for _, b := range blocks {
 				if b.Type == "text" && len(b.MD) > maxFindingTextBlock {
 					return "finding text block too large (max 256 KiB per block)"
+				}
+				if b.Type == "image" {
+					if b.Data != "" || b.Path != "" {
+						return "image blocks must not include data or path — use POST /api/findings/{id}/images"
+					}
+					if b.Hash == "" {
+						return "image blocks require a content hash"
+					}
 				}
 			}
 		}
@@ -151,16 +166,16 @@ func (h *findingsAPI) createFinding(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.broadcast(map[string]any{"type": "findings.update"})
-	out, _ := h.st.GetFinding(id)
-	// AttachFlow has no foreign-key check on flowId, so a nonexistent flow
-	// attaches "successfully" at the DB level with no error — the enriched
-	// finding then shows it as a Missing PoC flow block. Surface that as a
-	// warning too, alongside any hard AttachFlow errors collected above.
-	if out != nil {
-		for _, fl := range out.Flows {
-			if fl.Missing {
-				warnings = append(warnings, fmt.Sprintf("attached flow %d not found — PoC will show as missing", fl.FlowID))
-			}
+	out, err := h.st.GetFinding(id)
+	if err != nil {
+		httpErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// AttachFlow rejects unknown flowIds; any Missing rows here mean a PoC was
+	// purged after attach — still surface that so create_finding callers notice.
+	for _, fl := range out.Flows {
+		if fl.Missing {
+			warnings = append(warnings, fmt.Sprintf("attached flow %d not found — PoC will show as missing", fl.FlowID))
 		}
 	}
 	writeJSON(w, http.StatusOK, findingWithWarnings(out, warnings))
@@ -276,11 +291,19 @@ func (h *findingsAPI) attachFindingFlow(w http.ResponseWriter, r *http.Request) 
 		pos = *in.Position
 	}
 	if err := h.st.AttachFlow(id, in.FlowID, in.Note, pos); err != nil {
+		if errors.Is(err, store.ErrFlowNotFound) {
+			httpErr(w, http.StatusNotFound, err.Error())
+			return
+		}
 		httpErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	h.broadcast(map[string]any{"type": "findings.update"})
-	out, _ := h.st.GetFinding(id)
+	out, err := h.st.GetFinding(id)
+	if err != nil {
+		httpErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -294,4 +317,63 @@ func (h *findingsAPI) detachFindingFlow(w http.ResponseWriter, r *http.Request) 
 	h.broadcast(map[string]any{"type": "findings.update"})
 	out, _ := h.st.GetFinding(id)
 	writeJSON(w, http.StatusOK, out)
+}
+
+// attachFindingImage uploads screenshot/evidence bytes and inserts an image
+// block into the finding narrative. Body: {data, mime?, caption?, position?}.
+func (h *findingsAPI) attachFindingImage(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	var in struct {
+		Mime     string `json:"mime"`
+		Data     string `json:"data"` // raw base64 or data: URL
+		Caption  string `json:"caption"`
+		Position *int   `json:"position"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		httpErr(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	mime, raw, err := store.DecodeNotesImagePayload(in.Mime, in.Data)
+	if err != nil {
+		httpErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	hash, _, err := h.st.PutImageBytes(mime, raw)
+	if err != nil {
+		httpErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	pos := -1
+	if in.Position != nil {
+		pos = *in.Position
+	}
+	if err := h.st.AttachImage(id, hash, mime, in.Caption, pos); err != nil {
+		httpErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.broadcast(map[string]any{"type": "findings.update"})
+	out, err := h.st.GetFinding(id)
+	if err != nil {
+		httpErr(w, http.StatusNotFound, "finding not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// getFindingImage serves a content-addressed finding screenshot by hash.
+func (h *findingsAPI) getFindingImage(w http.ResponseWriter, r *http.Request) {
+	hash := r.PathValue("hash")
+	rc, err := h.st.OpenBody(hash)
+	if err != nil {
+		httpErr(w, http.StatusNotFound, "image not found")
+		return
+	}
+	defer rc.Close()
+	// Prefer MIME from a finding that references this hash; never sniff — serve
+	// as allowlisted raster or inert application/octet-stream.
+	mime := h.st.FindingImageMIME(hash)
+	w.Header().Set("Content-Type", store.SanitizeNotesImageMIME(mime))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	_, _ = io.Copy(w, rc)
 }
