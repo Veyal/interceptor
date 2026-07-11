@@ -923,9 +923,136 @@ document.addEventListener('keydown',e=>{
 });
 
 /* ---- modals: close on Escape and on backdrop click (consistent across all) ---- */
-export const MODAL_IDS=['aiModal','notesAiModal','checksModal','activeModal','oobModal','authzModal','decModal','flowModal','confirmModal','shortcutsModal','projModal','compareModal','findCreateModal','findPickModal','findFlowPickModal'];
+export const MODAL_IDS=['aiModal','notesAiModal','checksModal','activeModal','oobModal','authzModal','decModal','flowModal','confirmModal','shortcutsModal','projModal','compareModal','findCreateModal','findPickModal','findFlowPickModal','imgLightbox'];
 export function closeModals(){let n=0;MODAL_IDS.forEach(id=>{const m=$('#'+id);if(m&&m.style.display&&m.style.display!=='none'){closeModal(m);n++;}});return n>0;}
 MODAL_IDS.forEach(id=>{const m=$('#'+id);if(m)m.addEventListener('mousedown',e=>{if(e.target===m)closeModal(m);});});
+
+/* ---- image lightbox (click any .md-img / .find-doc-img to focus + zoom) ---- */
+const _imgLb={scale:1,ox:0,oy:0,fitScale:1,dragging:false,moved:false,dx:0,dy:0,px:0,py:0,wired:false};
+function imgLbEls(){
+  return{m:$('#imgLightbox'),stage:$('#imgLbStage'),img:$('#imgLbImg'),cap:$('#imgLbCaption'),pct:$('#imgLbZoomPct')};
+}
+function imgLbApply(){
+  const{img,pct,stage}=imgLbEls();if(!img)return;
+  img.style.transform=`translate(${_imgLb.ox}px,${_imgLb.oy}px) scale(${_imgLb.scale})`;
+  if(pct)pct.textContent=Math.round((_imgLb.scale/Math.max(_imgLb.fitScale,1e-9))*100)+'%';
+  if(stage)stage.classList.toggle('is-dragging',_imgLb.dragging);
+}
+function imgLbFit(){
+  const{stage,img}=imgLbEls();if(!stage||!img||!img.naturalWidth)return;
+  const pad=24,sw=Math.max(1,stage.clientWidth-pad*2),sh=Math.max(1,stage.clientHeight-pad*2);
+  const s=Math.min(sw/img.naturalWidth,sh/img.naturalHeight);
+  _imgLb.fitScale=s;_imgLb.scale=s;
+  _imgLb.ox=(stage.clientWidth-img.naturalWidth*s)/2;
+  _imgLb.oy=(stage.clientHeight-img.naturalHeight*s)/2;
+  imgLbApply();
+}
+function imgLbZoomAt(factor,clientX,clientY){
+  const{stage}=imgLbEls();if(!stage)return;
+  const r=stage.getBoundingClientRect();
+  const x=clientX-r.left,y=clientY-r.top;
+  const ix=(x-_imgLb.ox)/_imgLb.scale,iy=(y-_imgLb.oy)/_imgLb.scale;
+  const min=_imgLb.fitScale*0.5,max=_imgLb.fitScale*12;
+  const next=Math.min(max,Math.max(min,_imgLb.scale*factor));
+  _imgLb.scale=next;_imgLb.ox=x-ix*next;_imgLb.oy=y-iy*next;
+  imgLbApply();
+}
+export function openImageLightbox(src,caption){
+  ensureImageLightbox();
+  const{m,stage,img,cap}=imgLbEls();if(!m||!img||!src)return;
+  if(cap)cap.textContent=caption||'Screenshot';
+  img.removeAttribute('width');img.removeAttribute('height');
+  img.alt=caption||'Screenshot';
+  img.onload=()=>{requestAnimationFrame(imgLbFit);};
+  // Bust same-src cache so onload always fires when reopening.
+  if(img.src===src)img.removeAttribute('src');
+  img.src=src;
+  _imgLb.dragging=false;_imgLb.moved=false;
+  openModal(m);
+  const closeBtn=$('#imgLbClose');
+  if(closeBtn)setTimeout(()=>closeBtn.focus(),0);
+  else if(stage)setTimeout(()=>stage.focus(),0);
+  if(img.complete&&img.naturalWidth)requestAnimationFrame(imgLbFit);
+}
+export function closeImageLightbox(){const{m}=imgLbEls();if(m&&m.style.display==='flex')closeModal(m);}
+function ensureImageLightbox(){
+  if(_imgLb.wired)return;
+  const{m,stage,img}=imgLbEls();
+  if(!m||!stage||!img)return;
+  _imgLb.wired=true;
+  $('#imgLbClose')?.addEventListener('click',e=>{e.stopPropagation();closeImageLightbox();});
+  $('#imgLbZoomIn')?.addEventListener('click',e=>{
+    e.stopPropagation();
+    const r=stage.getBoundingClientRect();
+    imgLbZoomAt(1.25,r.left+r.width/2,r.top+r.height/2);
+  });
+  $('#imgLbZoomOut')?.addEventListener('click',e=>{
+    e.stopPropagation();
+    const r=stage.getBoundingClientRect();
+    imgLbZoomAt(1/1.25,r.left+r.width/2,r.top+r.height/2);
+  });
+  $('#imgLbZoomReset')?.addEventListener('click',e=>{e.stopPropagation();imgLbFit();});
+  stage.addEventListener('wheel',e=>{
+    e.preventDefault();
+    imgLbZoomAt(e.deltaY<0?1.12:1/1.12,e.clientX,e.clientY);
+  },{passive:false});
+  stage.addEventListener('dblclick',e=>{
+    e.preventDefault();
+    if(_imgLb.scale>_imgLb.fitScale*1.05)imgLbFit();
+    else imgLbZoomAt((2.5*_imgLb.fitScale)/_imgLb.scale,e.clientX,e.clientY);
+  });
+  stage.addEventListener('pointerdown',e=>{
+    if(e.button!==0)return;
+    e.preventDefault();
+    _imgLb.dragging=true;_imgLb.moved=false;_imgLb.px=e.clientX;_imgLb.py=e.clientY;
+    _imgLb.dx=_imgLb.ox;_imgLb.dy=_imgLb.oy;
+    stage.setPointerCapture(e.pointerId);
+    imgLbApply();
+  });
+  stage.addEventListener('pointermove',e=>{
+    if(!_imgLb.dragging)return;
+    if(Math.abs(e.clientX-_imgLb.px)>3||Math.abs(e.clientY-_imgLb.py)>3)_imgLb.moved=true;
+    _imgLb.ox=_imgLb.dx+(e.clientX-_imgLb.px);
+    _imgLb.oy=_imgLb.dy+(e.clientY-_imgLb.py);
+    imgLbApply();
+  });
+  const endDrag=e=>{
+    if(!_imgLb.dragging)return;
+    _imgLb.dragging=false;
+    try{stage.releasePointerCapture(e.pointerId);}catch{/* already released */}
+    imgLbApply();
+  };
+  stage.addEventListener('pointerup',endDrag);
+  stage.addEventListener('pointercancel',endDrag);
+  // Click empty stage (letterbox) closes; click/drag on the image does not.
+  stage.addEventListener('click',e=>{
+    if(e.target!==stage||_imgLb.moved)return;
+    closeImageLightbox();
+  });
+  m.addEventListener('keydown',e=>{
+    if(e.key==='+'||e.key==='='){e.preventDefault();$('#imgLbZoomIn')?.click();}
+    else if(e.key==='-'||e.key==='_'){e.preventDefault();$('#imgLbZoomOut')?.click();}
+    else if(e.key==='0'){e.preventDefault();imgLbFit();}
+  });
+  window.addEventListener('resize',()=>{if(m.style.display==='flex')imgLbFit();});
+}
+function imgLbClickTarget(t){
+  if(!(t instanceof Element))return null;
+  const img=t.closest('img.md-img, img.find-doc-img');
+  if(!img||img.closest('#imgLightbox'))return null;
+  return img;
+}
+// Capture-phase so we open even if a parent stops bubble.
+document.addEventListener('click',e=>{
+  const img=imgLbClickTarget(e.target);if(!img)return;
+  const src=img.currentSrc||img.getAttribute('src')||img.src;if(!src)return;
+  e.preventDefault();
+  e.stopPropagation();
+  openImageLightbox(src,img.getAttribute('alt')||'');
+},true);
+// Wire controls once DOM is ready (module scripts are deferred, but be safe).
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ensureImageLightbox);
+else ensureImageLightbox();
 
 // uiPrompt: an in-app replacement for the browser's prompt() — themed, consistent,
 // resolves to the entered string or null (Cancel / Escape / backdrop / empty).

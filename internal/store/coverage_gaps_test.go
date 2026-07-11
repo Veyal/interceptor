@@ -708,7 +708,7 @@ func TestFindingBodyHelpers_UpdateFirstTextInBody(t *testing.T) {
 
 	// Update the detail (body != nil constraint: detail only, body=nil path).
 	newDetail := "updated detail"
-	if err := s.UpdateFinding(fid, nil, nil, nil, nil, &newDetail, nil, nil, nil, nil, nil, nil); err != nil {
+	if err := s.UpdateFinding(fid, nil, nil, nil, nil, &newDetail, nil, nil, nil, nil, nil, nil, nil, nil, nil); err != nil {
 		t.Fatalf("UpdateFinding: %v", err)
 	}
 

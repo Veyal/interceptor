@@ -15,55 +15,60 @@ func TestValidateFindingFormatRejectsWallOfText(t *testing.T) {
 		Detail:   wall,
 	})
 	if err == nil {
-		t.Fatal("expected hard reject for wall-of-text detail without ## headings")
+		t.Fatal("expected hard reject for wall-of-text detail without impact/why fields")
 	}
-	if !strings.Contains(err.Error(), "## Summary") {
-		t.Fatalf("error should point at required format, got: %v", err)
+	if !strings.Contains(strings.ToLower(err.Error()), "impact") {
+		t.Fatalf("error should point at impact/why fields, got: %v", err)
 	}
 }
 
-func TestValidateFindingFormatAcceptsSectionedBody(t *testing.T) {
-	body := `[{"type":"text","md":"## Summary\nAttacker can read all user PII via IDOR on /api/users/{id}.\n\n## Evidence\n- Baseline: flow 12 (own user)\n- Exploit: flow 13 (victim id)\n\n## Impact\nConfidentiality breach of all user records."},{"type":"flow","flowId":13,"note":"exploit"}]`
+func TestValidateFindingFormatAcceptsPointFirst(t *testing.T) {
+	body := `[{"type":"text","md":"**Before**: own profile"},{"type":"flow","flowId":12,"note":"Before: own account"},{"type":"text","md":"**Action**: swap id"},{"type":"flow","flowId":13,"note":"After: other user PII"}]`
 	err, warns := validateFindingFormat(findingFormatInput{
 		Severity: "High",
 		Impact:   "full PII disclosure",
+		Why:      "Broken object-level authorization",
+		Target:   "GET api.example.com/users/{id}",
 		Body:     body,
 	})
 	if err != nil {
-		t.Fatalf("well-formed body should pass: %v", err)
+		t.Fatalf("well-formed finding should pass: %v", err)
 	}
 	if len(warns) > 0 {
-		t.Fatalf("well-formed body should have no warnings, got %v", warns)
+		t.Fatalf("well-formed finding should have no warnings, got %v", warns)
 	}
 }
 
 func TestValidateFindingFormatWarnsMissingImpact(t *testing.T) {
-	body := `[{"type":"text","md":"## Summary\nIDOR on /api/users/{id} returns other users.\n\n## Evidence\nSee attached flow."}]`
+	body := `[{"type":"flow","flowId":1,"note":"After: leak"}]`
 	err, warns := validateFindingFormat(findingFormatInput{
 		Severity: "High",
+		Why:      "broken authz",
+		Target:   "example.com",
 		Body:     body,
 	})
 	if err != nil {
 		t.Fatalf("should warn not reject: %v", err)
 	}
 	joined := strings.Join(warns, "\n")
-	if !strings.Contains(joined, "## Impact") && !strings.Contains(strings.ToLower(joined), "impact") {
+	if !strings.Contains(strings.ToLower(joined), "impact") {
 		t.Fatalf("expected impact warning, got %v", warns)
 	}
 }
 
 func TestValidateFindingFormatWarnsHighWithoutFlow(t *testing.T) {
-	body := `[{"type":"text","md":"## Summary\nAttacker gains admin via default creds.\n\n## Evidence\nLogin with admin/admin worked.\n\n## Impact\nFull admin takeover."}]`
 	err, warns := validateFindingFormat(findingFormatInput{
 		Severity: "Critical",
 		Impact:   "admin takeover",
-		Body:     body,
+		Why:      "default credentials",
+		Target:   "admin.example.com",
+		Detail:   "Login with admin/admin worked.",
 	})
 	if err != nil {
 		t.Fatalf("should warn not reject: %v", err)
 	}
 	joined := strings.Join(warns, "\n")
-	if !strings.Contains(strings.ToLower(joined), "flow") {
+	if !strings.Contains(strings.ToLower(joined), "flow") && !strings.Contains(joined, "PoC") {
 		t.Fatalf("expected flow/PoC warning for Critical, got %v", warns)
 	}
 }
@@ -72,8 +77,9 @@ func TestValidateFindingFormatWarnsNeedsVerificationWithoutInstructions(t *testi
 	err, warns := validateFindingFormat(findingFormatInput{
 		Severity: "Medium",
 		Status:   "needs_verification",
-		Detail:   "## Summary\nPossible PII in bucket object.\n\n## Impact\nMay expose identity documents.",
 		Impact:   "possible PII exposure",
+		Why:      "open bucket",
+		Target:   "s3.example.com",
 	})
 	if err != nil {
 		t.Fatalf("should warn not reject: %v", err)
@@ -85,22 +91,22 @@ func TestValidateFindingFormatWarnsNeedsVerificationWithoutInstructions(t *testi
 }
 
 func TestValidateFindingFormatAllowsShortOpening(t *testing.T) {
-	// create_finding often starts with a short what/where; full sections come later.
-	err, warns := validateFindingFormat(findingFormatInput{
+	err, _ := validateFindingFormat(findingFormatInput{
 		Severity: "High",
 		Detail:   "IDOR on /api/users/{id} — attaching PoC next.",
 	})
 	if err != nil {
 		t.Fatalf("short opening must not be rejected: %v", err)
 	}
-	_ = warns // soft warnings about missing impact/sections are fine
 }
 
 func TestValidateFindingFormatWarnsCredentialsNotHighlighted(t *testing.T) {
-	body := `[{"type":"text","md":"## Summary\nNacos dump leaks DB password.\n\n## Evidence\nThe config contains password=s3cretValue in plaintext.\n\n## Impact\nAttacker can connect to the database."}]`
+	body := `[{"type":"text","md":"The config contains password=s3cretValue in plaintext."},{"type":"flow","flowId":1,"note":"After: dump"}]`
 	err, warns := validateFindingFormat(findingFormatInput{
 		Severity: "High",
 		Impact:   "DB access",
+		Why:      "secrets in cleartext",
+		Target:   "nacos",
 		Body:     body,
 	})
 	if err != nil {
@@ -114,88 +120,33 @@ func TestValidateFindingFormatWarnsCredentialsNotHighlighted(t *testing.T) {
 
 func TestMCPInstructionsRequireFindingFormat(t *testing.T) {
 	instr := mcpInstructions()
-	for _, want := range []string{"## Summary", "## Evidence", "## Impact", "REQUIRED FORMAT", "NOT confirmed"} {
+	for _, want := range []string{"REQUIRED FORMAT", "impact", "why", "target", "PoC", "NOT confirmed", "Before"} {
 		if !strings.Contains(instr, want) {
 			t.Fatalf("mcpInstructions missing %q:\n%s", want, instr)
 		}
 	}
 }
 
-func TestMCPInstructionsScopeHumanInputToEngagement(t *testing.T) {
-	instr := mcpInstructions()
-	for _, want := range []string{
-		"HUMAN INPUT (Interseptor / target engagement only)",
-		"Do NOT use it for local machine/OS admin",
-		"ASK FOR FINDINGS",
-		"do not route it through request_human_input",
-	} {
-		if !strings.Contains(instr, want) {
-			t.Fatalf("mcpInstructions missing %q:\n%s", want, instr)
-		}
-	}
-	desc := ""
-	for _, tdef := range New("http://127.0.0.1:1").toolList() {
-		if name, _ := tdef["name"].(string); name == "request_human_input" {
-			desc, _ = tdef["description"].(string)
-			break
-		}
-	}
-	if desc == "" {
-		t.Fatal("request_human_input tool not registered")
-	}
-	for _, want := range []string{"Interseptor / target-engagement", "Do NOT use for local OS/admin"} {
-		if !strings.Contains(desc, want) {
-			t.Fatalf("request_human_input description missing %q:\n%s", want, desc)
-		}
-	}
-}
-
-func TestCreateFindingRejectsWallOfText(t *testing.T) {
-	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API must not be called when format validation rejects")
-	}))
-	defer mock.Close()
-
-	srv := New(mock.URL)
-	wall := strings.Repeat("Exposed admin panel dumps credentials and allows remote code execution against the production database. ", 4)
-	_, err := srv.Call("create_finding", map[string]any{
-		"title":    "Nacos dump",
-		"severity": "Critical",
-		"detail":   wall,
-	})
-	if err == nil {
-		t.Fatal("expected create_finding to reject wall-of-text")
-	}
-	if !strings.Contains(err.Error(), "## Summary") {
-		t.Fatalf("reject message should cite required format: %v", err)
-	}
-}
-
-func TestCreateFindingAppendsFormatWarnings(t *testing.T) {
+func TestCreateFindingForwardsWhyAndFormat(t *testing.T) {
+	var gotBody map[string]any
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && r.URL.Path == "/api/findings" {
+			json.NewDecoder(r.Body).Decode(&gotBody)
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{"id": 9, "title": "t", "severity": "High"})
+			_, _ = w.Write([]byte(`{"id":42,"title":"t","ready":false}`))
 			return
 		}
 		w.WriteHeader(404)
 	}))
 	defer mock.Close()
-
-	srv := New(mock.URL)
-	body := `[{"type":"text","md":"## Summary\nDefault creds on admin panel.\n\n## Evidence\nLogged in with admin/admin."}]`
-	out, err := srv.Call("create_finding", map[string]any{
-		"title":    "Default creds",
-		"severity": "High",
-		"body":     body,
-	})
-	if err != nil {
-		t.Fatalf("create_finding: %v", err)
+	s := New(mock.URL)
+	s.report = func(Activity) {}
+	script := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_finding","arguments":{"title":"IDOR","severity":"High","impact":"PII leak","why":"broken authz","target":"api.example.com","cwe":"CWE-639","environment":"staging"}}}` + "\n"
+	var out strings.Builder
+	if err := s.Serve(strings.NewReader(script), &out); err != nil {
+		t.Fatalf("Serve: %v", err)
 	}
-	if !strings.Contains(out, "FORMAT WARNING") {
-		t.Fatalf("expected FORMAT WARNING in response, got:\n%s", out)
-	}
-	if !strings.Contains(out, "/#finding-9") {
-		t.Fatalf("UI URL still required:\n%s", out)
+	if gotBody["why"] != "broken authz" || gotBody["impact"] != "PII leak" || gotBody["cwe"] != "CWE-639" {
+		t.Fatalf("body = %+v", gotBody)
 	}
 }

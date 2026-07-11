@@ -36,7 +36,7 @@ func TestFindingImpactRoundTrip(t *testing.T) {
 
 	// Update impact.
 	newImpact := "attacker gains admin access — full account takeover"
-	if err := s.UpdateFinding(id, nil, nil, nil, nil, nil, nil, nil, nil, &newImpact, nil, nil); err != nil {
+	if err := s.UpdateFinding(id, nil, nil, nil, nil, nil, nil, nil, nil, &newImpact, nil, nil, nil, nil, nil); err != nil {
 		t.Fatalf("UpdateFinding impact: %v", err)
 	}
 	got2, err := s.GetFinding(id)
@@ -105,7 +105,7 @@ func TestFindingsCRUDAndPoCFlows(t *testing.T) {
 
 	// Update status; list filter by status.
 	verified := "verified"
-	if err := s.UpdateFinding(id, nil, &verified, nil, nil, nil, nil, nil, nil, nil, nil, nil); err != nil {
+	if err := s.UpdateFinding(id, nil, &verified, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil); err != nil {
 		t.Fatalf("UpdateFinding: %v", err)
 	}
 	open, _ := s.ListFindings("", "open")
@@ -280,7 +280,7 @@ func TestFindingCvssRoundTrip(t *testing.T) {
 	}
 
 	vector := "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
-	if err := s.UpdateFinding(id, nil, nil, nil, nil, nil, nil, nil, nil, nil, &vector, nil); err != nil {
+	if err := s.UpdateFinding(id, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &vector, nil); err != nil {
 		t.Fatalf("UpdateFinding cvss: %v", err)
 	}
 	got2, err := s.GetFinding(id)
@@ -319,7 +319,7 @@ func TestUpdateFindingBodyPreservesFlowOrder(t *testing.T) {
 	// Body is now: [text:"original detail", flow:f1, flow:f2]
 	// Update detail only (no body arg) — must update in-place, not append or reorder.
 	newDetail := "updated detail"
-	if err := s.UpdateFinding(id, nil, nil, nil, nil, &newDetail, nil, nil, nil, nil, nil, nil); err != nil {
+	if err := s.UpdateFinding(id, nil, nil, nil, nil, &newDetail, nil, nil, nil, nil, nil, nil, nil, nil, nil); err != nil {
 		t.Fatalf("UpdateFinding detail: %v", err)
 	}
 
@@ -416,7 +416,7 @@ func TestUpdateFindingWithBodyArg(t *testing.T) {
 	}
 
 	newBody := `[{"type":"text","md":"first block"},{"type":"text","md":"second block"}]`
-	if err := s.UpdateFinding(id, nil, nil, nil, nil, nil, nil, nil, &newBody, nil, nil, nil); err != nil {
+	if err := s.UpdateFinding(id, nil, nil, nil, nil, nil, nil, nil, &newBody, nil, nil, nil, nil, nil, nil); err != nil {
 		t.Fatalf("UpdateFinding body: %v", err)
 	}
 
@@ -517,7 +517,7 @@ func TestFindingVerificationInstructionsRoundTrip(t *testing.T) {
 	}
 
 	updated := "Also check EXIF for GPS."
-	if err := s.UpdateFinding(id, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &updated); err != nil {
+	if err := s.UpdateFinding(id, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &updated); err != nil {
 		t.Fatalf("UpdateFinding: %v", err)
 	}
 	got, err = s.GetFinding(id)

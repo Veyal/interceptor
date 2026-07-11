@@ -66,7 +66,7 @@ func TestProjectRendersFindingsAndPoCsAndAppendix(t *testing.T) {
 		t.Fatalf("severity order wrong (hi=%d lo=%d):\n%s", hi, lo, out)
 	}
 	// Status + PoC flow render under the finding.
-	for _, want := range []string{"### 1. IDOR on user", "**Status:** verified", "**PoC flows:**", "GET app.test/api/user/2", "→ 200", "leaks other user"} {
+	for _, want := range []string{"### 1. IDOR on user", "**Status:** verified", "**PoC / Evidence:**", "**PoC flows:**", "GET app.test/api/user/2", "→ 200", "leaks other user", "**Remediation:** authorize"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q in:\n%s", want, out)
 		}
@@ -311,34 +311,45 @@ func TestRenderFindingNormalContentUnaffected(t *testing.T) {
 }
 
 // TestProjectImpactRendering verifies that a curated finding with Impact renders
-// "**Impact:**" (not "**Remediation:**") in the engagement report, while a passive
-// scan issue (store.Issue with Fix) still renders "**Remediation:**".
+// "**Impact:**" (not mixed into passive-scan Remediation), while a passive
+// scan issue (store.Issue with Fix) still renders "**Remediation:**" in the appendix.
 func TestProjectImpactRendering(t *testing.T) {
 	findings := []store.Finding{
 		{ID: 1, Severity: "High", Status: "open", Title: "SSRF via redirect",
-			Target: "POST /api/fetch", Impact: "attacker reads internal metadata endpoint"},
+			Target: "POST /api/fetch", Impact: "attacker reads internal metadata endpoint",
+			Why: "URL follow does not block link-local / metadata hosts"},
 	}
 	issues := []store.Issue{
 		{Severity: "Medium", Title: "Missing HSTS", Target: "GET /", Fix: "add Strict-Transport-Security header"},
 	}
 	out := Project(findings, issues)
 
-	// Curated finding with Impact renders "**Impact:**".
-	if !strings.Contains(out, "**Impact:** attacker reads internal metadata endpoint") {
-		t.Fatalf("missing Impact line in project report:\n%s", out)
+	for _, want := range []string{
+		"**Impact:** attacker reads internal metadata endpoint",
+		"**Why:** URL follow does not block link-local / metadata hosts",
+		"**Target:** `POST /api/fetch`",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in project report:\n%s", want, out)
+		}
 	}
-	// "**Remediation:**" must NOT appear for curated findings (only in passive issues appendix).
-	// Check the main body section does not contain Remediation.
+	// Section order: Impact before Why before Target.
+	imp := strings.Index(out, "**Impact:**")
+	why := strings.Index(out, "**Why:**")
+	tgt := strings.Index(out, "**Target:**")
+	if !(imp >= 0 && why > imp && tgt > why) {
+		t.Fatalf("section order wrong (impact=%d why=%d target=%d):\n%s", imp, why, tgt, out)
+	}
+
 	appendixIdx := strings.Index(out, "## Appendix")
 	if appendixIdx < 0 {
 		t.Fatalf("appendix section missing:\n%s", out)
 	}
 	mainBody := out[:appendixIdx]
 	if strings.Contains(mainBody, "**Remediation:**") {
-		t.Fatalf("Remediation must not appear in curated findings section:\n%s", mainBody)
+		t.Fatalf("Remediation must not appear when Fix is empty:\n%s", mainBody)
 	}
 
-	// Passive issue in the appendix still renders "**Remediation:**".
 	appendix := out[appendixIdx:]
 	if !strings.Contains(appendix, "**Remediation:** add Strict-Transport-Security header") {
 		t.Fatalf("passive issue Remediation missing from appendix:\n%s", appendix)

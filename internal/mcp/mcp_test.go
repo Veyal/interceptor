@@ -679,3 +679,38 @@ func TestAddFindingImageForwardsToREST(t *testing.T) {
 		t.Fatalf("position = %v", gotBody["position"])
 	}
 }
+
+// TestRenderFlowPreviewAttachForwardsToREST verifies render_flow_preview with
+// findingId posts to /api/findings/{id}/flow-preview.
+func TestRenderFlowPreviewAttachForwardsToREST(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]any
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/flow-preview") {
+			gotPath = r.URL.Path
+			json.NewDecoder(r.Body).Decode(&gotBody)
+			io.WriteString(w, `{"id":3,"title":"t","blocks":[{"type":"image","hash":"bb","caption":"cap"}]}`)
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer mock.Close()
+
+	s := New(mock.URL)
+	s.report = func(Activity) {}
+
+	script := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"render_flow_preview","arguments":{"flowId":9,"findingId":3,"side":"req","pretty":true,"layout":"horizontal","theme":"light","caption":"cap","position":1}}}` + "\n"
+	var out bytes.Buffer
+	if err := s.Serve(strings.NewReader(script), &out); err != nil {
+		t.Fatalf("Serve: %v", err)
+	}
+	if gotPath != "/api/findings/3/flow-preview" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotBody["flowId"] != float64(9) || gotBody["side"] != "req" || gotBody["caption"] != "cap" {
+		t.Fatalf("body = %+v", gotBody)
+	}
+	if gotBody["pretty"] != true || gotBody["layout"] != "horizontal" || gotBody["theme"] != "light" {
+		t.Fatalf("options not forwarded: %+v", gotBody)
+	}
+}

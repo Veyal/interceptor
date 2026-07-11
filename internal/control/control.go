@@ -79,6 +79,8 @@ type Hub struct {
 	SetCaptureScopeOnly func(bool)
 	// SetSuppressBrowserTelemetry toggles suppression of Chrome/Firefox telemetry. Set by cmd.
 	SetSuppressBrowserTelemetry func(bool)
+	// SetSuppressAndroidTelemetry toggles suppression of Android/GMS/Crashlytics telemetry. Set by cmd.
+	SetSuppressAndroidTelemetry func(bool)
 	// SetInvisibleProxy toggles transparent/invisible proxy mode. Set by cmd.
 	SetInvisibleProxy func(bool)
 	// SetTLSBypassHosts replaces the list of hosts tunneled raw (no MITM). Set by cmd.
@@ -291,6 +293,7 @@ type settingsJSON struct {
 	OobEnabled               bool     `json:"oobEnabled"`
 	CaptureScopeOnly         bool     `json:"captureScopeOnly"`
 	SuppressBrowserTelemetry bool     `json:"suppressBrowserTelemetry"`
+	SuppressAndroidTelemetry bool     `json:"suppressAndroidTelemetry"`
 	InvisibleProxy           bool     `json:"invisibleProxy"`
 	TLSBypassHosts           []string `json:"tlsBypassHosts"`
 	AutoBypassOnPinFailure   bool     `json:"autoBypassOnPinFailure"`
@@ -1281,6 +1284,8 @@ func (h *settingsAPI) getSettings(w http.ResponseWriter, r *http.Request) {
 	suppressTelemetry, stOK, _ := h.st.GetSetting("capture.suppressBrowserTelemetry")
 	// Default to true when the key has never been written (first run).
 	suppressTelemetryOn := !stOK || suppressTelemetry == "1"
+	suppressAndroid, andOK, _ := h.st.GetSetting("capture.suppressAndroidTelemetry")
+	suppressAndroidOn := !andOK || suppressAndroid == "1"
 	invisibleProxy, _, _ := h.st.GetSetting("proxy.invisibleProxy")
 	tlsBypassRaw, _, _ := h.st.GetSetting(tlsBypassSettingKey)
 	autoBypass, _, _ := h.st.GetSetting("proxy.autoBypassOnPinFailure")
@@ -1303,6 +1308,7 @@ func (h *settingsAPI) getSettings(w http.ResponseWriter, r *http.Request) {
 		OobEnabled:               h.oobEnabled(),
 		CaptureScopeOnly:         scopeOnly == "1",
 		SuppressBrowserTelemetry: suppressTelemetryOn,
+		SuppressAndroidTelemetry: suppressAndroidOn,
 		InvisibleProxy:           invisibleProxy == "1",
 		TLSBypassHosts:           parseHostList(tlsBypassRaw),
 		AutoBypassOnPinFailure:   autoBypass == "1",
@@ -1341,6 +1347,7 @@ func (h *settingsAPI) putSettings(w http.ResponseWriter, r *http.Request) {
 		OobEnabled               *bool     `json:"oobEnabled"`
 		CaptureScopeOnly         *bool     `json:"captureScopeOnly"`
 		SuppressBrowserTelemetry *bool     `json:"suppressBrowserTelemetry"`
+		SuppressAndroidTelemetry *bool     `json:"suppressAndroidTelemetry"`
 		InvisibleProxy           *bool     `json:"invisibleProxy"`
 		TLSBypassHosts           *[]string `json:"tlsBypassHosts"`
 		AutoBypassOnPinFailure   *bool     `json:"autoBypassOnPinFailure"`
@@ -1442,6 +1449,19 @@ func (h *settingsAPI) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if h.SetSuppressBrowserTelemetry != nil {
 			h.SetSuppressBrowserTelemetry(*in.SuppressBrowserTelemetry)
+		}
+		h.broadcast(map[string]any{"type": "settings.update"})
+	}
+	if in.SuppressAndroidTelemetry != nil {
+		v := "0"
+		if *in.SuppressAndroidTelemetry {
+			v = "1"
+		}
+		if !h.persistSetting(w, "capture.suppressAndroidTelemetry", v) {
+			return
+		}
+		if h.SetSuppressAndroidTelemetry != nil {
+			h.SetSuppressAndroidTelemetry(*in.SuppressAndroidTelemetry)
 		}
 		h.broadcast(map[string]any{"type": "settings.update"})
 	}

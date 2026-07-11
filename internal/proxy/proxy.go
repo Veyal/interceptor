@@ -43,17 +43,18 @@ type ScopeChecker interface {
 
 // Server is the intercepting forward-proxy HTTP handler.
 type Server struct {
-	st        *store.Store
-	cap       *capture.Capturer
-	ca        *tlsca.CA         // nil → HTTPS CONNECT returns 501
-	eng       *intercept.Engine // nil → no intercept/rules
-	events    Events            // nil → no live notifications
-	Scope     ScopeChecker      // nil → everything in scope
-	tr        *http.Transport
-	upstream            atomic.Pointer[url.URL] // optional chained upstream proxy
-	scopeOnly           atomic.Bool             // when set, only in-scope flows are persisted
-	suppressTelemetry   atomic.Bool             // when set, browser telemetry is not captured or intercepted
-	invisible           atomic.Bool             // when set, origin-form requests (no absolute URI) are forwarded from the Host header
+	st                       *store.Store
+	cap                      *capture.Capturer
+	ca                       *tlsca.CA         // nil → HTTPS CONNECT returns 501
+	eng                      *intercept.Engine // nil → no intercept/rules
+	events                   Events            // nil → no live notifications
+	Scope                    ScopeChecker      // nil → everything in scope
+	tr                       *http.Transport
+	upstream                 atomic.Pointer[url.URL] // optional chained upstream proxy
+	scopeOnly                atomic.Bool             // when set, only in-scope flows are persisted
+	suppressTelemetry        atomic.Bool             // when set, browser telemetry is not captured or intercepted
+	suppressAndroidTelemetry atomic.Bool             // when set, Android/GMS/Crashlytics telemetry is not captured or intercepted
+	invisible                atomic.Bool             // when set, origin-form requests (no absolute URI) are forwarded from the Host header
 
 	// TLS-bypass: CONNECTs to a matching host are tunneled raw (no MITM) so the
 	// client's pinning/handshake reaches the real origin and the app keeps working.
@@ -558,7 +559,8 @@ func (s *Server) gateAndForward(flow *store.Flow, r *http.Request) (*http.Respon
 
 	// Intercept gate (Burp-style hold) — only for in-scope, non-self, non-telemetry requests.
 	if s.eng != nil && s.eng.Enabled() && s.shouldCapture(flow) && (s.Scope == nil || s.Scope.InScope(flow)) &&
-		(!s.suppressTelemetry.Load() || !isBrowserTelemetry(flow.Host)) {
+		(!s.suppressTelemetry.Load() || !isBrowserTelemetry(flow.Host)) &&
+		(!s.suppressAndroidTelemetry.Load() || !isAndroidTelemetry(flow.Host)) {
 		raw, truncated := dumpRequest(out)
 		if truncated {
 			// The body exceeds the editor buffer, so the raw dump is truncated and a
@@ -946,6 +948,12 @@ func (s *Server) SetCaptureScopeOnly(v bool) { s.scopeOnly.Store(v) }
 // default; users may turn it off to inspect browser background traffic.
 func (s *Server) SetSuppressBrowserTelemetry(v bool) { s.suppressTelemetry.Store(v) }
 
+// SetSuppressAndroidTelemetry controls whether known Android OS, Google Play
+// Services, Crashlytics, and Analytics phone-home hosts are silently forwarded
+// without being captured or held by the intercept gate. Enabled by default;
+// users may turn it off to inspect GMS / SDK background traffic.
+func (s *Server) SetSuppressAndroidTelemetry(v bool) { s.suppressAndroidTelemetry.Store(v) }
+
 // SetInvisibleProxy toggles transparent/invisible proxy mode (Burp's "Support
 // invisible proxying"). When enabled, origin-form requests from clients that
 // aren't proxy-configured (traffic redirected via iptables/pf/DNS/port
@@ -955,13 +963,16 @@ func (s *Server) SetSuppressBrowserTelemetry(v bool) { s.suppressTelemetry.Store
 func (s *Server) SetInvisibleProxy(v bool) { s.invisible.Store(v) }
 
 // persistable reports whether a flow should be written to history: never our own
-// loopback traffic; never browser telemetry when suppression is on; and — when
-// scope-only capture is on and a scope is set — only when it is in scope.
+// loopback traffic; never browser/Android telemetry when suppression is on; and
+// — when scope-only capture is on and a scope is set — only when it is in scope.
 func (s *Server) persistable(flow *store.Flow) bool {
 	if !s.shouldCapture(flow) {
 		return false
 	}
 	if s.suppressTelemetry.Load() && isBrowserTelemetry(flow.Host) {
+		return false
+	}
+	if s.suppressAndroidTelemetry.Load() && isAndroidTelemetry(flow.Host) {
 		return false
 	}
 	if s.scopeOnly.Load() && s.Scope != nil && !s.Scope.InScope(flow) {
@@ -1118,7 +1129,6 @@ func defaultPort(scheme string) int {
 	}
 	return 80
 }
-
 
 func hostPort(host string, port int, scheme string) string {
 	if port == defaultPort(scheme) {

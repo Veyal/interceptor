@@ -112,7 +112,7 @@ func (s *Store) MergeFrom(peerDBPath, peerBodiesDir, label string) (MergeStats, 
 		return stats, fmt.Errorf("index local findings: %w", err)
 	}
 	frows, err := peer.Query(`SELECT id, severity, status, source, title, target, detail,
-		evidence, fix, body, impact, cvss, verification_instructions FROM findings`)
+		evidence, fix, body, impact, why, cwe, environment, cvss, verification_instructions FROM findings`)
 	if err != nil {
 		return stats, fmt.Errorf("read peer findings: %w", err)
 	}
@@ -124,7 +124,7 @@ func (s *Store) MergeFrom(peerDBPath, peerBodiesDir, label string) (MergeStats, 
 	for frows.Next() {
 		var f Finding
 		if err := frows.Scan(&f.ID, &f.Severity, &f.Status, &f.Source, &f.Title, &f.Target,
-			&f.Detail, &f.Evidence, &f.Fix, &f.Body, &f.Impact, &f.Cvss, &f.VerificationInstructions); err != nil {
+			&f.Detail, &f.Evidence, &f.Fix, &f.Body, &f.Impact, &f.Why, &f.Cwe, &f.Environment, &f.Cvss, &f.VerificationInstructions); err != nil {
 			frows.Close()
 			return stats, err
 		}

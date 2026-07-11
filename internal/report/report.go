@@ -227,8 +227,8 @@ func summaryTable(total int, counts, statusCounts map[string]int) string {
 	return b.String()
 }
 
-// renderFinding writes one finding's section (heading, metadata, narrative body
-// or legacy detail/evidence/PoC-flows fallback) to b.
+// renderFinding writes one finding's section in report order:
+// metadata → Impact → Why → Target → PoC/Evidence → optional Remediation.
 //
 // Finding content (Title, Impact, narrative text/flow-note blocks) can
 // originate from untrusted proxied content — e.g. an AI pastes page content
@@ -242,17 +242,32 @@ func renderFinding(b *strings.Builder, n int, f store.Finding) {
 	if f.VerificationInstructions != "" {
 		b.WriteString("- **Verification:** " + sanitizeLine(f.VerificationInstructions) + "\n")
 	}
-	if f.Target != "" {
-		b.WriteString("- **Target:** `" + code(f.Target) + "`\n")
-	}
 	if f.Cvss != "" {
 		b.WriteString("- **CVSS:** " + sanitizeLine(f.Cvss) + "\n")
 	}
-	if f.Impact != "" {
-		b.WriteString("- **Impact:** " + sanitizeLine(f.Impact) + "\n")
+	if f.Cwe != "" {
+		b.WriteString("- **CWE:** " + sanitizeLine(f.Cwe) + "\n")
+	}
+	if f.Environment != "" {
+		b.WriteString("- **Environment:** " + sanitizeLine(f.Environment) + "\n")
 	}
 	b.WriteString("\n")
-	// Render interleaved narrative body (text + PoC flows in author's order).
+
+	if f.Impact != "" {
+		b.WriteString("**Impact:** " + sanitizeLine(f.Impact) + "\n\n")
+	}
+	if f.Why != "" {
+		b.WriteString("**Why:** " + sanitizeLine(f.Why) + "\n\n")
+	}
+	if f.Target != "" {
+		b.WriteString("**Target:** `" + code(f.Target) + "`\n\n")
+	}
+
+	hasPoC := len(f.Blocks) > 0 || f.Detail != "" || f.Evidence != "" || len(f.Flows) > 0
+	if hasPoC {
+		b.WriteString("**PoC / Evidence:**\n\n")
+	}
+	// Render interleaved PoC timeline (text + flows + images in author's order).
 	if len(f.Blocks) > 0 {
 		for _, bl := range f.Blocks {
 			if bl.Type == "text" && bl.MD != "" {
@@ -295,36 +310,40 @@ func renderFinding(b *strings.Builder, n int, f store.Finding) {
 				}
 			}
 		}
-		return
-	}
-	// Legacy fallback: separate detail / evidence / flows sections.
-	if f.Detail != "" {
-		b.WriteString(f.Detail + "\n\n")
-	}
-	if f.Evidence != "" {
-		b.WriteString("**Evidence:** " + f.Evidence + "\n\n")
-	}
-	if len(f.Flows) > 0 {
-		b.WriteString("**PoC flows:**\n")
-		for _, fl := range f.Flows {
-			if fl.Missing {
-				line := fmt.Sprintf("- ⚠ PoC flow #%d — evidence no longer in history", fl.FlowID)
+	} else {
+		// Legacy fallback: separate detail / evidence / flows sections.
+		if f.Detail != "" {
+			b.WriteString(f.Detail + "\n\n")
+		}
+		if f.Evidence != "" {
+			b.WriteString("**Evidence:** " + f.Evidence + "\n\n")
+		}
+		if len(f.Flows) > 0 {
+			b.WriteString("**PoC flows:**\n")
+			for _, fl := range f.Flows {
+				if fl.Missing {
+					line := fmt.Sprintf("- ⚠ PoC flow #%d — evidence no longer in history", fl.FlowID)
+					if fl.Note != "" {
+						line += " — " + code(fl.Note)
+					}
+					b.WriteString(line + "\n")
+					continue
+				}
+				line := fmt.Sprintf("- `%s %s%s`", orVal(fl.Method, "GET"), code(fl.Host), code(fl.Path))
+				if fl.Status > 0 {
+					line += fmt.Sprintf(" → %d", fl.Status)
+				}
 				if fl.Note != "" {
 					line += " — " + code(fl.Note)
 				}
 				b.WriteString(line + "\n")
-				continue
+				renderFlowRaw(b, fl.ReqRaw, fl.ResRaw)
 			}
-			line := fmt.Sprintf("- `%s %s%s`", orVal(fl.Method, "GET"), code(fl.Host), code(fl.Path))
-			if fl.Status > 0 {
-				line += fmt.Sprintf(" → %d", fl.Status)
-			}
-			if fl.Note != "" {
-				line += " — " + code(fl.Note)
-			}
-			b.WriteString(line + "\n")
-			renderFlowRaw(b, fl.ReqRaw, fl.ResRaw)
 		}
+	}
+
+	if f.Fix != "" {
+		b.WriteString("**Remediation:** " + sanitizeLine(f.Fix) + "\n\n")
 	}
 }
 

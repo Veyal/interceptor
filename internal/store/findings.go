@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -31,6 +32,9 @@ type Finding struct {
 	Evidence  string `json:"evidence"`       // legacy only
 	Fix       string `json:"fix"`            // back-compat: kept but superseded by Impact
 	Impact    string `json:"impact"`         // security impact — what an attacker gains / business consequence
+	Why       string `json:"why"`            // why this is a vulnerability (broken security property)
+	Cwe       string `json:"cwe,omitempty"`  // CWE id or short class, e.g. CWE-639 / IDOR
+	Environment string `json:"environment,omitempty"` // prod | staging | local | ""
 	Cvss      string `json:"cvss,omitempty"` // CVSS score or vector string, e.g. "7.5" or "CVSS:3.1/AV:N/..."
 	// VerificationInstructions tells a human reviewer exactly what to check when
 	// Status is needs_verification (e.g. "download X and run file on it").
@@ -38,6 +42,9 @@ type Finding struct {
 	Body                     string         `json:"body,omitempty"` // stored JSON blocks (use Blocks for rendering)
 	Flows                    []FindingFlow  `json:"flows"`          // attached flow metadata (for list sidebar count)
 	Blocks                   []FindingBlock `json:"blocks"`         // ordered narrative body (source of truth for UI)
+	// Ready / Missing are computed at read time (not stored) — report-ready checklist.
+	Ready   bool     `json:"ready"`
+	Missing []string `json:"missing,omitempty"`
 }
 
 // FindingBlock is one element in a finding's narrative body.
@@ -323,6 +330,103 @@ func normalizeFindingSource(s string) string {
 	}
 }
 
+func normalizeFindingEnvironment(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "prod", "production":
+		return "prod"
+	case "staging", "stage", "stg":
+		return "staging"
+	case "local", "dev", "development":
+		return "local"
+	default:
+		return strings.TrimSpace(s)
+	}
+}
+
+// EnrichCompleteness fills Ready/Missing and best-effort migrates Why from old
+// "## Why this is a vulnerability" narrative when the why column is empty.
+func (f *Finding) EnrichCompleteness() {
+	if f == nil {
+		return
+	}
+	if strings.TrimSpace(f.Why) == "" {
+		if w := ExtractWhyFromNarrative(f.narrativeText()); w != "" {
+			f.Why = w
+		}
+	}
+	f.Missing = f.completenessGaps()
+	f.Ready = len(f.Missing) == 0
+}
+
+func (f *Finding) narrativeText() string {
+	var parts []string
+	if d := strings.TrimSpace(f.Detail); d != "" {
+		parts = append(parts, d)
+	}
+	for _, b := range f.Blocks {
+		if b.Type == "text" && strings.TrimSpace(b.MD) != "" {
+			parts = append(parts, b.MD)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func (f *Finding) completenessGaps() []string {
+	var miss []string
+	if strings.TrimSpace(f.Title) == "" {
+		miss = append(miss, "title")
+	}
+	if strings.TrimSpace(f.Impact) == "" {
+		miss = append(miss, "impact")
+	}
+	if strings.TrimSpace(f.Why) == "" {
+		miss = append(miss, "why")
+	}
+	if strings.TrimSpace(f.Target) == "" {
+		miss = append(miss, "target")
+	}
+	flowN, imgN := 0, 0
+	for _, b := range f.Blocks {
+		switch b.Type {
+		case "flow":
+			if !b.Missing {
+				flowN++
+			}
+		case "image":
+			if !b.Missing && b.Hash != "" {
+				imgN++
+			}
+		}
+	}
+	// Also count finding_flows if blocks empty of flows but Flows populated.
+	if flowN == 0 {
+		for _, fl := range f.Flows {
+			if !fl.Missing {
+				flowN++
+			}
+		}
+	}
+	if flowN+imgN == 0 {
+		miss = append(miss, "poc")
+	}
+	sev := strings.ToLower(strings.TrimSpace(f.Severity))
+	if (sev == "critical" || sev == "high") && flowN < 2 {
+		miss = append(miss, "poc_before_after")
+	}
+	return miss
+}
+
+// ExtractWhyFromNarrative pulls the body of "## Why this is a vulnerability"
+// from legacy markdown (best-effort migration).
+func ExtractWhyFromNarrative(text string) string {
+	re := regexp.MustCompile(`(?im)^##\s+Why this is a vulnerability\s*\n+([\s\S]*?)(?:\n##\s+|$)`)
+	m := re.FindStringSubmatch(text)
+	if len(m) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(m[1])
+}
+
 // CreateFinding inserts a finding and sets f.ID/f.TS/f.UpdatedTS. Title is required.
 // If Body is empty it is synthesized from Detail + Evidence so new findings are
 // immediately in the interleaved-body format.
@@ -332,13 +436,14 @@ func (s *Store) CreateFinding(f *Finding) (int64, error) {
 	f.Severity = normalizeFindingSeverity(f.Severity)
 	f.Status = normalizeFindingStatus(f.Status)
 	f.Source = normalizeFindingSource(f.Source)
+	f.Environment = normalizeFindingEnvironment(f.Environment)
 	if f.Body == "" {
 		f.Body = initialBody(f.Detail, f.Evidence)
 	}
 	res, err := s.db.Exec(
-		`INSERT INTO findings (ts, updated_ts, severity, status, source, title, target, detail, evidence, fix, body, impact, cvss, verification_instructions)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		f.TS, f.UpdatedTS, f.Severity, f.Status, f.Source, f.Title, f.Target, f.Detail, f.Evidence, f.Fix, f.Body, f.Impact, f.Cvss, f.VerificationInstructions)
+		`INSERT INTO findings (ts, updated_ts, severity, status, source, title, target, detail, evidence, fix, body, impact, why, cwe, environment, cvss, verification_instructions)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		f.TS, f.UpdatedTS, f.Severity, f.Status, f.Source, f.Title, f.Target, f.Detail, f.Evidence, f.Fix, f.Body, f.Impact, f.Why, f.Cwe, f.Environment, f.Cvss, f.VerificationInstructions)
 	if err != nil {
 		return 0, err
 	}
@@ -353,7 +458,7 @@ func (s *Store) CreateFinding(f *Finding) (int64, error) {
 // is updated (MCP backward-compat: AI updates detail → UI sees the change).
 // When body is set, detail is synced from its first text block so MCP list_findings
 // still shows meaningful text.
-func (s *Store) UpdateFinding(id int64, severity, status, title, target, detail, evidence, fix, body, impact, cvss, verificationInstructions *string) error {
+func (s *Store) UpdateFinding(id int64, severity, status, title, target, detail, evidence, fix, body, impact, why, cwe, environment, cvss, verificationInstructions *string) error {
 	// If detail changes and there is an existing body, sync the first text block.
 	if detail != nil && body == nil {
 		var existBody string
@@ -407,6 +512,18 @@ func (s *Store) UpdateFinding(id int64, severity, status, title, target, detail,
 	if impact != nil {
 		sets = append(sets, "impact=?")
 		args = append(args, *impact)
+	}
+	if why != nil {
+		sets = append(sets, "why=?")
+		args = append(args, *why)
+	}
+	if cwe != nil {
+		sets = append(sets, "cwe=?")
+		args = append(args, *cwe)
+	}
+	if environment != nil {
+		sets = append(sets, "environment=?")
+		args = append(args, normalizeFindingEnvironment(*environment))
 	}
 	if cvss != nil {
 		sets = append(sets, "cvss=?")
@@ -544,14 +661,14 @@ func (s *Store) findingFlows(findingID int64) ([]FindingFlow, error) {
 func scanFinding(sc scanner) (*Finding, error) {
 	var f Finding
 	if err := sc.Scan(&f.ID, &f.TS, &f.UpdatedTS, &f.Severity, &f.Status, &f.Source,
-		&f.Title, &f.Target, &f.Detail, &f.Evidence, &f.Fix, &f.Body, &f.Impact, &f.Cvss,
+		&f.Title, &f.Target, &f.Detail, &f.Evidence, &f.Fix, &f.Body, &f.Impact, &f.Why, &f.Cwe, &f.Environment, &f.Cvss,
 		&f.VerificationInstructions); err != nil {
 		return nil, err
 	}
 	return &f, nil
 }
 
-const findingCols = `id, ts, updated_ts, severity, status, source, title, target, detail, evidence, fix, body, impact, cvss, verification_instructions`
+const findingCols = `id, ts, updated_ts, severity, status, source, title, target, detail, evidence, fix, body, impact, why, cwe, environment, cvss, verification_instructions`
 
 // GetFinding loads one finding with its narrative body blocks and PoC flow list.
 func (s *Store) GetFinding(id int64) (*Finding, error) {
@@ -570,6 +687,7 @@ func (s *Store) GetFinding(id int64) (*Finding, error) {
 		f.Blocks = []FindingBlock{}
 	}
 	s.enrichImageBlocks(f.Blocks)
+	f.EnrichCompleteness()
 	return f, nil
 }
 
@@ -624,6 +742,7 @@ func (s *Store) ListFindings(severity, status string) ([]Finding, error) {
 				out[i].Blocks = []FindingBlock{}
 			}
 			s.enrichImageBlocks(out[i].Blocks)
+			out[i].EnrichCompleteness()
 		}
 	}
 	return out, nil

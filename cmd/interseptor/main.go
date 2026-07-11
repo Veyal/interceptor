@@ -231,6 +231,11 @@ func run() error {
 	if v, ok, _ := st.GetSetting("capture.suppressBrowserTelemetry"); !ok || v == "1" {
 		prx.SetSuppressBrowserTelemetry(true)
 	}
+	// Android / GMS / Crashlytics telemetry suppression: on by default.
+	hub.SetSuppressAndroidTelemetry = prx.SetSuppressAndroidTelemetry
+	if v, ok, _ := st.GetSetting("capture.suppressAndroidTelemetry"); !ok || v == "1" {
+		prx.SetSuppressAndroidTelemetry(true)
+	}
 	// Invisible (transparent) proxy mode: off by default; accept origin-form
 	// requests from non-proxy-configured clients (e.g. iptables/pf/DNS redirect).
 	hub.SetInvisibleProxy = prx.SetInvisibleProxy

@@ -43,6 +43,7 @@ func (h *Hub) registerFlowRoutes(f *flowAPI) {
 	h.mux.HandleFunc("GET /api/params", f.listParams)
 	h.mux.HandleFunc("GET /api/flows/{id}", f.getFlow)
 	h.mux.HandleFunc("GET /api/flows/{id}/raw", f.getFlowRaw)
+	h.mux.HandleFunc("GET /api/flows/{id}/preview.png", f.getFlowPreviewPNG)
 	h.mux.HandleFunc("GET /api/flows/{id}/body", f.getFlowBody)
 	h.mux.HandleFunc("GET /api/flows/{id}/ws", f.flowWS)
 	h.mux.HandleFunc("GET /api/flows/{id}/analyze", f.analyzeFlow)
@@ -124,6 +125,7 @@ func (h *Hub) registerFindingsRoutes(fd *findingsAPI) {
 	h.mux.HandleFunc("POST /api/findings/{id}/flows", fd.attachFindingFlow)
 	h.mux.HandleFunc("DELETE /api/findings/{id}/flows/{flowId}", fd.detachFindingFlow)
 	h.mux.HandleFunc("POST /api/findings/{id}/images", fd.attachFindingImage)
+	h.mux.HandleFunc("POST /api/findings/{id}/flow-preview", fd.attachFindingFlowPreview)
 }
 
 func (h *Hub) registerToolsRoutes(tools *toolsAPI) {

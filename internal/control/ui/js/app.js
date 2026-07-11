@@ -14,7 +14,7 @@ import { loadFindings } from './findings.js';
 import { loadTags } from './tags.js';
 import { loadHumanInput } from './humaninput.js';
 import './flowmodal.js'; // side-effect: flow inspect popup + modal handlers
-import './ai.js'; // side-effect: wires the AI assist modal (its openAi is also imported by proxy.js)
+import { openAi } from './ai.js';
 import './authz.js'; // side-effect: wires authz modal buttons
 import { openAuthz, renderAuthzScopePanel } from './authz.js';
 import { maybeShowSetup, openSetup } from './setup.js';
@@ -342,7 +342,7 @@ function cmdkCommands(){
     {t:'Switch or create project',kw:'projects workspace engagement open new default',run:openProjectModal},
     {t:'Run setup wizard',kw:'setup wizard onboarding first run guide proxy ca scope',run:openSetup},
     {t:'Toggle theme (dark / light)',kw:'dark mode light appearance ui color scheme',run:toggleTheme},
-    {t:'Settings: Proxy & network',kw:'listener bind port upstream system proxy capture browser telemetry invisible',run:goSet('proxy')},
+    {t:'Settings: Proxy & network',kw:'listener bind port upstream system proxy capture browser telemetry android gms crashlytics invisible',run:goSet('proxy')},
     {t:'Settings: TLS / CA — download CA certificate',kw:'https certificate cert trust install ca download mitm ssl pinning diagnosis passthrough bypass',run:goSet('tls')},
     {t:'Settings: Mobile devices — Android / iOS',kw:'android ios adb simulator device jailbreak ssh proxy install ca mobile phone',run:goSet('devices')},
     {t:'Settings: Target scope',kw:'include exclude host path in scope',run:goSet('scope')},
@@ -476,3 +476,4 @@ renderChips();loadSettings();loadSysProxy();loadAndroid();loadIOS();loadIOSSsh()
 // user already completed/skipped it or already has captured traffic.
 setTimeout(()=>{ if(state.flows && !state.flows.length) maybeShowSetup(); }, 600);
 {const cb=$('#cmdkBtn');if(cb)cb.onclick=()=>cmdkOpen();}
+{const ab=$('#askAiBtn');if(ab)ab.onclick=()=>openAi({project:true});}

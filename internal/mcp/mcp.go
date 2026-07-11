@@ -7,6 +7,7 @@ package mcp
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Veyal/interseptor/internal/httplines"
+	"github.com/Veyal/interseptor/internal/preview"
 	"github.com/Veyal/interseptor/internal/version"
 )
 
@@ -175,11 +177,11 @@ func mcpInstructions() string {
 		"AUTH: list_flows tag=auth → promote_flow_to_authz (Surveyor, Admin, …) → authz_run inScope:true → set_login_macro_from_flow → run_login_macro (refresh CSRF).\n\n" +
 		"RECON: run content discovery with a real tool (feroxbuster / gobuster / ffuf) pointed THROUGH this proxy so hits land in History — Interseptor has no built-in forced-browser. Then triage with list_flows / host_stats.\n\n" +
 		"SCAN: run_scanner (passive) → active_scan arm:true inScope:true csrfAware:true → cross_host_token_replay mode:auto for SSO/JWT apps → oob_* for blind callbacks.\n\n" +
-		"RECORD: write findings like an annotated notebook, not a wall of text — alternate short markdown text blocks with attached flows (and screenshots when useful): text → flow → text → image → flow. create_finding for the opening text → add_finding_poc (position:N to interleave) → add_finding_image for screenshots (base64; never put data/path inside body JSON) → more text blocks via update_finding body. Prefer attaching the actual flow/image over pasting raw HTTP into evidence/detail.\n\n" +
+		"RECORD: write findings point-first — create_finding with title (+ impact/why/target when known) → add_finding_poc for Before/Action/After flows → render_flow_preview for HTTP PNG evidence → add_finding_image only for real browser/device screenshots. Keep body as a short PoC timeline (text → flow → text → image), never a wall of prose. Prefer attaching flows/images over pasting raw HTTP into detail/evidence.\n\n" +
 		findingFormatGuide + "\n\n" +
 		"Everything you do is tagged AI. Pass optional `intent` on consequential tools.\n\n" +
 		"HUMAN INPUT (Interseptor / target engagement only): Use request_human_input for scope ambiguity, destructive or high-blast-radius target actions (mass IDOR fuzz, active scan arm, Intruder against prod-like targets), auth/identity choices that change what gets tested, or anything that exceeds the operator's declared engagement authority. Do NOT use it for local machine/OS admin (sudo, Remote Login, package installs, SSH/host setup), general coding/git/Cursor questions, or non-Interseptor tooling — ask in the normal chat UI, or stop and tell the human what local command to run.\n\n" +
-		"ASK FOR FINDINGS: when the operator asks you to triage history and file findings (without a full autopwn), read scope + list_findings (dedupe) + in-scope list_flows / list_issues, then file only evidence-backed findings via create_finding + add_finding_poc (text→flow→text). Skip duplicates. Summarize filed / skipped / needs_verification.\n\n" +
+		"ASK FOR FINDINGS: when the operator asks you to triage history and file findings (without a full autopwn), read scope + list_findings (dedupe) + in-scope list_flows / list_issues, then file only evidence-backed findings via create_finding + add_finding_poc (text→flow→text) and render_flow_preview to attach HTTP PNG screenshots for report-ready evidence. Skip duplicates. Summarize filed / skipped / needs_verification.\n\n" +
 		"IMPROVE INTERSEPTOR: this workspace is a tool under active development, separate from the target you are testing. If an Interseptor tool errors, returns something wrong, or is missing a capability you needed, report it (or ask the human to) at https://github.com/" + version.Repo + "/issues — include the tool name, what you expected, and what actually happened. Do not file issues about the target application there. If you need human input for something outside Interseptor, do not route it through request_human_input — use the normal chat channel."
 }
 
@@ -971,33 +973,41 @@ func (s *Server) registerTools() {
 	// ---- findings: structured, curated vulnerability records (the AI's durable
 	// memory; the human reviews/curates them in the Findings tab) ----
 	s.add("create_finding",
-		"Record a confirmed/suspected vulnerability as a structured finding (the AI's durable memory the human reviews). "+findingFormatGuide+" Short openings via detail are OK; expand to the full sectioned body before considering the finding done. Prefer add_finding_poc over pasting raw HTTP into detail/evidence. Returns the new finding with its id and a clickable UI URL. severity=Critical|High|Medium|Low|Info; status defaults to open (use needs_verification + verificationInstructions when the human must check something). Walls of text without ## headings are rejected.",
+		"Record a vulnerability finding (durable memory the human reviews). "+findingFormatGuide+" Stub create with title only is OK; fill impact/why/target + PoC before report-ready. Prefer add_finding_poc + render_flow_preview over pasting raw HTTP. Returns the finding + UI URL. severity=Critical|High|Medium|Low|Info; status defaults to open.",
 		obj(map[string]any{
 			"title":                    pt("string"),
 			"severity":                 pt("string"),
 			"status":                   p("string", "open|needs_verification|verified|false_positive|wont_fix|fixed"),
-			"target":                   pt("string"),
-			"detail":                   p("string", "opening markdown — prefer ## Summary / ## Evidence / ## Impact; short what/where OK if you expand next"),
-			"evidence":                 p("string", "legacy plaintext evidence field — prefer add_finding_poc (attaches an actual flow) over describing a request/response in prose here"),
-			"impact":                   p("string", "security impact — what an attacker gains / CIA consequence (also put ## Impact in body)"),
-			"cvss":                     p("string", "CVSS score or vector string, e.g. 7.5 or CVSS:3.1/AV:N/..."),
-			"verificationInstructions": p("string", "when status is needs_verification: exact steps for the human reviewer (what to download/run/check)"),
-			"body":                     p("string", "JSON array string of blocks [{type:'text',md},{type:'flow',flowId,note}] — text blocks MUST use ## Summary / ## Evidence / ## Impact; interleave with flow blocks"),
-			"intent":                   p("string", "optional: a short 'why' shown to the human in the Activity feed"),
+			"target":                   p("string", "affected host/app/endpoint"),
+			"impact":                   p("string", "what an attacker gains / CIA consequence"),
+			"why":                      p("string", "why this is a vulnerability — which security property breaks"),
+			"cwe":                      p("string", "optional CWE id or class, e.g. CWE-639 or IDOR"),
+			"environment":              p("string", "optional: prod|staging|local"),
+			"fix":                      p("string", "optional remediation"),
+			"detail":                   p("string", "legacy opening text — prefer impact/why fields + PoC body"),
+			"evidence":                 p("string", "legacy — prefer add_finding_poc"),
+			"cvss":                     p("string", "CVSS score or vector string"),
+			"verificationInstructions": p("string", "when status is needs_verification: exact steps for the human"),
+			"body":                     p("string", "JSON PoC timeline [{type:'text',md},{type:'flow',flowId,note},{type:'image',...}]"),
+			"intent":                   p("string", "optional: short 'why' shown in Activity"),
 		}, "title"),
 		func(a map[string]any) (string, error) {
 			if _, err := reqStr(a, "title"); err != nil {
 				return "", err
 			}
 			impact := argStr(a, "impact")
-			if impact == "" {
+			if impact == "" && argStr(a, "why") == "" {
+				// Legacy: some agents put impact text in "fix".
 				impact = argStr(a, "fix")
 			}
 			hard, warns := validateFindingFormat(findingFormatInput{
 				Severity:                 argStr(a, "severity"),
 				Status:                   argStr(a, "status"),
+				Title:                    argStr(a, "title"),
+				Target:                   argStr(a, "target"),
 				Detail:                   argStr(a, "detail"),
 				Impact:                   impact,
+				Why:                      argStr(a, "why"),
 				Body:                     argStr(a, "body"),
 				VerificationInstructions: argStr(a, "verificationInstructions"),
 			})
@@ -1009,10 +1019,19 @@ func (s *Server) registerTools() {
 				"target": argStr(a, "target"), "detail": argStr(a, "detail"),
 				"evidence": argStr(a, "evidence"), "source": "ai",
 			}
-			// impact is the primary field; fix is accepted for back-compat but not advertised.
-			if v := argStr(a, "impact"); v != "" {
-				reqBody["impact"] = v
-			} else if v := argStr(a, "fix"); v != "" {
+			if impact != "" {
+				reqBody["impact"] = impact
+			}
+			if v := argStr(a, "why"); v != "" {
+				reqBody["why"] = v
+			}
+			if v := argStr(a, "cwe"); v != "" {
+				reqBody["cwe"] = v
+			}
+			if v := argStr(a, "environment"); v != "" {
+				reqBody["environment"] = v
+			}
+			if v := argStr(a, "fix"); v != "" && argStr(a, "impact") != "" {
 				reqBody["fix"] = v
 			}
 			if v := argStr(a, "cvss"); v != "" {
@@ -1028,7 +1047,6 @@ func (s *Server) registerTools() {
 			if err != nil {
 				return result, err
 			}
-			// Append the UI deep-link URL so the human can navigate directly.
 			var f struct {
 				ID int64 `json:"id"`
 			}
@@ -1058,19 +1076,23 @@ func (s *Server) registerTools() {
 		})
 
 	s.add("update_finding",
-		"Update a finding's status or any field (e.g. mark verified, needs_verification, false_positive, or set impact / verificationInstructions). Only the fields you pass are changed. When sending `body` or `detail`, follow REQUIRED FORMAT (## Summary impact-first, ## Evidence, ## Impact). To interleave text between flows, pass the FULL `body` array. A detail-only update leaves existing body blocks untouched. Returns the updated finding with a clickable UI URL. Walls of text without ## headings are rejected.",
+		"Update a finding (only fields you pass change). "+findingFormatGuide+" Set impact/why/target for report-ready; body is the PoC timeline (send FULL array when rewriting). Returns updated finding + UI URL.",
 		obj(map[string]any{
 			"id":                       pt("integer"),
 			"status":                   p("string", "open|needs_verification|verified|false_positive|wont_fix|fixed"),
 			"severity":                 pt("string"),
 			"title":                    pt("string"),
 			"target":                   pt("string"),
+			"impact":                   p("string", "what an attacker gains / CIA consequence"),
+			"why":                      p("string", "why this is a vulnerability"),
+			"cwe":                      p("string", "optional CWE id or class"),
+			"environment":              p("string", "optional: prod|staging|local"),
+			"fix":                      p("string", "optional remediation"),
 			"detail":                   pt("string"),
-			"evidence":                 p("string", "legacy plaintext evidence field — prefer add_finding_poc + body text blocks over prose here"),
-			"impact":                   p("string", "the security impact — what an attacker gains / business consequence"),
-			"cvss":                     p("string", "CVSS score or vector string, e.g. 7.5 or CVSS:3.1/AV:N/..."),
-			"verificationInstructions": p("string", "exact steps for the human when status is needs_verification"),
-			"body":                     p("string", "JSON array string of blocks [{type:'text',md},{type:'flow',flowId,note}]. Text blocks MUST use ## Summary / ## Evidence / ## Impact; send the FULL ordered array"),
+			"evidence":                 p("string", "legacy — prefer add_finding_poc"),
+			"cvss":                     p("string", "CVSS score or vector"),
+			"verificationInstructions": p("string", "exact steps when status is needs_verification"),
+			"body":                     p("string", "JSON PoC timeline — send the FULL ordered array when rewriting"),
 		}, "id"),
 		func(a map[string]any) (string, error) {
 			id, err := reqInt(a, "id")
@@ -1080,22 +1102,27 @@ func (s *Server) registerTools() {
 			if id == 0 {
 				return "", fmt.Errorf("id is required (a non-zero finding id)")
 			}
-			// Validate narrative shape when the agent is rewriting body/detail.
 			_, hasNarrative := a["body"]
 			if !hasNarrative {
 				_, hasNarrative = a["detail"]
 			}
+			_, hasPillars := a["impact"]
+			if !hasPillars {
+				_, hasPillars = a["why"]
+			}
+			if !hasPillars {
+				_, hasPillars = a["target"]
+			}
 			var warns []string
-			if hasNarrative {
-				impact := argStr(a, "impact")
-				if impact == "" {
-					impact = argStr(a, "fix")
-				}
+			if hasNarrative || hasPillars {
 				hard, w := validateFindingFormat(findingFormatInput{
 					Severity:                 argStr(a, "severity"),
 					Status:                   argStr(a, "status"),
+					Title:                    argStr(a, "title"),
+					Target:                   argStr(a, "target"),
 					Detail:                   argStr(a, "detail"),
-					Impact:                   impact,
+					Impact:                   argStr(a, "impact"),
+					Why:                      argStr(a, "why"),
 					Body:                     argStr(a, "body"),
 					VerificationInstructions: argStr(a, "verificationInstructions"),
 				})
@@ -1110,20 +1137,15 @@ func (s *Server) registerTools() {
 				}
 			}
 			body := map[string]any{}
-			for _, k := range []string{"status", "severity", "title", "target", "detail", "evidence", "impact", "cvss", "verificationInstructions", "body"} {
+			for _, k := range []string{"status", "severity", "title", "target", "detail", "evidence", "impact", "why", "cwe", "environment", "fix", "cvss", "verificationInstructions", "body"} {
 				if v, ok := a[k]; ok {
 					body[k] = v
 				}
-			}
-			// fix accepted for back-compat but not advertised in schema.
-			if v, ok := a["fix"]; ok {
-				body["fix"] = v
 			}
 			result, err := s.api(http.MethodPatch, fmt.Sprintf("/api/findings/%d", id), body)
 			if err != nil {
 				return result, err
 			}
-			// Append the UI deep-link URL.
 			result += fmt.Sprintf("\n\nUI: %s/#finding-%d", s.base, id)
 			result += formatWarningsBlock(warns)
 			return result, nil
@@ -1182,6 +1204,74 @@ func (s *Server) registerTools() {
 				reqBody["position"] = pos
 			}
 			return s.api(http.MethodPost, fmt.Sprintf("/api/findings/%d/images", fid), reqBody)
+		})
+
+	s.add("render_flow_preview",
+		"Render a captured flow (History/Repeater/Intruder/PoC) as an Interseptor-styled HTTP request/response PNG — looks like a tool screenshot for reports. Prefer this over pasting curl. Pass findingId to generate+attach in one step (recommended). Without findingId, returns a data URL you can feed to add_finding_image.",
+		obj(map[string]any{
+			"flowId":    pt("integer"),
+			"side":      p("string", "both (default) | req | res"),
+			"pretty":    p("boolean", "indent JSON/XML bodies (default true)"),
+			"layout":    p("string", "horizontal (default, request left / response right) | vertical (stacked)"),
+			"theme":     p("string", "light (default) | dark"),
+			"findingId": p("integer", "if set, attach the PNG to this finding"),
+			"caption":   pt("string"),
+			"position":  p("integer", "0-based block index when attaching; omit to append"),
+		}, "flowId"),
+		func(a map[string]any) (string, error) {
+			flowID, err := reqInt(a, "flowId")
+			if err != nil {
+				return "", err
+			}
+			if flowID == 0 {
+				return "", fmt.Errorf("flowId is required (non-zero integer)")
+			}
+			side := strings.ToLower(strings.TrimSpace(argStr(a, "side")))
+			if side == "" {
+				side = "both"
+			}
+			layout := strings.ToLower(strings.TrimSpace(argStr(a, "layout")))
+			theme := strings.ToLower(strings.TrimSpace(argStr(a, "theme")))
+			pretty := argBool(a, "pretty", true)
+			fid := argInt(a, "findingId", 0)
+			if fid > 0 {
+				reqBody := map[string]any{
+					"flowId":  flowID,
+					"side":    side,
+					"pretty":  pretty,
+					"layout":  layout,
+					"theme":   theme,
+					"caption": argStr(a, "caption"),
+				}
+				if pos, ok := a["position"]; ok && pos != nil {
+					reqBody["position"] = pos
+				}
+				return s.api(http.MethodPost, fmt.Sprintf("/api/findings/%d/flow-preview", fid), reqBody)
+			}
+			q := url.Values{}
+			q.Set("side", side)
+			if pretty {
+				q.Set("pretty", "1")
+			} else {
+				q.Set("pretty", "0")
+			}
+			if layout != "" {
+				q.Set("layout", layout)
+			} else {
+				q.Set("layout", string(preview.LayoutHorizontal))
+			}
+			if theme != "" {
+				q.Set("theme", theme)
+			} else {
+				q.Set("theme", string(preview.ThemeLight))
+			}
+			raw, err := s.apiGet(fmt.Sprintf("/api/flows/%d/preview.png?%s", flowID, q.Encode()))
+			if err != nil {
+				return "", err
+			}
+			b64 := base64.StdEncoding.EncodeToString([]byte(raw))
+			return fmt.Sprintf("PNG preview for flow %d (%d bytes, side=%s pretty=%v layout=%s theme=%s).\nmime=image/png\nURL: /api/flows/%d/preview.png?%s\ndata:image/png;base64,%s\n\nTip: re-call with findingId to attach directly to a finding.",
+				flowID, len(raw), side, pretty, preview.NormalizeLayout(layout), preview.NormalizeTheme(theme), flowID, q.Encode(), b64), nil
 		})
 
 	s.add("remove_finding_poc",

@@ -26,7 +26,7 @@ Rules:
 - Do NOT run active attacks (no active_scan, Intruder, authz fuzz, or send_request probes). Triage only.
 - Dedupe against existing findings (titles/targets already listed). Skip duplicates.
 - File via create_finding then add_finding_poc (text → flow → text notebook). Prefer attaching real flows over pasting raw HTTP into detail.
-- Use the required finding format (## Summary impact-first, ## Evidence, ## Impact; ## Needs Verification when unproven).
+- Use the required finding format: ## Summary (impact-first), ## Steps Before→Action→After (or IDOR: our account→other user→cross-access) with interleaved flows, ## Evidence, ## Impact, ## Why this is a vulnerability, ## Why this is not intended; ## Needs Verification when unproven. Never claim success without an After proof flow.
 - Mark needs_verification when evidence is suggestive but not proven; include verificationInstructions.
 - When done, reply with a short summary only:
   filed: <n> — titles

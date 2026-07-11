@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-07-11
+
+### Added
+- **Findings redesign (point-first, evidence-backed).** Curated findings use Impact / Why / Target pillars plus a PoC timeline (flows + screenshots). New optional fields `why`, `cwe`, `environment`; Draft vs Ready completeness (UI badge + MCP warnings). Create allows title-only stubs. Report export order: Impact → Why → Target → PoC → optional Remediation. MCP format drops mandatory `## Summary` essay walls. (`internal/store`, `internal/mcp/finding_format.go`, `internal/control`, `internal/control/ui/js/findings.js`, `internal/report`.)
+- **Flow preview render options.** Generated HTTP PNGs accept `pretty` (JSON/XML indent), `layout` (`vertical`|`horizontal`), and `theme` (`dark`|`light`) via `GET /api/flows/{id}/preview.png`, `POST .../flow-preview`, and MCP `render_flow_preview`. Defaults: beautified, horizontal (request left / response right), light theme. (`internal/preview`, `internal/control/preview.go`, `internal/mcp/mcp.go`.)
+- **Image lightbox with zoom.** Click any finding screenshot or markdown image to focus it full-viewport; scroll / ± / double-click zoom, drag to pan, Fit / Esc to reset or close. (`internal/control/ui/js/core.js`, `index.html`, `app.css`.)
+- **Android telemetry suppression (on by default).** Play/GMS check-in, Crashlytics, Firebase Analytics, connectivity probes, and common ad/measurement hosts are silently forwarded without capture or intercept — same idea as browser telemetry suppress. Toggle in Settings → Proxy & network. App backends, Google auth, and FCM push stay visible. Host list lives in `internal/proxy/telemetry.go`.
+- **Flow PNG previews for MCP / reports.** `GET /api/flows/{id}/preview.png` and `POST /api/findings/{id}/flow-preview` render Interseptor-styled request/response screenshots (pure Go). MCP `render_flow_preview` generates and optionally attaches them as finding image evidence — prefer over curl dumps for client reports. HTML report export embeds finding images as `data:` URIs so offline downloads show screenshots. (`internal/preview`, `internal/control/preview.go`, `internal/mcp/mcp.go`.)
+- **Global read-only Ask AI.** The top bar opens a session-only chat with bounded project context: notes, scope, findings, and in-scope flow metadata. It never sends requests or mutates the project.
+
 ### Changed
 - **Dev-build fallback version advanced to the published `1.3.1`.** Now that v1.3.1 is released, `internal/version/version.go`'s fallback `Version` constant moved from `1.3.0` to `1.3.1`.
 
@@ -618,5 +628,4 @@ The **"you can attack that"** release: user-authored active checks, a fully auto
   which are already marked with a "DSC" badge on their rows and findable via the
   Discover tab — so the toolbar toggle was redundant. The `?discovery=1` API filter
   on `/api/flows` is unchanged.
-
 

@@ -1,6 +1,7 @@
 package control
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -115,6 +116,7 @@ func (h *findingsAPI) findingsReport(w http.ResponseWriter, r *http.Request) {
 	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
 	switch format {
 	case "html":
+		h.enrichFindingReportImages(fs)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Disposition", `attachment; filename="interseptor-report.html"`)
 		w.Write([]byte(report.ProjectHTML(fs, issues)))
@@ -128,6 +130,10 @@ func (h *findingsAPI) findingsReport(w http.ResponseWriter, r *http.Request) {
 // reportBodyCap bounds each reconstructed req/res in the export so huge downloads
 // cannot blow up the report. Truncation is marked explicitly.
 const reportBodyCap = 64 << 10 // 64 KiB
+
+// reportImageEmbedCap bounds each screenshot embedded as a data URI in HTML
+// exports so a few large PNGs cannot explode the download.
+const reportImageEmbedCap = 2 << 20 // 2 MiB
 
 // enrichFindingReportBodies attaches reconstructed HTTP req/res to each PoC flow
 // block (and legacy Flows list) for offline report handoff.
@@ -146,6 +152,33 @@ func (h *findingsAPI) enrichFindingReportBodies(fs []store.Finding) {
 				continue
 			}
 			fl.ReqRaw, fl.ResRaw = h.flowRawForReport(fl.FlowID)
+		}
+	}
+}
+
+// enrichFindingReportImages rewrites image block URLs to data: URIs so a
+// downloaded HTML report shows screenshots without the control API.
+func (h *findingsAPI) enrichFindingReportImages(fs []store.Finding) {
+	for i := range fs {
+		for j := range fs[i].Blocks {
+			bl := &fs[i].Blocks[j]
+			if bl.Type != "image" || bl.Missing || bl.Hash == "" {
+				continue
+			}
+			rc, err := h.st.OpenBody(bl.Hash)
+			if err != nil {
+				continue
+			}
+			data, err := io.ReadAll(io.LimitReader(rc, reportImageEmbedCap+1))
+			rc.Close()
+			if err != nil || len(data) == 0 || len(data) > reportImageEmbedCap {
+				continue
+			}
+			mime := store.SanitizeNotesImageMIME(bl.Mime)
+			if mime == "" || mime == "application/octet-stream" {
+				mime = "image/png"
+			}
+			bl.URL = "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
 		}
 	}
 }
@@ -175,11 +208,14 @@ func (h *findingsAPI) createFinding(w http.ResponseWriter, r *http.Request) {
 		Target                   string  `json:"target"`
 		Detail                   string  `json:"detail"`
 		Evidence                 string  `json:"evidence"`
-		Fix                      string  `json:"fix"`    // back-compat: still accepted
-		Impact                   string  `json:"impact"` // security impact — what an attacker gains / business consequence
-		Cvss                     string  `json:"cvss"`   // CVSS score or vector string
+		Fix                      string  `json:"fix"`    // remediation — optional
+		Impact                   string  `json:"impact"` // what an attacker gains / business consequence
+		Why                      string  `json:"why"`    // why this is a vulnerability
+		Cwe                      string  `json:"cwe"`
+		Environment              string  `json:"environment"` // prod | staging | local
+		Cvss                     string  `json:"cvss"`
 		VerificationInstructions string  `json:"verificationInstructions"`
-		Body                     string  `json:"body"`    // JSON blocks (new format)
+		Body                     string  `json:"body"`    // JSON blocks (PoC timeline)
 		FlowIDs                  []int64 `json:"flowIds"` // optional: attach these PoC flows on create
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
@@ -197,7 +233,8 @@ func (h *findingsAPI) createFinding(w http.ResponseWriter, r *http.Request) {
 	f := &store.Finding{
 		Severity: in.Severity, Status: in.Status, Source: orVal(in.Source, "human"),
 		Title: in.Title, Target: in.Target, Detail: in.Detail, Evidence: in.Evidence, Fix: in.Fix,
-		Impact: in.Impact, Cvss: in.Cvss, VerificationInstructions: in.VerificationInstructions, Body: in.Body,
+		Impact: in.Impact, Why: in.Why, Cwe: in.Cwe, Environment: in.Environment,
+		Cvss: in.Cvss, VerificationInstructions: in.VerificationInstructions, Body: in.Body,
 	}
 	id, err := h.st.CreateFinding(f)
 	if err != nil {
@@ -267,11 +304,14 @@ func (h *findingsAPI) updateFinding(w http.ResponseWriter, r *http.Request) {
 		Target                   *string `json:"target"`
 		Detail                   *string `json:"detail"`
 		Evidence                 *string `json:"evidence"`
-		Fix                      *string `json:"fix"`    // back-compat: still accepted
-		Impact                   *string `json:"impact"` // security impact — what an attacker gains / business consequence
-		Cvss                     *string `json:"cvss"`   // CVSS score or vector string
+		Fix                      *string `json:"fix"`
+		Impact                   *string `json:"impact"`
+		Why                      *string `json:"why"`
+		Cwe                      *string `json:"cwe"`
+		Environment              *string `json:"environment"`
+		Cvss                     *string `json:"cvss"`
 		VerificationInstructions *string `json:"verificationInstructions"`
-		Body                     *string `json:"body"` // JSON blocks
+		Body                     *string `json:"body"` // JSON blocks (PoC timeline)
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		httpErr(w, http.StatusBadRequest, "bad json")
@@ -295,7 +335,7 @@ func (h *findingsAPI) updateFinding(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusRequestEntityTooLarge, msg)
 		return
 	}
-	if err := h.st.UpdateFinding(id, in.Severity, in.Status, in.Title, in.Target, in.Detail, in.Evidence, in.Fix, in.Body, in.Impact, in.Cvss, in.VerificationInstructions); err != nil {
+	if err := h.st.UpdateFinding(id, in.Severity, in.Status, in.Title, in.Target, in.Detail, in.Evidence, in.Fix, in.Body, in.Impact, in.Why, in.Cwe, in.Environment, in.Cvss, in.VerificationInstructions); err != nil {
 		httpErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}

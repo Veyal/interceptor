@@ -34,6 +34,34 @@ func newHub(t *testing.T) (*Hub, *store.Store, *intercept.Engine) {
 	return h, s, eng
 }
 
+func TestServeUIIncludesAskAIProjectShell(t *testing.T) {
+	h, _, _ := newHub(t)
+	ts := httptest.NewServer(h.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer resp.Body.Close()
+	body := readAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /: expected 200, got %d", resp.StatusCode)
+	}
+
+	for _, want := range []string{
+		`id="askAiBtn"`,
+		`data-ai-ui`,
+		`type="button"`,
+		`aria-label="Ask AI about the current project"`,
+		`id="aiModal"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("served UI missing %q", want)
+		}
+	}
+}
+
 // A loopback request must not be able to relocate the process to an arbitrary
 // path via /api/project/switch — only plain project names are accepted.
 func TestSwitchProjectRejectsPaths(t *testing.T) {

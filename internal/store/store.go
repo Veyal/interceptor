@@ -280,6 +280,9 @@ func Open(dir string) (*Store, error) {
 		`ALTER TABLE findings ADD COLUMN impact TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE findings ADD COLUMN cvss TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE findings ADD COLUMN verification_instructions TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE findings ADD COLUMN why TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE findings ADD COLUMN cwe TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE findings ADD COLUMN environment TEXT NOT NULL DEFAULT ''`,
 		// Collaboration: scoped/expiring API keys (existing keys → full, never-expire).
 		`ALTER TABLE api_keys ADD COLUMN scope TEXT NOT NULL DEFAULT 'full'`,
 		`ALTER TABLE api_keys ADD COLUMN expires INTEGER NOT NULL DEFAULT 0`,

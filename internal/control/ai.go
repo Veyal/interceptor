@@ -48,6 +48,7 @@ func (h *Hub) aiCreds() (provider, key, endpoint string, ok bool) {
 // aiAssistReq is the JSON body shared by the assist endpoints: a single flow
 // (back-compat) or a selection, plus the kind (explain/suggest/summarize).
 type aiAssistReq struct {
+	Context   string         `json:"context"`
 	FlowID    int64          `json:"flowId"`
 	FlowIDs   []int64        `json:"flowIds"`
 	FindingID int64          `json:"findingId"`
@@ -123,7 +124,18 @@ func (h *aiAPI) aiAssist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var flows []assistFlow
-	if in.FindingID != 0 {
+	if in.Context != "" && in.Context != "project" {
+		httpErr(w, http.StatusBadRequest, "unknown context")
+		return
+	}
+	if in.Context == "project" {
+		var err error
+		flows, err = h.collectProjectAssistFlows()
+		if err != nil {
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	} else if in.FindingID != 0 {
 		f, err := h.st.GetFinding(in.FindingID)
 		if err != nil {
 			httpErr(w, http.StatusNotFound, "finding not found")
@@ -147,7 +159,7 @@ func (h *aiAPI) aiAssist(w http.ResponseWriter, r *http.Request) {
 		if f.Impact != "" {
 			fmt.Fprintf(&fb, "Impact:\n%s\n", f.Impact)
 		}
-		
+
 		flows = append([]assistFlow{{
 			Label: fmt.Sprintf("Finding #%d: %s", f.ID, f.Title),
 			Req:   fb.String(),
@@ -191,7 +203,18 @@ func (h *aiAPI) aiAssistStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var flows []assistFlow
-	if in.FindingID != 0 {
+	if in.Context != "" && in.Context != "project" {
+		httpErr(w, http.StatusBadRequest, "unknown context")
+		return
+	}
+	if in.Context == "project" {
+		var err error
+		flows, err = h.collectProjectAssistFlows()
+		if err != nil {
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	} else if in.FindingID != 0 {
 		f, err := h.st.GetFinding(in.FindingID)
 		if err != nil {
 			httpErr(w, http.StatusNotFound, "finding not found")
@@ -215,7 +238,7 @@ func (h *aiAPI) aiAssistStream(w http.ResponseWriter, r *http.Request) {
 		if f.Impact != "" {
 			fmt.Fprintf(&fb, "Impact:\n%s\n", f.Impact)
 		}
-		
+
 		flows = append([]assistFlow{{
 			Label: fmt.Sprintf("Finding #%d: %s", f.ID, f.Title),
 			Req:   fb.String(),
@@ -244,7 +267,7 @@ func (h *aiAPI) aiAssistStream(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	model, _, _ := h.st.GetSetting("ai.model")
-	if in.Agent && in.Kind == "ask" {
+	if in.Agent && in.Kind == "ask" && in.Context != "project" {
 		h.aiAssistAgentStream(w, r, in, flows, provider, key, model, endpoint, flusher)
 		return
 	}
@@ -342,12 +365,16 @@ type assistFlow struct {
 	Req      string
 	Res      string
 	Findings string // passive findings, for the "summarize" kind
+	Project  bool
 }
 
 // assistPrompt builds the AI-assist user prompt. One flow keeps the original
 // focused wording; several selected flows become a combined per-endpoint review.
 func assistPrompt(kind string, flows []assistFlow, question string) string {
 	question = strings.TrimSpace(question)
+	if len(flows) == 1 && flows[0].Project {
+		return "Answer this question about the active Interseptor project using only the bounded read-only project context below:\n\nQuestion: " + question + "\n\n" + flows[0].Req
+	}
 	if len(flows) == 1 {
 		f := flows[0]
 		switch kind {
@@ -428,6 +455,9 @@ func normalizeAskHistory(history []aiAssistTurn) []aiAssistTurn {
 
 // flowContextPrompt anchors a follow-up thread with the captured exchange(s).
 func flowContextPrompt(flows []assistFlow) string {
+	if len(flows) == 1 && flows[0].Project {
+		return "We are discussing the active Interseptor project. Answer follow-up questions using only this bounded read-only project context.\n\n" + flows[0].Req
+	}
 	if len(flows) == 1 {
 		f := flows[0]
 		return "We are discussing this HTTP exchange. Answer follow-up questions using only what it shows.\n\nRequest:\n" + f.Req + "\n\nResponse:\n" + f.Res

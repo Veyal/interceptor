@@ -327,6 +327,7 @@ export async function loadSettings(){try{const s=await api('/api/settings');stat
   loadAiProviders();
   if($('#capScopeToggle'))setCapScope(!!s.captureScopeOnly);
   if($('#suppressTelemetryToggle'))setSuppressTelemetry(s.suppressBrowserTelemetry!==false);
+  if($('#suppressAndroidTelemetryToggle'))setSuppressAndroidTelemetry(s.suppressAndroidTelemetry!==false);
   if($('#invisibleProxyToggle'))setInvisibleProxy(!!s.invisibleProxy);
   if($('#autoBypassToggle'))setAutoBypass(!!s.autoBypassOnPinFailure);
   // Don't clobber the list while the operator is mid-edit (a live settings.update
@@ -363,6 +364,8 @@ export function applyAiDisabledUI(){
   if(fields)fields.style.display=off?'none':'';
   if(hint)hint.style.display=off?'block':'none';
   if(off){
+    const aiModal=$('#aiModal');
+    if(aiModal&&aiModal.style.display==='flex')closeModal(aiModal);
     const act=document.querySelector('.panel[data-panel="activity"]');
     if(act&&act.classList.contains('active'))document.querySelector('.tab[data-tab="proxy"]')?.click();
     const mcpBtn=document.querySelector('#apiSub button[data-s="mcp"]');
@@ -493,6 +496,12 @@ $('#suppressTelemetryToggle')&&($('#suppressTelemetryToggle').onclick=async()=>{
   const on=!$('#suppressTelemetryToggle').classList.contains('on');
   try{await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({suppressBrowserTelemetry:on})});setSuppressTelemetry(on);toast(on?'Browser telemetry suppressed':'Browser telemetry now visible in history');}
   catch(e){toast('telemetry: '+e.message);}
+});
+export function setSuppressAndroidTelemetry(on){const b=$('#suppressAndroidTelemetryToggle');if(!b)return;b.classList.toggle('on',on);b.setAttribute('aria-pressed',on?'true':'false');b.textContent=on?'Suppressing Android telemetry':'Allowing Android telemetry';}
+$('#suppressAndroidTelemetryToggle')&&($('#suppressAndroidTelemetryToggle').onclick=async()=>{
+  const on=!$('#suppressAndroidTelemetryToggle').classList.contains('on');
+  try{await api('/api/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({suppressAndroidTelemetry:on})});setSuppressAndroidTelemetry(on);toast(on?'Android telemetry suppressed':'Android telemetry now visible in history');}
+  catch(e){toast('android telemetry: '+e.message);}
 });
 export function setInvisibleProxy(on){const b=$('#invisibleProxyToggle');if(!b)return;b.classList.toggle('on',on);b.setAttribute('aria-pressed',on?'true':'false');b.textContent=on?'Invisible proxy is on':'Invisible proxy is off';}
 $('#invisibleProxyToggle')&&($('#invisibleProxyToggle').onclick=async()=>{

@@ -13,8 +13,6 @@ let findings = [], selFinding = null;
 let bodyBlocks = [];
 let bodyFindingId = null;
 let bodySaveTimer = null;
-let findDetailView = 'report';
-try { findDetailView = sessionStorage.getItem('findView') || 'report'; } catch { /* private mode */ }
 // True while a text-block textarea has focus. An SSE findings.update (e.g. a body
 // save round-tripping, or the AI recording) would otherwise rebuild the detail
 // pane mid-edit and discard the focused textarea + any unsaved keystrokes.
@@ -50,13 +48,14 @@ function findingListMeta(f) {
   const st = f.status === 'needs_verification'
     ? '<span class="find-needs-verif" title="Needs human verification">⚠ needs verification</span>'
     : esc(statusLabel(f.status));
-  const parts = [st];
-  const steps = findingStepCount(f);
+  const ready = f.ready
+    ? '<span class="find-ready">Ready</span>'
+    : '<span class="find-draft">Draft</span>';
+  const parts = [ready, st];
   const pocs = findingPocCount(f);
-  if (steps) parts.push(steps + ' step' + (steps === 1 ? '' : 's'));
-  else if (pocs) parts.push(pocs + ' PoC');
-  if (findingIsEmpty(f)) parts.push('<span class="hint">needs content</span>');
+  if (pocs) parts.push(pocs + ' PoC');
   if (f.target) parts.push('<span class="hint">' + esc(f.target.length > 28 ? f.target.slice(0, 27) + '…' : f.target) + '</span>');
+  else parts.push('<span class="hint">no target</span>');
   if (f.source === 'ai') parts.push('<span style="color:var(--accent)">AI</span>');
   return parts.join(' · ');
 }
@@ -74,7 +73,7 @@ function renderFindings() {
     selFinding = null; renderFindingDetail(); return;
   }
   if (!selFinding || !findings.some(f => f.id === selFinding)) selFinding = findings[0].id;
-  box.innerHTML = findings.map(f => `<div class="find-row${f.id === selFinding ? ' sel' : ''}${findingIsEmpty(f) ? ' find-row-empty' : ''}${f.status === 'needs_verification' ? ' find-row-needs-verif' : ''}" data-id="${f.id}">
+  box.innerHTML = findings.map(f => `<div class="find-row${f.id === selFinding ? ' sel' : ''}${!(f.ready) ? ' find-row-empty' : ''}${f.status === 'needs_verification' ? ' find-row-needs-verif' : ''}" data-id="${f.id}">
     <span class="sev" style="color:${sevColor(f.severity)}">${esc(f.severity)}</span>
     <span class="find-title">${esc(f.title)}</span>
     <span class="find-meta">${findingListMeta(f)}</span>
@@ -142,7 +141,6 @@ function finishTextEdit(block, ta, fid) {
     block.classList.add('find-doc-text-empty');
     autoResizeTextarea(ta);
   }
-  if (findDetailView === 'chain') renderFindingChain($('#findChain'), bodyBlocks, $('#findImpact')?.value || '');
 }
 
 function renderBlockEl(b, i, total) {
@@ -178,7 +176,7 @@ function renderBlockEl(b, i, total) {
     return `<div class="find-block find-doc-image" data-i="${i}">
       ${controls}
       <figure class="find-doc-figure">
-        <img class="md-img find-doc-img" src="${escAttr(src)}" alt="${escAttr(b.caption || 'screenshot')}">
+        <img class="md-img find-doc-img" src="${escAttr(src)}" alt="${escAttr(b.caption || 'screenshot')}" title="Click to enlarge">
         <input class="find-poc-note-input block-caption" data-i="${i}" value="${escAttr(b.caption || '')}"
           placeholder="Caption (optional)" onclick="event.stopPropagation()">
       </figure>
@@ -211,7 +209,7 @@ function renderBlockEl(b, i, total) {
 
 function renderBodyEditor(container, fid) {
   if (!bodyBlocks.length) {
-    container.innerHTML = '<div class="find-doc-empty">No description yet — write the finding narrative below, or attach PoC flows from Proxy History.</div>';
+    container.innerHTML = '<div class="find-doc-empty">No PoC yet — add step notes, attach flows from History, or upload screenshots. Label Before → Action → After.</div>';
     return;
   }
   container.innerHTML = bodyBlocks.map((b, i) => renderBlockEl(b, i, bodyBlocks.length)).join('');
@@ -252,7 +250,7 @@ function renderBodyEditor(container, fid) {
       const i = Number(btn.dataset.mv), j = i + Number(btn.dataset.dir);
       if (j < 0 || j >= bodyBlocks.length) return;
       [bodyBlocks[i], bodyBlocks[j]] = [bodyBlocks[j], bodyBlocks[i]];
-      renderFindBody(fid, $('#findImpact')?.value || '');
+      renderFindBody(fid);
       scheduleSave(fid);
     };
   });
@@ -262,7 +260,7 @@ function renderBodyEditor(container, fid) {
     btn.onclick = e => {
       e.stopPropagation();
       bodyBlocks.splice(Number(btn.dataset.del), 1);
-      renderFindBody(fid, $('#findImpact')?.value || '');
+      renderFindBody(fid);
       scheduleSave(fid);
     };
   });
@@ -277,122 +275,11 @@ function renderBodyEditor(container, fid) {
   });
 }
 
-// ---- attack-chain timeline (ordered blocks → vertical step flow) ------------
+// ---- body editor ---------------------------------------------------------
 
-/** Visible steps for the chain: non-empty text, all flows/images, optional impact tail. */
-export function chainSteps(blocks, impact) {
-  const steps = [];
-  (blocks || []).forEach((b, i) => {
-    if (b.type === 'flow' || b.type === 'image') steps.push({ b, i });
-    else if (b.type === 'text' && textChainLabel(b.md)) steps.push({ b, i });
-  });
-  if (impact && impact.trim()) steps.push({ b: { type: 'impact', md: impact.trim() }, i: -1 });
-  return steps;
-}
-
-function chainFlowCard(b, i) {
-  if (b.missing) {
-    return `<blockquote class="find-poc-callout find-poc-missing">
-      <div>⚠ PoC flow #${esc(String(b.flowId))} — evidence deleted from history</div>
-      <span class="hint">Re-capture this endpoint to restore evidence</span>
-    </blockquote>
-    ${b.note ? `<div class="fc-step-note">${esc(b.note)}</div>` : ''}`;
-  }
-  const reqLine = b.method
-    ? `<span class="m">${esc(b.method)}</span> <span class="p">${esc(b.host || '')}${esc(b.path || '')}</span>${b.status ? `<span class="sts">→ ${b.status}</span>` : ''}`
-    : `<span class="hint">flow #${esc(String(b.flowId))}</span>`;
-  return `<blockquote class="find-poc-callout"><div class="find-poc-req">${reqLine}</div></blockquote>
-    ${b.note ? `<div class="fc-step-note">${esc(b.note)}</div>` : ''}`;
-}
-
-function chainImageCard(b) {
-  if (b.missing) {
-    return `<blockquote class="find-poc-callout find-poc-missing">
-      <div>⚠ Screenshot — evidence blob missing</div>
-    </blockquote>
-    ${b.caption ? `<div class="fc-step-note">${esc(b.caption)}</div>` : ''}`;
-  }
-  const src = b.url || ('/api/findings/images/' + (b.hash || ''));
-  return `<figure class="find-doc-figure">
-    <img class="md-img find-doc-img" src="${escAttr(src)}" alt="${escAttr(b.caption || 'screenshot')}">
-    ${b.caption ? `<figcaption class="fc-step-note">${esc(b.caption)}</figcaption>` : ''}
-  </figure>`;
-}
-
-function chainStepHtml(item, num, isLast) {
-  const { b, i } = item;
-  const kind = b.type === 'impact' ? 'impact'
-    : b.type === 'image' ? (b.missing ? 'missing' : 'image')
-    : b.type === 'flow' ? (b.missing ? 'missing' : 'flow') : 'text';
-  const badgeLabel = b.type === 'impact' ? '!' : String(num);
-  let card = '', attrs = `data-kind="${kind}" data-i="${i}"`;
-  if (b.type === 'text') {
-    card = `<div class="fc-card fc-card-text md">${renderMD(b.md)}</div>`;
-  } else if (b.type === 'impact') {
-    card = `<div class="fc-card fc-card-impact"><div class="fc-card-label">Impact</div><div class="fc-card-body">${esc(b.md)}</div></div>`;
-  } else if (b.type === 'image') {
-    card = `<div class="fc-card fc-card-image">${chainImageCard(b)}</div>`;
-  } else {
-    attrs += b.missing ? '' : ` data-flow="${b.flowId}"`;
-    card = `<div class="fc-card fc-card-flow">${chainFlowCard(b, i)}</div>`;
-  }
-  const vline = isLast ? '' : '<div class="fc-vline" aria-hidden="true"></div>';
-  return `<div class="fc-step" ${attrs} role="listitem">
-    <div class="fc-rail"><div class="fc-badge fc-badge-${kind}">${badgeLabel}</div>${vline}</div>
-    <div class="fc-content">${card}</div>
-  </div>`;
-}
-
-function renderFindingChain(wrap, blocks, impact) {
-  if (!wrap) return;
-  const steps = chainSteps(blocks, impact);
-  if (!steps.length) {
-    wrap.innerHTML = '<div class="find-chain-empty hint">No steps yet — add narrative paragraphs and PoC flows in Report view.</div>';
-    return;
-  }
-  wrap.innerHTML = `<div class="find-chain" role="list" aria-label="Attack chain">${steps.map((item, n) => chainStepHtml(item, n + 1, n === steps.length - 1)).join('')}</div>`;
-
-  wrap.querySelectorAll('.fc-step[data-kind="flow"]').forEach(el => {
-    el.onclick = () => {
-      const fid = el.dataset.flow;
-      if (fid) openFindingFlow(Number(fid));
-    };
-  });
-  wrap.querySelectorAll('.fc-step[data-kind="text"]').forEach(el => {
-    el.title = 'Open in Report view';
-    el.onclick = () => {
-      const idx = Number(el.dataset.i);
-      setFindDetailView('report');
-      requestAnimationFrame(() => {
-        const block = document.querySelector(`#findBody .find-block[data-i="${idx}"]`);
-        block?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        block?.classList.add('find-block-flash');
-        setTimeout(() => block?.classList.remove('find-block-flash'), 1200);
-      });
-    };
-  });
-}
-
-function setFindDetailView(view) {
-  findDetailView = view;
-  try { sessionStorage.setItem('findView', view); } catch { /* private mode */ }
-  const seg = $('#findViewSeg');
-  if (seg) seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.view === view));
-  const hint = document.querySelector('.find-view-hint');
-  if (hint) hint.textContent = view === 'chain' ? 'Attack steps top-to-bottom · click a step to inspect' : 'Narrative report · markdown + PoC flows';
-  const article = document.querySelector('.find-article');
-  if (article) article.classList.toggle('find-chain-active', view === 'chain');
-  renderFindBody(bodyFindingId, $('#findImpact')?.value || '');
-}
-
-function renderFindBody(fid, impactText) {
+function renderFindBody(fid) {
   const docEl = $('#findBody');
-  const chainEl = $('#findChain');
-  if (findDetailView === 'chain') {
-    if (chainEl) renderFindingChain(chainEl, bodyBlocks, impactText);
-  } else {
-    renderBodyEditor(docEl, fid);
-  }
+  if (docEl) renderBodyEditor(docEl, fid);
 }
 
 function scheduleSave(fid) {
@@ -427,12 +314,26 @@ async function flushBodySave(fid, snapshot) {
 
 // ---- detail pane ---------------------------------------------------------
 
+function missingLabel(k) {
+  return ({ impact: 'Impact', why: 'Why', target: 'Target', poc: 'PoC evidence', poc_before_after: 'Before+After flows (High/Critical)' }[k] || k);
+}
+
+async function patchFinding(id, fields) {
+  await api('/api/findings/' + id, {
+    method: 'PATCH', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(fields),
+  });
+  Object.assign(findings.find(x => x.id === id) || {}, fields);
+}
+
 function renderFindingDetail() {
   const box = $('#findDetail'); if (!box) return;
   const f = findings.find(x => x.id === selFinding);
   if (!f) { box.innerHTML = '<div class="state-empty"><div class="state-empty-icon">🗂️</div><div class="state-empty-title">No finding selected</div><p class="state-empty-hint">Select a finding from the list to view its details.</p></div>'; return; }
 
   const statusSel = STATUSES.map(s => `<option value="${s}"${s === f.status ? ' selected' : ''}>${esc(statusLabel(s))}</option>`).join('');
+  const sevOpts = ['Critical', 'High', 'Medium', 'Low', 'Info'].map(s => `<option value="${s}"${s === f.severity ? ' selected' : ''}>${s}</option>`).join('');
+  const envOpts = ['', 'prod', 'staging', 'local'].map(e => `<option value="${e}"${(f.environment || '') === e ? ' selected' : ''}>${e || 'env…'}</option>`).join('');
   const missBanner = (() => {
     const missFlow = (f.blocks || []).filter(b => b.type === 'flow' && b.missing).length;
     const missImg = (f.blocks || []).filter(b => b.type === 'image' && b.missing).length;
@@ -441,99 +342,134 @@ function renderFindingDetail() {
     if (missImg) parts.push(`${missImg} screenshot${missImg === 1 ? '' : 's'} missing`);
     return parts.length ? `<div class="find-missing-banner">⚠ ${parts.join(' · ')} — restore evidence if needed.</div>` : '';
   })();
+  const gaps = f.missing || [];
+  const completeBar = f.ready
+    ? `<div class="find-complete find-complete-ready" role="status"><span class="find-ready">Ready</span> — Impact, Why, Target, and PoC are filled.</div>`
+    : `<div class="find-complete find-complete-draft" role="status"><span class="find-draft">Draft</span> — still need: ${gaps.map(g => `<a href="#find-sec-${escAttr(g === 'poc_before_after' ? 'poc' : g)}" class="find-gap-link">${esc(missingLabel(g))}</a>`).join(', ') || 'content'}</div>`;
   const verifBanner = (f.status === 'needs_verification' || f.verificationInstructions)
     ? `<div class="find-verif-banner" role="status">
         <div class="find-verif-title">⚠ Needs human verification</div>
         <textarea id="findVerifInstr" class="find-verif-text" rows="3" placeholder="What should the human check? Exact steps…">${esc(f.verificationInstructions || '')}</textarea>
       </div>` : '';
-  box.innerHTML = `<article class="find-article${findDetailView === 'chain' ? ' find-chain-active' : ''}">
+
+  box.innerHTML = `<article class="find-article">
     <header class="find-header">
       <div class="find-header-top">
-        <span class="find-sev-badge" style="color:${sevColor(f.severity)}">${esc(f.severity)}</span>
+        <select id="findSeverity" class="btn find-sev-select" aria-label="Severity" style="color:${sevColor(f.severity)}">${sevOpts}</select>
         <h2 class="find-title-text" id="findTitleText">${esc(f.title)}</h2>
         <button class="btn xs" id="findRename" title="Rename finding" aria-label="Rename finding">✎</button>
       </div>
       <div class="find-meta-bar">
         <select id="findStatus" class="btn" style="background:var(--bg3)" aria-label="Finding status">${statusSel}</select>
-        ${f.target ? `<span class="find-target hint">${esc(f.target)}</span>` : ''}
+        <select id="findEnv" class="btn" style="background:var(--bg3)" aria-label="Environment">${envOpts}</select>
         <div class="find-cvss-field">
           <label for="findCvss">CVSS</label>
           <input id="findCvss" class="find-cvss-inline" type="text" value="${escAttr(f.cvss || '')}" placeholder="e.g. 7.5">
+        </div>
+        <div class="find-cvss-field">
+          <label for="findCwe">CWE</label>
+          <input id="findCwe" class="find-cvss-inline" type="text" value="${escAttr(f.cwe || '')}" placeholder="CWE-639">
         </div>
         <div class="spacer"></div>
         <button class="btn accent" id="findAskAi" data-ai-ui title="Ask AI about this finding">✨ Ask AI</button>
         <button class="btn danger xs" id="findDelete">Delete</button>
       </div>
     </header>
+    ${completeBar}
     ${missBanner}
     ${verifBanner}
-    <div class="find-view-bar">
-      <div class="seg find-view-seg" id="findViewSeg" role="tablist" aria-label="Finding view">
-        <button type="button" data-view="report"${findDetailView === 'report' ? ' class="on"' : ''}>Edit</button>
-        <button type="button" data-view="chain"${findDetailView === 'chain' ? ' class="on"' : ''}>Timeline</button>
-      </div>
-      <span class="hint find-view-hint">${findDetailView === 'chain' ? 'Read-only attack timeline · click a step to inspect' : 'Editable narrative · add paragraphs & PoC flows'}</span>
-    </div>
-    <div class="find-body-wrap">
-      <div class="find-doc" id="findBody"></div>
-      <div class="find-chain-wrap" id="findChain"></div>
-    </div>
-    <div class="find-doc-actions" id="findDocActions">
-      <button class="btn" id="findAddText">＋ Paragraph</button>
-      <button class="btn" id="findAddFlow" title="Attach request/response flows as PoC evidence">＋ PoC flow<span id="findPocReady" class="hint"></span></button>
-      <button class="btn" id="findAddImage" title="Attach a screenshot as evidence">＋ Screenshot</button>
-      <input type="file" id="findImageFile" accept="image/png,image/jpeg,image/gif,image/webp,image/bmp,image/avif" hidden>
-    </div>
-    <aside class="find-impact">
+
+    <section class="find-sec" id="find-sec-impact">
       <h3>Impact</h3>
-      <textarea id="findImpact" class="find-impact-text" rows="3" placeholder="What an attacker gains — business consequence, data exposed, privilege escalation…">${esc(f.impact || '')}</textarea>
-    </aside>
+      <textarea id="findImpact" class="find-field-text" rows="2" placeholder="What an attacker gains — business consequence, data exposed, privilege…">${esc(f.impact || '')}</textarea>
+    </section>
+    <section class="find-sec" id="find-sec-why">
+      <h3>Why it's a finding</h3>
+      <textarea id="findWhy" class="find-field-text" rows="2" placeholder="Which security property breaks (authz, authn, integrity, secrets handling…)?">${esc(f.why || '')}</textarea>
+    </section>
+    <section class="find-sec" id="find-sec-target">
+      <h3>Affected target</h3>
+      <input id="findTarget" class="btn btn-field find-target-input" type="text" value="${escAttr(f.target || '')}" placeholder="Host / app / endpoint (e.g. GET api.example.com/users/{id})">
+    </section>
+
+    <section class="find-sec" id="find-sec-poc">
+      <h3>PoC / Evidence</h3>
+      <p class="hint find-poc-hint">Ordered exploit chain — Before → Action → After. Attach flows and screenshots; step notes must say what changed and why it proves Impact.</p>
+      <div class="find-doc" id="findBody"></div>
+      <div class="find-doc-actions" id="findDocActions">
+        <button class="btn" id="findAddText" title="Add a short step note">＋ Step note</button>
+        <button class="btn" id="findAddFlow" title="Attach request/response flows as PoC evidence">＋ PoC flow<span id="findPocReady" class="hint"></span></button>
+        <button class="btn" id="findAddImage" title="Attach a screenshot as evidence">＋ Screenshot</button>
+        <input type="file" id="findImageFile" accept="image/png,image/jpeg,image/gif,image/webp,image/bmp,image/avif" hidden>
+      </div>
+    </section>
+
+    <details class="find-more">
+      <summary>Remediation (optional)</summary>
+      <textarea id="findFix" class="find-field-text" rows="2" placeholder="How to fix…">${esc(f.fix || '')}</textarea>
+    </details>
   </article>`;
 
-  // Load body blocks for this finding.
   bodyFindingId = f.id;
   bodyBlocks = (f.blocks || []).map(b => ({ ...b }));
-  renderFindBody(f.id, f.impact || '');
+  renderFindBody(f.id);
 
-  $('#findViewSeg')?.querySelectorAll('button').forEach(btn => {
-    btn.onclick = () => setFindDetailView(btn.dataset.view);
-  });
+  const blurPatch = (id, key, getVal) => {
+    const el = $(id); if (!el) return;
+    el.addEventListener('blur', async () => {
+      const v = getVal(el);
+      if (v === (f[key] || '')) return;
+      try {
+        await patchFinding(f.id, { [key]: v });
+        f[key] = v;
+        await loadFindings();
+      } catch (err) { toast(err.message); }
+    });
+  };
+  blurPatch('#findImpact', 'impact', el => el.value);
+  blurPatch('#findWhy', 'why', el => el.value);
+  blurPatch('#findTarget', 'target', el => el.value);
+  blurPatch('#findCvss', 'cvss', el => el.value);
+  blurPatch('#findCwe', 'cwe', el => el.value);
+  blurPatch('#findFix', 'fix', el => el.value);
+  blurPatch('#findVerifInstr', 'verificationInstructions', el => el.value);
 
-  // Wire controls.
   $('#findRename').onclick = async () => {
     const t = await uiPrompt({ title: 'Rename finding', value: f.title, placeholder: 'Finding title' });
     if (t == null || t === f.title) return;
-    try { await api('/api/findings/' + f.id, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: t }) }); f.title = t; const el = $('#findTitleText'); if (el) el.textContent = t; toast('finding renamed'); }
+    try { await patchFinding(f.id, { title: t }); f.title = t; const el = $('#findTitleText'); if (el) el.textContent = t; toast('finding renamed'); renderFindings(); }
     catch (err) { toast(err.message); }
   };
   $('#findStatus').onchange = async e => {
-    const status = e.target.value;
     try {
-      await api('/api/findings/' + f.id, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status }) });
-      f.status = status;
-      toast('status: ' + statusLabel(status));
-      renderFindings();
+      await patchFinding(f.id, { status: e.target.value });
+      f.status = e.target.value;
+      toast('status: ' + statusLabel(f.status));
+      await loadFindings();
     } catch (err) { toast(err.message); }
   };
-  $('#findVerifInstr')?.addEventListener('blur', async () => {
-    const verificationInstructions = $('#findVerifInstr').value;
-    if (verificationInstructions === (f.verificationInstructions || '')) return;
+  $('#findSeverity').onchange = async e => {
     try {
-      await api('/api/findings/' + f.id, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ verificationInstructions }) });
-      f.verificationInstructions = verificationInstructions;
+      await patchFinding(f.id, { severity: e.target.value });
+      f.severity = e.target.value;
+      await loadFindings();
     } catch (err) { toast(err.message); }
-  });
+  };
+  $('#findEnv').onchange = async e => {
+    try {
+      await patchFinding(f.id, { environment: e.target.value });
+      f.environment = e.target.value;
+      await loadFindings();
+    } catch (err) { toast(err.message); }
+  };
   $('#findDelete').onclick = async () => {
     try { await api('/api/findings/' + f.id, { method: 'DELETE' }); selFinding = null; toast('finding deleted'); loadFindings(); }
     catch (err) { toast(err.message); }
   };
-  $('#findAskAi') && ($('#findAskAi').onclick = () => {
-    openAi({ findingId: f.id });
-  });
+  $('#findAskAi') && ($('#findAskAi').onclick = () => openAi({ findingId: f.id }));
   $('#findAddText').onclick = () => {
     bodyBlocks.push({ type: 'text', md: '' });
-    setFindDetailView('report');
-    renderFindBody(f.id, $('#findImpact')?.value || '');
+    renderFindBody(f.id);
     const tas = document.querySelectorAll('#findBody .block-text');
     if (tas.length) tas[tas.length - 1].focus();
   };
@@ -559,17 +495,6 @@ function renderFindingDetail() {
     } catch (err) { toast(err.message); }
   };
   updateFindPocBtn();
-  $('#findImpact')?.addEventListener('blur', async () => {
-    const impact = $('#findImpact').value;
-    if (findDetailView === 'chain') renderFindingChain($('#findChain'), bodyBlocks, impact);
-    try { await api('/api/findings/' + f.id, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ impact }) }); }
-    catch (err) { toast(err.message); }
-  });
-  $('#findCvss')?.addEventListener('blur', async () => {
-    const cvss = $('#findCvss').value;
-    try { await api('/api/findings/' + f.id, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cvss }) }); }
-    catch (err) { toast(err.message); }
-  });
 }
 
 function pocFlowIdsReady() {
@@ -694,7 +619,7 @@ async function openFlowPickForFinding(findingId) {
 }
 
 /* ---- create finding ---- */
-$('#findNew') && ($('#findNew').onclick = () => { $('#fcTitle').value = ''; $('#fcSeverity').value = 'Medium'; $('#fcDetail').value = ''; openModal($('#findCreateModal')); $('#fcTitle').focus(); });
+$('#findNew') && ($('#findNew').onclick = () => { $('#fcTitle').value = ''; $('#fcSeverity').value = 'Medium'; openModal($('#findCreateModal')); $('#fcTitle').focus(); });
 $('#fcClose') && ($('#fcClose').onclick = () => closeModal($('#findCreateModal')));
 
 /* ---- Ask AI for findings (triage) ---- */
@@ -820,7 +745,7 @@ $('#findExport') && ($('#findExport').onclick = async () => {
 $('#fcSave') && ($('#fcSave').onclick = async () => {
   const title = $('#fcTitle').value.trim(); if (!title) { toast('title required'); return; }
   try {
-    const f = await api('/api/findings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title, severity: $('#fcSeverity').value, detail: $('#fcDetail').value, source: 'human' }) });
+    const f = await api('/api/findings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title, severity: $('#fcSeverity').value, source: 'human' }) });
     closeModal($('#findCreateModal')); selFinding = f && f.id;
   } catch (e) { toast(e.message); }
 });

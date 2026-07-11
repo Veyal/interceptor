@@ -12,10 +12,14 @@ let aiSeq = 0;              // bumped per request; stale runs must not touch the
 let aiQuestion = '';        // the free-text question being asked
 let aiHistory = [];         // [{role, content}] completed + in-flight user turn
 let aiStreaming = '';       // partial assistant reply while streaming
+let aiProject = false;
 
 function setStatus(s) { const el = $('#aiStatus'); if (el) el.textContent = s || ''; }
 
 function aiHintHtml() {
+  if (aiProject) {
+    return '<div class="hint">Ask anything about the current project — captured traffic, findings, notes, scope, or what to investigate next. Follow-up questions stay in this session.</div>';
+  }
   const what = state.aiIds.length > 1 ? state.aiIds.length + ' selected flows' : 'this request / response';
   return '<div class="hint">Ask anything about ' + what + ' — e.g. <i>“is the CSRF token validated?”</i>, <i>“what auth scheme is this?”</i>, <i>“suggest test payloads”</i>. Follow-up questions stay in context. Enable <b>Let AI send requests</b> to let the model probe URLs (Anthropic only).</div>';
 }
@@ -51,7 +55,7 @@ function updateAskPlaceholder() {
   if (!qi) return;
   qi.placeholder = aiHistory.length
     ? 'Ask a follow-up… (Enter)'
-    : 'Ask anything about this request / response… (Enter)';
+    : (aiProject ? 'Ask anything about the current project… (Enter)' : 'Ask anything about this request / response… (Enter)');
 }
 
 function resetAiChat() {
@@ -66,23 +70,34 @@ function resetAiChat() {
 // ready for a free-text question — no preset mode is run; the user asks.
 export function openAi(opts) {
   if (state.aiDisabled) { toast('AI features are disabled — enable in Settings → AI assist'); return; }
+  aiProject = !!(opts && opts.project);
   state.aiIds = [];
   state.aiFindingId = null;
-  if (opts && opts.findingId) {
+  if (!aiProject && opts && opts.findingId) {
     state.aiFindingId = opts.findingId;
-  } else if (opts && opts.ids) {
+  } else if (!aiProject && opts && opts.ids) {
     state.aiIds = opts.ids.slice();
-  } else if (state.selId != null) {
+  } else if (!aiProject && state.selId != null) {
     state.aiIds = [state.selId];
   }
-  if (!state.aiIds.length && !state.aiFindingId) { toast('select a flow or finding first'); return; }
+  if (!aiProject && !state.aiIds.length && !state.aiFindingId) { toast('select a flow or finding first'); return; }
   abortAi();
   resetAiChat();
   setStatus('');
+  updateAiMode();
   updateActionBar();
   syncAgentToggle();
   openModal($('#aiModal'));
   const qi = $('#aiQuestion'); if (qi) { qi.value = ''; setTimeout(() => qi.focus(), 30); }
+}
+
+function updateAiMode() {
+  const title = $('#aiModalTitle');
+  const question = $('#aiQuestion');
+  const agentRow = document.querySelector('.ai-agent-row');
+  if (title) title.textContent = aiProject ? 'Ask AI about current project' : '✨ Ask AI';
+  if (question) question.setAttribute('aria-label', aiProject ? 'Ask a question about the current project' : 'Ask a question about the selected flow(s)');
+  if (agentRow) agentRow.style.display = aiProject ? 'none' : '';
 }
 
 // Agent mode (let the AI send requests) only works on the Anthropic provider —
@@ -120,6 +135,14 @@ function scheduleAiRender(seq) {
 }
 
 function assistBody(kind) {
+  if (aiProject) {
+    return {
+      context: 'project',
+      kind: 'ask',
+      question: aiQuestion,
+      history: aiHistory.slice(0, -1).filter(t => t.role === 'user' || t.role === 'assistant'),
+    };
+  }
   const ids = state.aiIds;
   const body = { kind };
   if (state.aiFindingId) body.findingId = state.aiFindingId;
@@ -148,7 +171,7 @@ async function streamAi(kind, seq) {
   let acc = '';
   try {
     const r = await fetch('/api/ai/assist/stream', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST', headers: { 'content-type': 'application/json', 'X-Interseptor-CSRF': '1' },
       body: JSON.stringify(body), signal: ctrl.signal,
     });
     if (!r.ok || !r.body) throw new Error('stream-unavailable');
@@ -246,7 +269,7 @@ async function runAiNonStream(kind, seq) {
 }
 
 function updateActionBar() {
-  const single = state.aiIds.length === 1;
+  const single = !aiProject && state.aiIds.length === 1;
   $('#aiToRepeater').style.display = single ? '' : 'none';
   $('#aiToIntruder').style.display = single ? '' : 'none';
 }
