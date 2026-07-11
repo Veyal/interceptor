@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Dev-build fallback version advanced to the published `1.3.1`.** Now that v1.3.1 is released, `internal/version/version.go`'s fallback `Version` constant moved from `1.3.0` to `1.3.1`.
+
 ## [1.3.1] - 2026-07-11
 
 ### Added
