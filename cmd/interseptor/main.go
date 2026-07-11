@@ -52,6 +52,12 @@ func isLoopbackBind(addr string) bool {
 }
 
 func main() {
+	// One-shot migration: if this process is still the pre-rename `interceptor`
+	// binary on disk, install as `interseptor` and leave a compatibility shim.
+	if _, err := version.MaybeRebrandExecutable(os.Stderr); err != nil {
+		// Non-fatal — continue with the current path; update can retry later.
+		fmt.Fprintf(os.Stderr, "rebrand note: %v\n", err)
+	}
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "version", "-v", "--version":

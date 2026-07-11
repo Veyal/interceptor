@@ -145,16 +145,23 @@ func Update(ctx context.Context, opts UpdateOptions) error {
 		if err != nil {
 			return err
 		}
-		prog.step("Installing to %s…", dest)
-		if err := installBinary(dest, bin); err != nil {
+		installDest, legacyPath, rebranded := resolveInstallDest(dest)
+		if rebranded {
+			prog.step("Rebranding interceptor → interseptor…")
+		}
+		prog.step("Installing to %s…", installDest)
+		if err := installBinary(installDest, bin, legacyPath); err != nil {
 			if errors.Is(err, ErrRestartRequired) {
 				prog.done("Windows updater started — it will stop running Interseptor instances, replace the binary, and restart automatically")
-				fmt.Fprintf(out, "\nIf the app does not restart within a minute, run `interseptor stop`, then move %s.new over %s manually.\n", filepath.Base(dest), dest)
+				fmt.Fprintf(out, "\nIf the app does not restart within a minute, run `interseptor stop`, then move %s.new over %s manually.\n", filepath.Base(installDest), installDest)
 				return err
 			}
 			return err
 		}
-		prog.done("Updated to interseptor v%s → %s", ver, dest)
+		prog.done("Updated to interseptor v%s → %s", ver, installDest)
+		if rebranded {
+			printRebrandNotice(out, legacyPath, installDest)
+		}
 		printMCPUpdateNote(out)
 		return nil
 	}
@@ -177,6 +184,90 @@ func Update(ctx context.Context, opts UpdateOptions) error {
 func printMCPUpdateNote(out io.Writer) {
 	fmt.Fprintf(out, "\nMCP: if Cursor uses Streamable HTTP (http://127.0.0.1:9966/mcp), restart Interseptor to pick up this build — no MCP config change needed.\n")
 	fmt.Fprintf(out, "     stdio clients: restart the MCP server or use scripts/interseptor-mcp to resolve the updated binary on PATH.\n")
+}
+
+// isLegacyBinaryName reports whether base is the pre-rename product binary name.
+func isLegacyBinaryName(base string) bool {
+	switch strings.ToLower(base) {
+	case "interceptor", "interceptor.exe":
+		return true
+	default:
+		return false
+	}
+}
+
+// rebrandInstallPath maps a legacy interceptor install path to interseptor.
+// ok is false when dest is already the current name (or unrelated).
+func rebrandInstallPath(dest string) (string, bool) {
+	base := filepath.Base(dest)
+	switch strings.ToLower(base) {
+	case "interceptor":
+		return filepath.Join(filepath.Dir(dest), "interseptor"), true
+	case "interceptor.exe":
+		return filepath.Join(filepath.Dir(dest), "interseptor.exe"), true
+	default:
+		return dest, false
+	}
+}
+
+// resolveInstallDest returns where to write the new binary. When the running
+// executable is still named interceptor, installDest is interseptor in the same
+// directory and legacyPath is the old path (for a compatibility shim).
+func resolveInstallDest(currentExe string) (installDest, legacyPath string, rebranded bool) {
+	if next, ok := rebrandInstallPath(currentExe); ok {
+		return next, currentExe, true
+	}
+	return currentExe, "", false
+}
+
+func printRebrandNotice(out io.Writer, legacyPath, newPath string) {
+	if out == nil {
+		out = os.Stderr
+	}
+	fmt.Fprintf(out, "\n")
+	fmt.Fprintf(out, "══════════════════════════════════════════════════════════\n")
+	fmt.Fprintf(out, "  Renamed: interceptor → interseptor\n")
+	fmt.Fprintf(out, "══════════════════════════════════════════════════════════\n")
+	fmt.Fprintf(out, "  The product was renamed. This update installed:\n")
+	fmt.Fprintf(out, "    %s\n", newPath)
+	if legacyPath != "" {
+		fmt.Fprintf(out, "  A compatibility shim remains at:\n")
+		fmt.Fprintf(out, "    %s\n", legacyPath)
+	}
+	fmt.Fprintf(out, "  Prefer:  interseptor …\n")
+	fmt.Fprintf(out, "  Updates: interseptor update\n")
+	fmt.Fprintf(out, "══════════════════════════════════════════════════════════\n")
+}
+
+// MaybeRebrandExecutable renames a running legacy "interceptor" binary to
+// "interseptor" in place (writes the new name, replaces the old path with a
+// shim). Safe to call on every startup — no-op when already named interseptor.
+// Returns whether a rebrand happened.
+func MaybeRebrandExecutable(out io.Writer) (bool, error) {
+	dest, err := os.Executable()
+	if err != nil {
+		return false, err
+	}
+	if resolved, err := filepath.EvalSymlinks(dest); err == nil {
+		// If we're already executing via a shim → interseptor, don't touch it.
+		if !isLegacyBinaryName(filepath.Base(resolved)) && isLegacyBinaryName(filepath.Base(dest)) {
+			return false, nil
+		}
+		dest = resolved
+	}
+	installDest, legacyPath, rebranded := resolveInstallDest(dest)
+	if !rebranded {
+		return false, nil
+	}
+	self, err := os.ReadFile(dest)
+	if err != nil {
+		return false, err
+	}
+	if err := installBinary(installDest, self, legacyPath); err != nil {
+		return false, err
+	}
+	printRebrandNotice(out, legacyPath, installDest)
+	return true, nil
 }
 
 func fetchRelease(ctx context.Context, version string) (*releaseInfo, error) {
@@ -507,9 +598,9 @@ func unzipBin(data []byte) ([]byte, error) {
 	return nil, fmt.Errorf("interseptor binary not found in zip")
 }
 
-func installBinary(dest string, data []byte) error {
+func installBinary(dest string, data []byte, legacyPath string) error {
 	if runtime.GOOS == "windows" {
-		return installBinaryWindows(dest, data)
+		return installBinaryWindows(dest, data, legacyPath)
 	}
 	tmp := dest + ".new"
 	if err := os.WriteFile(tmp, data, 0o755); err != nil {
@@ -519,10 +610,29 @@ func installBinary(dest string, data []byte) error {
 		_ = os.Remove(tmp)
 		return err
 	}
+	if legacyPath != "" && legacyPath != dest {
+		_ = installLegacyShim(legacyPath, dest)
+	}
 	return nil
 }
 
-func installBinaryWindows(dest string, data []byte) error {
+// installLegacyShim replaces the old interceptor path with a symlink (or a
+// tiny shell wrapper) pointing at interseptor, so existing PATH / scripts keep
+// working during the rename.
+func installLegacyShim(legacyPath, target string) error {
+	_ = os.Remove(legacyPath)
+	if err := os.Symlink(target, legacyPath); err == nil {
+		return nil
+	}
+	// Symlink failed (e.g. no privilege on some volumes) — drop a wrapper script.
+	wrapper := "#!/bin/sh\nexec \"" + target + "\" \"$@\"\n"
+	if err := os.WriteFile(legacyPath, []byte(wrapper), 0o755); err != nil {
+		return err
+	}
+	return nil
+}
+
+func installBinaryWindows(dest string, data []byte, legacyPath string) error {
 	newPath := dest + ".new"
 	if err := os.WriteFile(newPath, data, 0o755); err != nil {
 		return err
@@ -533,7 +643,7 @@ func installBinaryWindows(dest string, data []byte) error {
 	dir := filepath.Dir(dest)
 	bat := filepath.Join(dir, "interseptor-update.bat")
 	logPath := filepath.Join(dir, "interseptor-update.log")
-	script := windowsUpdateScript(newPath, dest, bat, logPath)
+	script := windowsUpdateScript(newPath, dest, bat, logPath, legacyPath)
 	if err := os.WriteFile(bat, []byte(script), 0o644); err != nil {
 		return err
 	}
@@ -545,21 +655,39 @@ func installBinaryWindows(dest string, data []byte) error {
 }
 
 // windowsUpdateScript builds a cmd batch file that finishes an in-place update.
-// Exported as a pure function so CI on non-Windows can assert the retry/stop logic.
-func windowsUpdateScript(newPath, dest, bat, logPath string) string {
+// legacyPath, when non-empty, is a pre-rename interceptor.exe to replace with a
+// .bat shim after the new interseptor.exe is in place.
+func windowsUpdateScript(newPath, dest, bat, logPath, legacyPath string) string {
 	// Paths are quoted; batch treats % as special so double them in literals.
+	legacyBlock := ""
+	if legacyPath != "" {
+		legacyBat := strings.TrimSuffix(legacyPath, filepath.Ext(legacyPath)) + ".bat"
+		if strings.HasSuffix(strings.ToLower(legacyPath), ".exe") {
+			// Replace interceptor.exe with interceptor.bat that forwards to interseptor.exe
+			legacyBlock = fmt.Sprintf(`
+REM Compatibility shim for the pre-rename binary name.
+if exist "%%LEGACY%%" del "%%LEGACY%%" >nul 2>&1
+echo @echo off> "%s"
+echo "%%~dp0interseptor.exe" %%*>> "%s"
+`, legacyBat, legacyBat)
+		}
+	}
 	return fmt.Sprintf(`@echo off
 setlocal EnableDelayedExpansion
 set "NEW=%s"
 set "DEST=%s"
 set "BAT=%s"
 set "LOG=%s"
+set "LEGACY=%s"
 
 REM Let the `+"`interseptor update`"+` CLI exit and release its exe handle.
 timeout /t 3 /nobreak >nul
 
 REM Stop any still-running Interseptor servers so the exe can be replaced.
 for /f "tokens=2" %%%%p in ('tasklist /FI "IMAGENAME eq interseptor.exe" /NH 2^>nul ^| findstr /i "interseptor.exe"') do (
+  taskkill /PID %%%%p /T /F >nul 2>&1
+)
+for /f "tokens=2" %%%%p in ('tasklist /FI "IMAGENAME eq interceptor.exe" /NH 2^>nul ^| findstr /i "interceptor.exe"') do (
   taskkill /PID %%%%p /T /F >nul 2>&1
 )
 timeout /t 1 /nobreak >nul
@@ -575,6 +703,7 @@ goto retry
 
 :success
 if exist "%%NEW%%" del "%%NEW%%" >nul 2>&1
+%s
 del "%%BAT%%" >nul 2>&1
 start "" "%%DEST%%"
 exit /b 0
@@ -583,7 +712,7 @@ exit /b 0
 echo [%%date%% %%time%%] Could not replace %%DEST%% after 90 attempts.>> "%%LOG%%"
 echo Staged binary kept at %%NEW%%>> "%%LOG%%"
 exit /b 1
-`, newPath, dest, bat, logPath)
+`, newPath, dest, bat, logPath, legacyPath, legacyBlock)
 }
 
 func goInstall(ctx context.Context, version string, out io.Writer) error {

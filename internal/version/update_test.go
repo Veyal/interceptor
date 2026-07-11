@@ -7,6 +7,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -110,12 +112,75 @@ func TestAssetCandidates(t *testing.T) {
 	}
 }
 
+func TestRebrandInstallPath(t *testing.T) {
+	dir := t.TempDir()
+	in := filepath.Join(dir, "interceptor")
+	got, ok := rebrandInstallPath(in)
+	want := filepath.Join(dir, "interseptor")
+	if !ok || got != want {
+		t.Fatalf("got (%q,%v), want (%q,true)", got, ok, want)
+	}
+	exeIn := filepath.Join(dir, "interceptor.exe")
+	got, ok = rebrandInstallPath(exeIn)
+	want = filepath.Join(dir, "interseptor.exe")
+	if !ok || got != want {
+		t.Fatalf("exe: got (%q,%v), want (%q,true)", got, ok, want)
+	}
+	same := filepath.Join(dir, "interseptor")
+	got, ok = rebrandInstallPath(same)
+	if ok || got != same {
+		t.Fatalf("already rebranded: got (%q,%v)", got, ok)
+	}
+}
+
+func TestIsLegacyBinaryName(t *testing.T) {
+	if !isLegacyBinaryName("interceptor") || !isLegacyBinaryName("Interceptor.exe") {
+		t.Fatal("expected legacy names")
+	}
+	if isLegacyBinaryName("interseptor") || isLegacyBinaryName("interseptor.exe") {
+		t.Fatal("interseptor is not legacy")
+	}
+}
+
+func TestInstallLegacyShimSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "interseptor")
+	legacy := filepath.Join(dir, "interceptor")
+	if err := os.WriteFile(target, []byte("bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := installLegacyShim(legacy, target); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Lstat(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		got, err := os.Readlink(legacy)
+		if err != nil || got != target {
+			t.Fatalf("symlink -> %q err=%v, want %q", got, err, target)
+		}
+		return
+	}
+	// Fallback wrapper script.
+	b, _ := os.ReadFile(legacy)
+	if !strings.Contains(string(b), target) {
+		t.Fatalf("wrapper missing target: %s", b)
+	}
+}
+
+
 func TestWindowsUpdateScript(t *testing.T) {
 	script := windowsUpdateScript(
 		`C:\tools\interseptor.exe.new`,
 		`C:\tools\interseptor.exe`,
 		`C:\tools\interseptor-update.bat`,
 		`C:\tools\interseptor-update.log`,
+		"",
 	)
 	for _, want := range []string{
 		`set "NEW=C:\tools\interseptor.exe.new"`,
@@ -133,3 +198,23 @@ func TestWindowsUpdateScript(t *testing.T) {
 		t.Fatal("expected 3s initial wait for update CLI to exit")
 	}
 }
+
+func TestWindowsUpdateScriptRebrand(t *testing.T) {
+	script := windowsUpdateScript(
+		`C:\tools\interseptor.exe.new`,
+		`C:\tools\interseptor.exe`,
+		`C:\tools\interseptor-update.bat`,
+		`C:\tools\interseptor-update.log`,
+		`C:\tools\interceptor.exe`,
+	)
+	for _, want := range []string{
+		`set "LEGACY=C:\tools\interceptor.exe"`,
+		`interceptor.bat`,
+		`interseptor.exe`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("rebrand script missing %q:\n%s", want, script)
+		}
+	}
+}
+
