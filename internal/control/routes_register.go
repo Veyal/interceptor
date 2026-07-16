@@ -84,6 +84,8 @@ func (h *Hub) registerInterceptRoutes(ic *interceptAPI) {
 func (h *Hub) registerSettingsRoutes(set *settingsAPI, and *androidAPI, ios *iosAPI, sess *sessionAPI) {
 	h.mux.HandleFunc("GET /api/settings", set.getSettings)
 	h.mux.HandleFunc("PUT /api/settings", set.putSettings)
+	h.mux.HandleFunc("GET /api/ui/{panel}", h.getUIState)
+	h.mux.HandleFunc("PUT /api/ui/{panel}", h.putUIState)
 	h.mux.HandleFunc("GET /api/network/hosts", set.getNetworkHosts)
 	h.mux.HandleFunc("GET /api/proxy/device-endpoint", set.getDeviceProxyEndpoint)
 	h.mux.HandleFunc("POST /api/proxy/device-endpoint", set.setDeviceProxyEndpoint)
@@ -172,6 +174,8 @@ func (h *Hub) registerChecksRoutes(chk *checksAPI, as *activescanAPI) {
 
 func (h *Hub) registerPacksRoutes() {
 	h.mux.HandleFunc("GET /api/packs", h.listPacks)
+	h.mux.HandleFunc("GET /api/packs/catalog", h.listPackCatalog)
+	h.mux.HandleFunc("POST /api/packs/catalog/{name}/install", h.installCatalogPack)
 	h.mux.HandleFunc("POST /api/packs/install", h.installPack)
 	h.mux.HandleFunc("GET /api/packs/{name}", h.getPack)
 	h.mux.HandleFunc("DELETE /api/packs/{name}", h.removePack)

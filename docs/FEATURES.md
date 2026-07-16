@@ -34,9 +34,10 @@ The full rundown. For the short version, see the [README](../README.md#what-it-d
 - **Scanner** — 12 passive checks (missing CSP/HSTS/`nosniff`/clickjacking headers, wildcard CORS,
   reflected parameters, secrets in bodies, insecure cookies, Basic-auth & version disclosure, …),
   exportable as a **Markdown findings report**.
-- **Custom checks** — extend the scanner with your own passive checks in sandboxed **Starlark**
-  (drop a `.star` file in `~/.interseptor/checks/`). See the
-  [check-authoring guide](custom-checks.md) and [`examples/checks/`](../examples/checks/).
+- **Custom checks & rule packs** — extend the scanner with sandboxed **Starlark** checks
+  (drop a `.star` in `~/.interseptor/checks/`), install **official packs** from Scanner → Checks
+  (or upload a `.tar.gz`), and share community packs. See
+  [custom checks](custom-checks.md), [rule packs](rule-packs.md), and [`examples/checks/`](../examples/checks/).
 - **Target scope** — include/exclude rules that focus history, the intercept gate, and the scanner.
 - **WebSocket** capture (`ws://`/`wss://` per-frame) **and replay** (a WebSocket Repeater).
 - **Session / auth injection** — auto-apply an `Authorization`/`Cookie` to every Repeater & Intruder

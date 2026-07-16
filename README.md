@@ -35,7 +35,7 @@ machine**, nothing phoned home.
   prove (differential repro → adversarial review → OOB proof → human confirm for the scary ones).
 - **Extensible** — write your own passive/active checks in sandboxed Starlark, no fork required.
 - **Mobile-ready** — Android and iOS setup for HTTPS interception on real devices.
-- **AI & API native** — a full MCP server (90 tools) and a REST/SSE API so an agent or script drives
+- **AI & API native** — a full MCP server (92 tools) and a REST/SSE API so an agent or script drives
   the same core as the UI, plus BYO-key AI assist for explaining requests and suggesting payloads.
 
 That's the highlight reel — the **[full feature list](docs/FEATURES.md)** covers WebSockets, HAR
@@ -74,6 +74,8 @@ several projects at once are all in **[Getting started](docs/getting-started.md)
 | **[Architecture](docs/architecture.md)** | Security model, package layout, UI structure |
 | **[Custom checks](docs/custom-checks.md)** · [active checks](docs/custom-active-checks.md) | Author your own Starlark checks |
 | **[Rule packs](docs/rule-packs.md)** | Share, install, and manage bundles of checks |
+| **[Engagement close-out](docs/engagement-closeout.md)** | Checklist to leave a report-ready project |
+| **[MCP cookbook](docs/product/mcp-cookbook.md)** | Copy-paste agent recipes |
 | **[Contributing](CONTRIBUTING.md)** | Code standards, TDD, commit style, cutting a release |
 | **[Security policy](SECURITY.md)** | Reporting a vulnerability *in* Interseptor |
 | **[Roadmap & strategy](docs/product/)** | Why this exists, what's next, benchmarks |

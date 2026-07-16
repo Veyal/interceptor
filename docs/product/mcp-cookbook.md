@@ -1,4 +1,4 @@
-# MCP Cookbook — three recipes for the AI-assisted pentester
+# MCP Cookbook — recipes for the AI-assisted pentester
 
 *For Priya + Atlas: copy these prompts into your MCP client after connecting
 `interseptor mcp` or `POST http://127.0.0.1:9966/mcp`.*
@@ -51,3 +51,59 @@ captured flows, no separate Discover tab.
 ```
 
 **Safety:** `active_scan` sends real payloads — pass `arm=true` once per session and only on authorized targets.
+
+## Recipe 4 — Close out findings (engagement end)
+
+**Goal:** Leave a report-ready project, not a History pile.
+
+```
+1. list_findings — triage status / severity / ready flags
+2. For each stub: update_finding with Impact / Why / Target pillars
+3. get_flow + add_finding_poc for proof flows (and screenshots if needed)
+4. Mark uncertain items needs_verification with concrete check steps
+5. export_findings_report (or UI Export report) → Markdown/HTML for the client
+6. Optional: export_full_project for a portable archive
+```
+
+**Human checklist:** [engagement-closeout.md](../engagement-closeout.md)
+
+## Recipe 5 — Autopilot with trust review
+
+**Goal:** Run Autopilot, then accept only what the Trust ledger justified.
+
+```
+1. list_scope — Autopilot refuses to start without include rules
+2. check_readiness — fix blockers (OOB, auth, traffic)
+3. autopwn_start with a tight budget (maxRequests / maxWallMs)
+4. autopwn_state while it runs; watch Activity + History (glass box)
+5. list_findings — review only newly filed items; delete/revise noise
+6. autopwn_stop if budgets look wrong mid-run
+```
+
+**Tip:** In the UI, the Autopilot **Trust ledger** shows filed / rejected / skipped
+with reasons — use that before you trust Critical/High.
+
+## Recipe 6 — Custom checks and rule packs
+
+**Goal:** Encode a finding as a reusable check, or install an official pack.
+
+```
+1. list_checks / list_active_checks — see what's loaded
+2. Author offline: `interseptor check new` → validate → test
+3. save_check / save_active_check when ready (or drop into Checks UI)
+4. list_packs / pack_info — see installed packs (install is human-gated)
+5. Human: Scanner → Checks → Install official pack, or
+   `interseptor rules install pack.tar.gz`
+```
+
+## Recipe 7 — Intruder from AI payload lists
+
+**Goal:** Fuzz one injection point with AI-suggested payloads, then file a finding.
+
+```
+1. get_flow on the target exchange
+2. suggest_intruder_payloads with flowId (+ optional hint)
+3. start_intruder using the returned positions/payloads (or UI ✨ Generate)
+4. After the run: inspect flagged / interesting results in History
+5. create_finding + add_finding_poc with the best attempt's flowId
+```

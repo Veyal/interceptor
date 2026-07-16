@@ -1,107 +1,65 @@
 # Interseptor — Roadmap
 
-*Owner: Product · Last updated: 2026-06-26 · Horizon: rolling. Now/Next/Later, not dates.*
+*Owner: Product · Last updated: 2026-07-16 · Horizon: rolling. Now/Next/Later, not dates.*
 
-Roadmap is organized around the strategy in [strategy.md](strategy.md). The product **intent** is a
-proxy operated by **a penetration tester and their AI assistant together**, so the top priorities
-are: **(A) make the AI a first-class operator** (a real MCP server + an AI-friendly API), **(B)
-frictionless UX/onboarding** for the human, and only then **(C) close table-stakes gaps** and **(D)
-press differentiators**. See [improvements.md](improvements.md) for the gap analysis driving this.
-
-## What exists today (v1 baseline)
-
-Proxy + HTTP/HTTPS MITM, live history with inspector, intercept (hold/forward/drop) + request-side
-match-&-replace, **Repeater**, **Intruder** (Sniper/Pitchfork), passive **Scanner**, **WebSocket
-frame capture**, runtime listener rebind, CA management, and a **REST + SSE control API** with API
-keys and an MCP descriptor. ~3.7k LOC of Go, no cgo, single static binary.
+Strategy: a proxy operated by **a penetration tester and their AI assistant together**.
+Priority order: **(A) engagement close-out**, **(B) trustworthy AI**, **(C) table-stakes
+proxy depth**, then **(D) reach / packaging**. See [improvements.md](improvements.md).
 
 ## Themes
 
-1. **AI-operable** — the AI can do everything the UI can: a real MCP server + an AI-friendly API.
-2. **Frictionless UX** — instant onboarding (CA, proxy setup, MCP setup), low-noise, easy to drive.
-3. **Trustworthy core** — be a tool pentesters stage real work on (scope, scale, correctness).
-4. **Interop & reach** — HAR, upstream proxy, benchmarks, packaging.
+1. **Close the engagement** — findings → evidence → report is the sticky loop.
+2. **AI-operable + trustworthy** — agents drive the same engine; humans see *why* Autopilot filed or rejected.
+3. **Project = whole workspace** — tabs, presets, packs, notes travel with the project.
+4. **Trustworthy core** — HTTP/2, correctness, never break forwarding.
+5. **Interop & reach** — install paths, packs ecosystem, collaboration.
 
-## ✅ Shipped (cycle 1 — the AI-operable pivot)
+## ✅ Shipped (through v1.5.0)
 
-The entire **Now + Next** slate of cycle 1 landed (each TDD'd, with a control API, UI, MCP tool, and
-verified live). See [CHANGELOG.md](../../CHANGELOG.md).
+MCP (92 tools), scope, Repeater/Intruder, scanner + active scan + Autopilot, findings
+redesign, rule packs + check CLI + Starlark stdlib, project-scoped + project-DB UI tabs,
+Intruder Numbers / AI payloads / result viewer, retention, OpenAPI, mobile helpers,
+remote/tunnel pieces, HAR + full project export.
 
-| Shipped | Notes |
-|---|---|
-| **Real MCP server** (`interseptor mcp`) | stdio JSON-RPC, **18 tools**, bounded results |
-| **MCP setup in the UI** + AI-friendly API | copy-paste client config; `/api/reference` self-documents |
-| **Target scope** (PRD-0001) | include/exclude rules focus history + intercept + scanner |
-| **Response interception** | response match-&-replace + hold/edit/drop |
-| **HAR export & import** | HAR 1.2 round-trip; free interop |
-| **System-proxy toggle** (macOS) | opt-in only |
-| **Upstream / chained proxy** | race-safe, live + at startup |
-| **History full-text search** | method/host/path |
-| **Onboarding "get started" card** + **performance benchmarks** | see [benchmarks.md](../benchmarks.md): ~20 MB idle, ~1 s cold start |
+## Now (committed slice)
 
-## ✅ Shipped (cycle 2 — depth on the core loop + agent reach)
+| Item | Why | Status |
+|---|---|---|
+| Engagement close-out checklist | Convert “cool proxy” → “I finish work here” | Docs + Findings UX |
+| Project-DB UI state (Repeater/Intruder/presets) | Drafts survive machine/browser switches | Shipped this cycle |
+| Official rule packs + Checks UI install | Growth channel without growing core | Shipped this cycle |
+| Intruder Interesting filter → Finding | Analysis, not firehose | Shipped this cycle |
+| Autopilot Trust ledger copy | Surface verifier gates | Shipped this cycle |
+| MCP cookbook v2 recipes | Agent onboarding | Shipped this cycle |
+| Packaging truth (tool counts, install docs) | Stop lying in README | Shipped this cycle |
 
-| Shipped | Notes |
-|---|---|
-| **Projects** (named save/load) | export/import flows + rules + scope + settings; round-trip tested |
-| **Saved filters / views** | name & recall a history filter; toolbar dropdown |
-| **`analyze_flow`** (AI tool) | compact decision-ready flow summary (headers/params/findings/scope) |
-| **Benchmark guard** | `BenchmarkInsertFlow` + `scripts/bench.sh` (reproduces the documented numbers) |
-| **BYO-key AI assist** (Anthropic **+ OpenRouter**) | explain / suggest payloads / summarize, off until a key is set; provider-selectable |
-| **MCP Streamable-HTTP transport** | `POST /mcp` on the control port — same tools, no stdio subprocess; stateless, batch-aware; unit-tested + live-verified |
-| **Session / auth — header injection** | auth headers (bearer/cookie) auto-applied to every Repeater/Intruder send; `set_session` MCP tool. *Slice of the L item; login macros + 401 re-auth still roadmapped.* |
-| **Flow → curl** + **findings → Markdown report** | `flow_as_curl` and `scan_report` MCP tools / endpoints |
-| **WebSocket message replay** | `internal/wsrepeater` (RFC 6455, no deps); WS-inspector replay box, `POST /api/ws/send`, `ws_send` MCP tool (**36 tools**) |
+## Next
 
-## ✅ Shipped (cycle 3 — discovery depth + session continuity)
-
-| Shipped | Notes |
-|---|---|
-| **Content discovery** (forced-browse) | scope-aware engine, Discover tab, soft-404 calibration, recursion, `FlagDiscovery` flows |
-| **Discovery loop** | History DSC badge + filter, Discover→Repeater, scope targets, history seeds, AI path suggestions |
-| **Login macro + 401 re-auth** | recorded login request, auto session refresh, Repeater/Intruder retry on 401 |
-| **MCP discovery + session tools** | `start_discovery`, `discovery_state`, `stop_discovery`, `suggest_discovery_paths`, `run_login_macro` (**41 tools**) — *the four discovery tools were removed in a later cycle along with the content-discovery feature; see the `[0.29.0]` → Removed entry in CHANGELOG.md* |
-| **UX polish** | header intercept cue, `j`/`k` history nav, `r`→Repeater, improved empty states |
-| **[MCP cookbook](mcp-cookbook.md)** + **[benchmark comparison](benchmark-comparison.md)** | agent recipes + Burp/ZAP positioning numbers |
-
-## Cycle 4 — remaining bets (all genuinely L/XL; not single-session work)
-
-These are the honest, larger efforts left. Each deserves its own design → PRD → plan.
-
-| Item | Theme | Why / caveat | Effort |
+| Item | Theme | Effort | Issue |
 |---|---|---|---|
-| **Session / auth handling** (login macros, token refresh, re-auth on 401) | Trustworthy core | High value; a pain point across all tools | L |
-| **Comparative benchmarks vs Burp & ZAP** | Interop & reach | Our harness + numbers shipped ([benchmarks.md](../benchmarks.md)); the *comparison* needs those tools installed on the same box | S–M |
-| **WebSocket through an upstream proxy** | Interop & reach | WS *message replay* shipped (`ws_send` / WS Repeater); routing the WS handshake via an upstream proxy remains | M |
-| **HTTP/2 support** | Trustworthy core | Increasingly expected; significant proxy work | L |
-| **Extension / plugin API** | Differentiator | Burp's real moat; worth it once core is sticky | XL |
-| **Collaboration / multi-user** | Reach | Team/commercial segment | XL |
-| **Remote tunnel** (expose the proxy to a remote device securely) | Interop | Niche; external dependency | M |
-| **HTTP/3 / QUIC** | Trustworthy core | Immature even in mitmproxy; forward-looking | XL |
+| HTTP/2 MITM support | Trustworthy core | L | [#19](https://github.com/Veyal/interseptor/issues/19) |
+| Autopilot confidence in Findings detail | Trustworthy AI | M | [#20](https://github.com/Veyal/interseptor/issues/20) |
+| Collaboration: merge conflict preview + presence | Reach | L | [#21](https://github.com/Veyal/interseptor/issues/21) |
+| Content discovery (scope-aware soft-404) return | Table stakes | L | [#22](https://github.com/Veyal/interseptor/issues/22) |
+| Enable Homebrew tap / Scoop bucket | Reach | S | [#23](https://github.com/Veyal/interseptor/issues/23) |
+| Signed rule packs (minisign) | Packs ecosystem | M | [#24](https://github.com/Veyal/interseptor/issues/24) |
+
+## Later
+
+| Item | Theme | Effort | Issue |
+|---|---|---|---|
+| Extension / plugin API | Differentiator (Burp moat) | XL | [#25](https://github.com/Veyal/interseptor/issues/25) |
+| HTTP/3 / QUIC | Forward-looking | XL |
+| Team roles / audit log / commercial packaging | Commercial | XL |
+| WebSocket via upstream proxy | Interop | M |
 
 ## Prioritization model
 
-Lightweight RICE — **Reach × Impact × Confidence ÷ Effort**. Reach = share of target users
-touched; Impact = 0.25/0.5/1/2/3; Confidence = 0.5/0.8/1.0; Effort in person-weeks (S≈1, M≈2–4,
-L≈6–10, XL≈12+). Cycle-2 top scores:
+RICE — Reach × Impact × Confidence ÷ Effort. Revisit each planning cycle.
+“Now” is a small committed slice; “Next” / “Later” are intentionally undated.
 
-| Feature | Reach | Impact | Conf | Effort | ~Score | Bucket |
-|---|---|---|---|---|---|---|
-| Projects (save/load) | Med | 1.0 | 0.8 | M | High | Now |
-| Comparative benchmarks | High | 0.5 | 0.8 | S–M | High | Now |
-| Saved filters/views | Med | 0.5 | 1.0 | S–M | Med-High | Now |
-| MCP streamable-HTTP + analyze_flow | Med | 1.0 | 0.8 | M | Med-High | Next |
-| Session/auth handling | Med | 2.0 | 0.5 | L | Med | Next |
-| BYO-key AI assist | Med | 1.0 | 0.6 | M–L | Med | Next |
-| HTTP/2 | Med | 1.0 | 0.8 | L | Low-Med | Later |
+## How we work
 
-*Scores are directional, revisited each planning cycle. "Now" is a small committed slice; "Next"
-and "Later" are intentionally not dated.*
-
-## How we work (lightweight product process)
-
-1. A roadmap item graduates to a **PRD** ([prd-0001-target-scope.md](prd-0001-target-scope.md) is the
-   template/exemplar) before build.
-2. Each PRD → a TDD implementation plan under `docs/superpowers/plans/` (existing convention).
-3. Every change lands with tests, a `CHANGELOG.md` entry, and updates to this roadmap.
-4. We measure against [metrics.md](metrics.md) and let the data re-rank the backlog.
+1. Roadmap item → GitHub issue (and PRD when L/XL).
+2. TDD + CHANGELOG under `[Unreleased]`.
+3. Measure against engagement outcomes: report exports, findings filed, Autopilot accept rate.

@@ -133,28 +133,38 @@ function renderPlan(){
 
 function outcomeHtml(c){
   if(c.outcome==='filed'){
-    const conf = c.confidence!=null ? ' (conf '+c.confidence+')' : '';
+    const conf = c.confidence!=null ? ' · confidence '+c.confidence : '';
     const link = c.findingId ? ` <a class="ap-cand-link" data-finding="${c.findingId}">view finding →</a>` : '';
-    return `<span class="ap-out-filed">✓ filed${esc(conf)}</span>${link}`;
+    return `<span class="ap-out-filed">✓ filed — passed verification gates${esc(conf)}</span>${link}`;
   }
   if(c.outcome==='rejected'){
-    return `<span class="ap-out-rejected">✗ rejected${c.rejectedAt?' @ '+esc(c.rejectedAt):''}</span>`;
+    const gate = c.rejectedAt ? ' failed at <b>'+esc(c.rejectedAt)+'</b>' : ' failed a verification gate';
+    return `<span class="ap-out-rejected">✗ rejected —${gate}${c.reason?': '+esc(c.reason):''}</span>`;
   }
   if(c.outcome==='skipped'){
-    return `<span class="ap-out-skipped">skipped${c.reason?': '+esc(c.reason):''}</span>`;
+    return `<span class="ap-out-skipped">⊘ skipped — ${c.reason?esc(c.reason):'not pursued this run'}</span>`;
   }
-  return `<span class="ap-out-verifying">verifying…</span>`;
+  return `<span class="ap-out-verifying">… verifying (differential → adversarial → OOB → human for Critical/High)</span>`;
 }
 
 function renderCandidates(){
   const box=$('#apCandidates'); if(!box) return;
   if(!candOrder.length){
-    box.innerHTML = `<div class="ap-plan-empty">No candidates yet — they appear as the run finds and verifies them.</div>`;
+    box.innerHTML = `<div class="ap-plan-empty">Trust ledger is empty — candidates appear as the run finds and verifies them. Only <b>filed</b> rows become Findings.</div>`;
     return;
   }
-  box.innerHTML = candOrder.map(k=>{
+  // Filed first, then verifying, then rejected/skipped — makes the ledger scannable.
+  const order = candOrder.slice().sort((a,b)=>{
+    const rank = o => o==='filed'?0:o==='verifying'?1:o==='rejected'?2:3;
+    return rank(candById.get(a)?.outcome) - rank(candById.get(b)?.outcome);
+  });
+  let filed=0,rejected=0,skipped=0,verifying=0;
+  order.forEach(k=>{const o=candById.get(k)?.outcome; if(o==='filed')filed++; else if(o==='rejected')rejected++; else if(o==='skipped')skipped++; else verifying++;});
+  const legend=$('#apLedgerLegend');
+  if(legend) legend.textContent = `${filed} filed · ${rejected} rejected · ${skipped} skipped · ${verifying} verifying`;
+  box.innerHTML = order.map(k=>{
     const c = candById.get(k); if(!c) return '';
-    return `<div class="ap-cand">
+    return `<div class="ap-cand ap-cand-${escAttr(c.outcome||'verifying')}">
       <div class="ap-cand-top">
         <span class="ap-cand-class">${esc(c.vulnClass||'?')}</span>
         ${c.severity?`<span class="ap-cand-sev" style="color:${sevVar(c.severity)}">${esc(c.severity)}</span>`:''}
@@ -175,7 +185,7 @@ function renderCounts(){
   if(cur.verified!=null) parts.push(cur.verified+' verified');
   if(cur.filed!=null) parts.push(cur.filed+' filed');
   if(cur.rejected!=null) parts.push(cur.rejected+' rejected');
-  el.textContent = parts.join(' · ');
+  el.textContent = parts.join(' · ') || 'trust ledger';
 }
 
 // ---- run history ----

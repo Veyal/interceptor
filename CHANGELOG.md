@@ -9,7 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Project-DB UI state for Repeater / Intruder / presets.** `GET/PUT /api/ui/{panel}` stores tab drafts in the project database (panels: `repeater`, `intruder`, `intruder-presets`). The UI hydrates from the API first, then localStorage, and persists both ways — drafts survive browser/machine switches within the same project.
+- **Official rule packs in the binary.** Bundled catalog (`secrets`, `api-jwt`, `security-headers`) via `GET /api/packs/catalog` and one-click `POST /api/packs/catalog/{name}/install`. Scanner → Checks shows Official packs + `.tar.gz` upload.
+- **Intruder Interesting / Errors filter and → Finding.** Result pane filters All / Interesting / Errors; **→ Finding** creates a finding with PoC `flowIds` from flagged/interesting attempts.
+- **Autopilot Trust ledger.** UI copy and richer outcomes so humans see why candidates were filed, rejected, or skipped.
+- **Engagement close-out guide.** [`docs/engagement-closeout.md`](docs/engagement-closeout.md); Findings empty state points at Export report + the checklist.
+- **MCP cookbook v2.** Recipes for close-out, Autopilot trust review, rule packs, and AI Intruder payloads ([`docs/product/mcp-cookbook.md`](docs/product/mcp-cookbook.md)).
+
 ### Changed
+- **Roadmap refreshed** for the post-1.5.0 cycle ([`docs/product/roadmap.md`](docs/product/roadmap.md)).
+- **README MCP tool count** corrected to **92**.
 - **Dev-build fallback version advanced to the published `1.5.0`.** Now that v1.5.0 is released, `internal/version/version.go`'s fallback `Version` constant moved from `1.4.0` to `1.5.0`.
 
 ## [1.5.0] - 2026-07-16

@@ -1,6 +1,7 @@
 package control
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 
@@ -61,4 +62,51 @@ func (h *Hub) removePack(w http.ResponseWriter, r *http.Request) {
 	}
 	h.broadcast(map[string]any{"type": "checks.update"})
 	writeJSON(w, http.StatusOK, map[string]any{"removed": n})
+}
+
+func (h *Hub) listPackCatalog(w http.ResponseWriter, r *http.Request) {
+	packs, err := rules.ListCatalog()
+	if err != nil {
+		httpInternalErr(w, err)
+		return
+	}
+	installed, _ := h.packsRegistry().List()
+	have := map[string]string{}
+	for _, p := range installed {
+		have[p.Name] = p.Version
+	}
+	out := make([]map[string]any, 0, len(packs))
+	for _, p := range packs {
+		row := map[string]any{
+			"name": p.Name, "version": p.Version, "description": p.Description,
+			"author": p.Author, "checks": p.Checks,
+		}
+		if v, ok := have[p.Name]; ok {
+			row["installed"] = true
+			row["installedVersion"] = v
+		} else {
+			row["installed"] = false
+		}
+		out = append(out, row)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"packs": out})
+}
+
+func (h *Hub) installCatalogPack(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	var buf bytes.Buffer
+	m, err := rules.BuildCatalogPack(name, &buf)
+	if err != nil {
+		httpErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	got, n, err := h.packsRegistry().InstallStream(bytes.NewReader(buf.Bytes()), h.ChecksDir, h.ActiveChecksDir, "catalog")
+	if err != nil {
+		httpErr(w, http.StatusBadRequest, "install failed: "+err.Error())
+		return
+	}
+	h.broadcast(map[string]any{"type": "checks.update"})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"name": got.Name, "version": got.Version, "installed": n, "catalog": m.Name,
+	})
 }

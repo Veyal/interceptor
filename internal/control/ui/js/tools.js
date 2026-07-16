@@ -62,6 +62,20 @@ function repSyncReqSeg(view){
 // Storage is project-scoped (`rep.tabs.<project>`) so switching projects does
 // not leak another engagement's drafts (#17). Legacy unscoped `rep.tabs` is
 // migrated once into the current project via projectStorageKey.
+function persistUIState(panel, blob){
+  // Fire-and-forget project DB write so drafts survive browser clears / machines.
+  api('/api/ui/'+panel,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(blob)}).catch(()=>{});
+}
+async function hydrateUIState(panel, storageBase){
+  try{
+    const d=await api('/api/ui/'+panel);
+    if(d&&d.value!=null){
+      try{localStorage.setItem(projectStorageKey(storageBase),JSON.stringify(d.value));}catch(e){}
+      return true;
+    }
+  }catch(e){}
+  return false;
+}
 export const repTabs=createTabManager({
   storageKey:()=>projectStorageKey('rep.tabs'),
   blank:repBlank,
@@ -71,6 +85,7 @@ export const repTabs=createTabManager({
   normalize:t=>({tid:t.tid,method:t.method||'GET',url:t.url||'',headers:t.headers||'',body:t.body||'',reqView:t.reqView||'pretty',resView:t.resView||'pretty',resId:null,status:'',color:'',title:''}),
   serialize:t=>({tid:t.tid,method:t.method,url:t.url,headers:t.headers,body:t.body,reqView:t.reqView||'pretty',resView:t.resView}),
   labelStyle:(t,active)=>`color:${active?methodColor(t.method):'inherit'}`,
+  onPersist:blob=>persistUIState('repeater',blob),
 });
 export function repCur(){return repTabs.cur();}
 export function renderRepTabs(){repTabs.render('#repTabs');}
@@ -168,8 +183,11 @@ export async function sendToRepeater(f){
     toast('loaded #'+f.id+' into Repeater');
   }catch(e){toast(e.message);}
 }
-export function repInit(){
+export async function repInit(){
+  await hydrateUIState('repeater','rep.tabs');
   repTabs.init('#repTabs');
+  // First persist migrates localStorage drafts into the project DB.
+  if(repTabs.tabs.length) repTabs.persist();
   ['#repMethod','#repUrl'].forEach(s=>{const el=$(s);if(el)el.addEventListener('input',()=>{
     repSaveEditor();
     // Typing in method/url only changes the active tab's label — don't rebuild the
@@ -401,12 +419,16 @@ const intrTabs=createTabManager({
   onLoad:t=>intrApply(t),
   normalize:t=>({tid:t.tid,target:t.target||'',template:t.template||INTR_TPL,type:t.type||'sniper',threads:t.threads||1,delay:t.delay||0,repeat:t.repeat||20,sniper:t.sniper||'',pos:Array.isArray(t.pos)?t.pos:[],sniperLines:t.sniperLines||null,posLines:Array.isArray(t.posLines)?t.posLines:[],sniperFile:t.sniperFile||null,posFiles:Array.isArray(t.posFiles)?t.posFiles:[],sniperLarge:!!t.sniperLarge,sniperCount:t.sniperCount||0,posCounts:Array.isArray(t.posCounts)?t.posCounts:[],sniperSource:t.sniperSource||'list',sniperNums:{...(t.sniperNums||INTR_NUM_DEFAULT())},posSources:Array.isArray(t.posSources)?t.posSources:[],posNums:Array.isArray(t.posNums)?t.posNums.map(n=>({...(n||INTR_NUM_DEFAULT())})):[],grep:t.grep||'',extract:t.extract||'',proc:t.proc||''}),
   serialize:intrTabForStorage,
+  onPersist:blob=>persistUIState('intruder',blob),
 });
 function intrTouch(){intrSaveCur();renderIntrTabs();intrTabs.persistDebounced();} // save editor → active tab
 function renderIntrTabs(){intrTabs.render('#intrTabs');}
-export function intrInit(){
+export async function intrInit(){
   if(intrInit._done)return; intrInit._done=true;
+  await hydrateUIState('intruder','intr.tabs');
+  await hydrateIntrPresets();
   intrTabs.init('#intrTabs');
+  if(intrTabs.tabs.length) intrTabs.persist();
   renderIntrHistory();loadIntrPresets();
   $('#intrTarget')&&$('#intrTarget').addEventListener('input',intrTouch);
   $('#intrTemplate')&&$('#intrTemplate').addEventListener('input',()=>{intrTemplateChanged();intrTouch();});
@@ -703,6 +725,14 @@ export async function intrStart(){
 }
 $('#intrStart').onclick=intrStart;
 function intrPresetsKey(){return projectStorageKey('intruder.presets');}
+async function hydrateIntrPresets(){
+  try{
+    const d=await api('/api/ui/intruder-presets');
+    if(d&&Array.isArray(d.value)){
+      try{localStorage.setItem(intrPresetsKey(),JSON.stringify(d.value));}catch(e){}
+    }
+  }catch(e){}
+}
 function loadIntrPresets(){
   const sel=$('#intrPreset');if(!sel)return;
   let list=[];try{list=JSON.parse(localStorage.getItem(intrPresetsKey())||'[]');}catch(e){}
@@ -730,9 +760,17 @@ if($('#intrPresetSave'))$('#intrPresetSave').onclick=async()=>{
     repeat:$('#intrRepeat').value,grep:$('#intrGrep').value,extract:$('#intrExtract').value,proc:$('#intrProc').value});
   if(list.length>20)list.length=20;
   try{localStorage.setItem(intrPresetsKey(),JSON.stringify(list));}catch(e){}
+  persistUIState('intruder-presets', list);
   loadIntrPresets();toast('preset saved');
 };
 export let intrTimer=null;
+let intrFilter='all', intrLastResults=[];
+function intrIsInteresting(r){return !!(r&& (r.flagged||r.matched||r.anomaly));}
+function intrApplyFilter(res){
+  if(intrFilter==='interesting') return res.filter(intrIsInteresting);
+  if(intrFilter==='error') return res.filter(r=>r.error);
+  return res;
+}
 export function scheduleIntr(){clearTimeout(intrTimer);intrTimer=setTimeout(async()=>{try{renderIntr(await api('/api/intruder/state'));}catch(e){}},120);}
 export function renderIntr(st){
   const running=!!st.running,total=st.total||0,done=st.done||0;
@@ -743,7 +781,12 @@ export function renderIntr(st){
   if(bar&&fill){bar.style.display=(running||total)?'block':'none';fill.style.width=total?Math.round(done/total*100)+'%':'0';}
   // results summary (flagged count)
   const stats=$('#intrStats'),res=st.results||[];
-  if(stats){const fl=res.filter(r=>r.flagged).length;stats.textContent=res.length?`${res.length} sent${fl?' · '+fl+' flagged ⚑':''}`:'';}
+  intrLastResults=res.slice();
+  if(stats){
+    const fl=res.filter(r=>r.flagged).length, int=res.filter(intrIsInteresting).length;
+    const shown=intrApplyFilter(res).length;
+    stats.textContent=res.length?`${res.length} sent${fl?' · '+fl+' flagged ⚑':''}${int&&intrFilter!=='interesting'?' · '+int+' interesting':''}${intrFilter!=='all'?' · showing '+shown:''}`:'';
+  }
   // capture a completed run into history (once per Start)
   if(!running&&total>0&&intrCapturePending){
     intrCapturePending=false;
@@ -758,9 +801,43 @@ export function renderIntr(st){
     box.innerHTML=running?'<div class="hint" style="padding:12px">sending…</div>':INTR_RESULTS_EMPTY;
     return;
   }
-  if(res.length>=INTR_VIRT_MIN) renderIntrVirtual(box,res);
-  else{box.innerHTML=res.map(intrRowHTML).join('');wireIntrResultRows(box);}
+  const view=intrApplyFilter(res);
+  if(!view.length){
+    box.innerHTML='<div class="hint" style="padding:12px">No results match this filter.</div>';
+    return;
+  }
+  if(view.length>=INTR_VIRT_MIN) renderIntrVirtual(box,view);
+  else{box.innerHTML=view.map(intrRowHTML).join('');wireIntrResultRows(box);}
 }
+{const seg=$('#intrResFilter');
+if(seg)seg.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  intrFilter=b.dataset.f||'all';
+  seg.querySelectorAll('button').forEach(x=>{const on=x===b;x.classList.toggle('on',on);x.setAttribute('aria-pressed',on?'true':'false');});
+  renderIntr({running:false,total:intrLastResults.length,done:intrLastResults.length,results:intrLastResults});
+});}
+async function intrToFinding(){
+  const pool=intrApplyFilter(intrLastResults);
+  const withFlow=pool.filter(r=>(r.flowId||r.flowID)>0);
+  const interesting=withFlow.filter(intrIsInteresting);
+  const pick=interesting.length?interesting:withFlow.slice(0,10);
+  if(!pick.length){toast('no attempts with captured flows to attach','warn');return;}
+  const title=await uiPrompt({title:'Create finding from Intruder',placeholder:'e.g. IDOR on /api/users?id=',value:($('#intrTarget').value||'Intruder finding').replace(/^https?:\/\//,'')});
+  if(!title)return;
+  try{
+    const body={
+      title, severity:'medium', status:'needs_verification', source:'human',
+      target:$('#intrTarget').value||'',
+      why:'Intruder attack produced interesting responses (flagged / matched / anomalous).',
+      impact:'Confirm whether the differing responses indicate unauthorized access or injection.',
+      verificationInstructions:'Open each attached PoC flow, compare status/length/body to the baseline, and confirm impact on the target.',
+      flowIds:pick.map(r=>Number(r.flowId||r.flowID)).filter(Boolean).slice(0,20),
+    };
+    const f=await api('/api/findings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+    toast('finding #'+f.id+' created with '+body.flowIds.length+' PoC'+(body.flowIds.length===1?'':'s'));
+    document.querySelector('.tab[data-tab="findings"]')?.click();
+  }catch(e){toast(e.message||'could not create finding','error');}
+}
+if($('#intrToFinding'))$('#intrToFinding').onclick=intrToFinding;
 // Virtualized Intruder results: rendering thousands of result rows on every poll
 // (every 120ms while running) rebuilds the whole DOM and janks the tab. Render only
 // the visible window, repaint on scroll — same pattern as the Map table / Proxy rows.

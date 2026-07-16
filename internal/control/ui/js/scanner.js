@@ -308,8 +308,58 @@ async function checkAiGenerate(){
     if(status)status.innerHTML='<span style="color:var(--red)">'+esc(e.message)+'</span>';
   }finally{if(btn)btn.disabled=false;}
 }
-export function openChecks(){openModal($('#checksModal'));const s=$('#checksSearch');if(s)s.value='';loadChecksList();updateCheckFlowHint();if(!$('#checkSrc').value)checkNew();checkSetMode('code');}
+async function loadPacksPanel(){
+  const box=$('#checksPackList'); if(!box) return;
+  try{
+    const [cat, inst] = await Promise.all([
+      api('/api/packs/catalog').catch(()=>({packs:[]})),
+      api('/api/packs').catch(()=>({packs:[]})),
+    ]);
+    const catalog=cat.packs||[];
+    const installed=inst.packs||[];
+    let html='';
+    if(catalog.length){
+      html+='<div class="hint" style="margin-bottom:4px;font-weight:700">Official packs</div>';
+      html+=catalog.map(p=>{
+        const on=!!p.installed;
+        return `<div class="checks-pack-row"><div><b>${esc(p.name)}</b> <span class="hint">v${esc(p.version)} · ${p.checks} checks</span><div class="hint">${esc(p.description||'')}</div></div>
+          <button type="button" class="btn ${on?'':'btn-primary'}" data-pack="${escAttr(p.name)}" ${on?'disabled':''}>${on?'Installed':'Install'}</button></div>`;
+      }).join('');
+    }
+    if(installed.length){
+      html+='<div class="hint" style="margin:8px 0 4px;font-weight:700">Installed</div>';
+      html+=installed.map(p=>`<div class="checks-pack-row"><div><b>${esc(p.name)}</b> <span class="hint">v${esc(p.version||'')}</span></div>
+        <button type="button" class="btn" data-remove="${escAttr(p.name)}" title="Uninstall pack">Remove</button></div>`).join('');
+    }
+    if(!html) html='<span class="hint">No packs yet — install an official pack or upload a .tar.gz.</span>';
+    box.innerHTML=html;
+    box.querySelectorAll('[data-pack]').forEach(b=>b.onclick=async()=>{
+      b.disabled=true; b.textContent='…';
+      try{
+        await api('/api/packs/catalog/'+encodeURIComponent(b.dataset.pack)+'/install',{method:'POST'});
+        toast('pack installed'); loadChecksList(); loadPacksPanel();
+      }catch(e){toast(e.message,'error'); b.disabled=false; b.textContent='Install';}
+    });
+    box.querySelectorAll('[data-remove]').forEach(b=>b.onclick=async()=>{
+      if(!await uiConfirm('Remove pack?','Uninstall <b>'+esc(b.dataset.remove)+'</b> and delete its checks from disk?','Remove','btn danger')) return;
+      try{
+        await api('/api/packs/'+encodeURIComponent(b.dataset.remove),{method:'DELETE'});
+        toast('pack removed'); loadChecksList(); loadPacksPanel();
+      }catch(e){toast(e.message,'error');}
+    });
+  }catch(e){box.textContent=e.message||'could not load packs';}
+}
+async function installPackFile(file){
+  if(!file) return;
+  try{
+    const buf=await file.arrayBuffer();
+    await api('/api/packs/install',{method:'POST',headers:{'content-type':'application/gzip'},body:buf});
+    toast('pack installed from '+file.name); loadChecksList(); loadPacksPanel();
+  }catch(e){toast(e.message||'install failed','error');}
+}
+export function openChecks(){openModal($('#checksModal'));const s=$('#checksSearch');if(s)s.value='';loadChecksList();loadPacksPanel();updateCheckFlowHint();if(!$('#checkSrc').value)checkNew();checkSetMode('code');}
 if($('#checksBtn'))$('#checksBtn').onclick=openChecks;
+if($('#checksPackFile'))$('#checksPackFile').onchange=e=>{const f=e.target.files&&e.target.files[0]; if(f) installPackFile(f); e.target.value='';};
 if($('#checksClose'))$('#checksClose').onclick=()=>closeModal($('#checksModal'));
 if($('#checkNew'))$('#checkNew').onclick=()=>checkNew('passive');
 if($('#checkNewActive'))$('#checkNewActive').onclick=()=>checkNew('active');

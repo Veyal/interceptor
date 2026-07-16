@@ -112,12 +112,15 @@ export function projectStorageKey(base){
 //                 omit to leave the span unstyled)
 // Returns {tabs,cur,add,switchTo,close,persist,persistDebounced,render,init}.
 export function createTabManager(opts){
-  const {storageKey:keyOpt,blank,title,onSave,onLoad,normalize,serialize=(t=>t),labelStyle}=opts;
+  const {storageKey:keyOpt,blank,title,onSave,onLoad,normalize,serialize=(t=>t),labelStyle,onPersist}=opts;
   const storageKey=()=>typeof keyOpt==='function'?keyOpt():keyOpt;
   const mgr={tabs:[],active:null,seq:1,persistT:null};
   mgr.cur=()=>mgr.tabs.find(t=>t.tid===mgr.active)||null;
   mgr.persist=function(){
-    try{localStorage.setItem(storageKey(),JSON.stringify({seq:mgr.seq,active:mgr.active,tabs:mgr.tabs.map(serialize)}));}catch(e){}
+    const blob={seq:mgr.seq,active:mgr.active,tabs:mgr.tabs.map(serialize)};
+    try{localStorage.setItem(storageKey(),JSON.stringify(blob));}catch(e){}
+    // Optional project-DB sync (Repeater/Intruder) — best-effort, never blocks UI.
+    if(typeof onPersist==='function'){try{onPersist(blob);}catch(e){}}
   };
   mgr.persistDebounced=function(){clearTimeout(mgr.persistT);mgr.persistT=setTimeout(mgr.persist,400);};
   mgr.render=function(barSel){

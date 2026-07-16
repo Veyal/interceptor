@@ -69,7 +69,7 @@ function renderFindings() {
   const box = $('#findList'); if (!box) return;
   const c = $('#findCount'); if (c) c.textContent = findings.length ? findings.length + ' finding' + (findings.length === 1 ? '' : 's') : '';
   if (!findings.length) {
-    box.innerHTML = '<div class="state-empty"><div class="state-empty-icon">🔎</div><div class="state-empty-title">No findings yet</div><p class="state-empty-hint">Create one, or the AI records them as it tests.</p></div>';
+    box.innerHTML = '<div class="state-empty"><div class="state-empty-icon">🔎</div><div class="state-empty-title">No findings yet</div><p class="state-empty-hint">Create one, or the AI records them as it tests.</p><p class="state-empty-hint state-empty-cmdk">Wrapping up? File PoCs here, then <b>Export report</b> — checklist: <code>docs/engagement-closeout.md</code></p></div>';
     selFinding = null; renderFindingDetail(); return;
   }
   if (!selFinding || !findings.some(f => f.id === selFinding)) selFinding = findings[0].id;

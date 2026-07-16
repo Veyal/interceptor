@@ -55,8 +55,12 @@ immediately alongside your other checks and custom-built-ins — no restart.
 |---|---|---|
 | `GET` | `/api/packs` | list installed packs |
 | `GET` | `/api/packs/{name}` | one pack's record |
+| `GET` | `/api/packs/catalog` | official packs bundled in the binary |
+| `POST` | `/api/packs/catalog/{name}/install` | one-click install of an official pack |
 | `POST` | `/api/packs/install` | upload a `.tar.gz` (full-scope key) |
 | `DELETE` | `/api/packs/{name}` | uninstall (full-scope key) |
+
+UI: **Scanner → Checks** has an Official packs list plus a `.tar.gz` upload.
 
 MCP tools: `list_packs`, `pack_info` (read-only — see the note above).
 

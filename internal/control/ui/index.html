@@ -101,11 +101,12 @@
             <div id="apPlan" class="ap-plan scroll"></div>
           </section>
           <section class="pane ap-cand-pane">
-            <div class="pane-head"><span class="lbl">CANDIDATES</span><span id="apCandCounts" class="hint"></span></div>
+            <div class="pane-head"><span class="lbl">TRUST LEDGER</span><span id="apCandCounts" class="hint"></span></div>
+            <div class="ap-ledger-legend hint" id="apLedgerLegend">Filed = verified · Rejected = failed a gate · Skipped = not pursued</div>
             <div id="apCandidates" class="ap-candidates scroll"></div>
           </section>
         </div>
-        <p class="hint ap-glassbox">Every request is visible in <b>Proxy History</b>; every step in the <b>Activity</b> feed (the glass box); verified findings land in <b>Findings</b>.</p>
+        <p class="hint ap-glassbox">Every request is visible in <b>Proxy History</b>; every step in the <b>Activity</b> feed (the glass box). The <b>Trust ledger</b> shows why each candidate was filed, rejected, or skipped — only machine-verified findings land in <b>Findings</b>.</p>
       </div>
       <div class="ap-history" id="apHistoryWrap" style="display:none">
         <div class="ap-history-head">PAST RUNS</div>
@@ -327,7 +328,14 @@ Content-Type: application/json
         <div class="intr-payloads" id="intrPayloadsWrap"></div>
       </section>
       <section class="pane intr-results">
-        <div class="pane-head"><span class="lbl">RESULTS</span><span id="intrProgress" class="count"></span><div class="spacer"></div><span id="intrStats" class="hint"></span><button class="btn" id="intrHistToggle" title="Show/hide past attacks (this session)">⟲ History</button></div>
+        <div class="pane-head"><span class="lbl">RESULTS</span><span id="intrProgress" class="count"></span><div class="spacer"></div>
+          <span class="seg intr-res-filter" id="intrResFilter" role="tablist" aria-label="Filter results">
+            <button type="button" class="on" data-f="all" role="tab" aria-selected="true">All</button>
+            <button type="button" data-f="interesting" role="tab" aria-selected="false" title="Flagged, grep match, or length anomaly">Interesting</button>
+            <button type="button" data-f="error" role="tab" aria-selected="false">Errors</button>
+          </span>
+          <button class="btn" id="intrToFinding" title="Create a Finding from interesting attempts (attaches their flows as PoCs)">→ Finding</button>
+          <span id="intrStats" class="hint"></span><button class="btn" id="intrHistToggle" title="Show/hide past attacks (this session)">⟲ History</button></div>
         <div class="intr-progbar" id="intrProgBar" style="display:none"><div id="intrProgFill"></div></div>
         <div class="intr-head"><div>#</div><div>Payload</div><div class="ta-c">St</div><div class="ta-r">Len</div><div class="ta-r">Time</div></div>
         <div id="intrResults" class="scroll"><div class="state-empty"><div class="state-empty-icon">🎯</div><div class="state-empty-title">No results yet</div><p class="state-empty-hint">Set a target, mark <b>§</b> injection points, add payloads, then <b>Start</b>.</p></div></div>
@@ -394,6 +402,7 @@ Content-Type: application/json
           <div class="state-empty-icon">🔎</div>
           <div class="state-empty-title">No findings yet</div>
           <p class="state-empty-hint">Create one, or the AI records them as it tests.</p>
+          <p class="state-empty-hint state-empty-cmdk">Wrapping up? File PoCs here, then <b>Export report</b> — checklist: <code>docs/engagement-closeout.md</code></p>
         </div>
       </div>
       <div id="findDetail" class="find-detail">
@@ -1098,7 +1107,14 @@ Content-Type: application/json
           <input id="checksSearch" class="btn checks-search" placeholder="🔎 filter checks…" aria-label="Filter checks" spellcheck="false">
         </div>
         <div id="checksList" style="flex:1;overflow:auto"></div>
-        <div style="padding:8px;border-top:1px solid var(--line);display:flex;gap:6px"><button class="btn btn-primary" id="checkNew" style="flex:1">+ New passive</button><button class="btn" id="checkNewActive" style="flex:1" title="Author an active check that sends probe requests">+ New active ⚡</button></div>
+        <div style="padding:8px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;gap:6px"><button class="btn btn-primary" id="checkNew" style="flex:1">+ New passive</button><button class="btn" id="checkNewActive" style="flex:1" title="Author an active check that sends probe requests">+ New active ⚡</button></div>
+          <details class="checks-packs" id="checksPacks">
+            <summary class="hint" style="cursor:pointer;font-weight:700">Rule packs</summary>
+            <div id="checksPackList" class="checks-pack-list hint" style="padding:6px 0">Loading packs…</div>
+            <label class="btn" style="display:block;text-align:center;margin-top:4px;cursor:pointer">📂 Install .tar.gz<input type="file" id="checksPackFile" accept=".tar.gz,application/gzip" hidden></label>
+          </details>
+        </div>
       </div>
       <div class="checks-editor">
         <div class="row" style="padding:8px 12px;gap:8px;border-bottom:1px solid var(--line);flex:none">
