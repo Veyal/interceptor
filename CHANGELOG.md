@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-07-16
+
 ### Added
 - **Finding tags for report scoping (#26, #27).** Findings support the same slug tags as History (`cms`, `website`, `app`, `api`, `out-of-scope`, …). UI: tag chips + filter strip + Edit Tags; MCP/API: `tags` on create/update, `list_findings?tag=`, `list_finding_tags` / `GET /api/findings/tags`. Export: Tags line in Markdown, JSON report format, optional `?groupBy=tag` (+ `omitTags` / `tagOrder`). MCP tool count is now **93**.
 - **Project-DB UI state for Repeater / Intruder / presets.** `GET/PUT /api/ui/{panel}` stores tab drafts in the project database (panels: `repeater`, `intruder`, `intruder-presets`). The UI hydrates from the API first, then localStorage, and persists both ways — drafts survive browser/machine switches within the same project.
@@ -20,8 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - **Roadmap refreshed** for the post-1.5.0 cycle ([`docs/product/roadmap.md`](docs/product/roadmap.md)).
-- **README MCP tool count** corrected to **92**.
-- **Dev-build fallback version advanced to the published `1.5.0`.** Now that v1.5.0 is released, `internal/version/version.go`'s fallback `Version` constant moved from `1.4.0` to `1.5.0`.
+- **README / docs MCP tool count** updated to **93**.
 
 ## [1.5.0] - 2026-07-16
 
