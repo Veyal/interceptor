@@ -389,12 +389,15 @@ Content-Type: application/json
         <select id="findExportFmt" class="btn btn-field" title="Report download format" aria-label="Report format">
           <option value="md">Markdown</option>
           <option value="html">HTML</option>
+          <option value="json">JSON</option>
           <option value="pdf">PDF</option>
         </select>
         <button class="btn" id="findExport" title="Download curated findings report (PoCs included; passive scan omitted)">⤓ Export report</button>
+        <label class="hint find-groupby" title="Section the Markdown/HTML report by finding tag"><input type="checkbox" id="findExportGroupByTag"> Group by tag</label>
         <span id="findCount" class="count"></span>
         <div class="spacer"></div>
       </div>
+      <div id="findTagFilter" class="find-tag-filter" aria-label="Filter findings by tag"></div>
     </div>
     <div id="scanFindingsView" class="find-view">
       <div id="findList" class="scan-list">

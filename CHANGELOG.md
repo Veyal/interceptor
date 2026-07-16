@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Finding tags for report scoping (#26, #27).** Findings support the same slug tags as History (`cms`, `website`, `app`, `api`, `out-of-scope`, …). UI: tag chips + filter strip + Edit Tags; MCP/API: `tags` on create/update, `list_findings?tag=`, `list_finding_tags` / `GET /api/findings/tags`. Export: Tags line in Markdown, JSON report format, optional `?groupBy=tag` (+ `omitTags` / `tagOrder`). MCP tool count is now **93**.
 - **Project-DB UI state for Repeater / Intruder / presets.** `GET/PUT /api/ui/{panel}` stores tab drafts in the project database (panels: `repeater`, `intruder`, `intruder-presets`). The UI hydrates from the API first, then localStorage, and persists both ways — drafts survive browser/machine switches within the same project.
 - **Official rule packs in the binary.** Bundled catalog (`secrets`, `api-jwt`, `security-headers`) via `GET /api/packs/catalog` and one-click `POST /api/packs/catalog/{name}/install`. Scanner → Checks shows Official packs + `.tar.gz` upload.
 - **Intruder Interesting / Errors filter and → Finding.** Result pane filters All / Interesting / Errors; **→ Finding** creates a finding with PoC `flowIds` from flagged/interesting attempts.

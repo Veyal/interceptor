@@ -14,6 +14,8 @@ The goal is a **report-ready project**, not just a pile of History rows.
 - [ ] Run **Scanner** (passive) and triage hits worth promoting
 - [ ] Use **Ask AI for findings** or file manually — prefer point-first findings
   (Impact / Why / Target + PoC timeline)
+- [ ] Tag findings by deliverable scope (`cms` / `website` / `app` / `api`; use
+  `out-of-scope` for adjacent evidence you want to keep out of the client pack)
 - [ ] Attach **PoC flows** (`add_finding_poc` / UI) and screenshots where needed
 - [ ] Mark uncertain items `needs_verification` with concrete check steps
 - [ ] Intruder: filter **Interesting** → **→ Finding** to attach flagged attempts
@@ -26,7 +28,8 @@ The goal is a **report-ready project**, not just a pile of History rows.
 
 ## 4. Export & handoff
 
-- [ ] Export **Findings report** (Markdown or HTML) with PoC bodies as needed
+- [ ] Export **Findings report** (Markdown / HTML / JSON) with PoC bodies as needed;
+  enable **Group by tag** (omits `out-of-scope` by default) for multi-scope write-ups
 - [ ] Export **full project** zip if the client needs a portable archive
 - [ ] Copy deep links (`/#finding-N`, `/#flow-N`) into notes / ticket system
 - [ ] Install any custom checks you want to reuse as a **rule pack** for next time

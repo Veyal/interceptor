@@ -160,6 +160,20 @@ func (s *Store) MergeFrom(peerDBPath, peerBodiesDir, label string) (MergeStats, 
 			}
 			ffrows.Close()
 		}
+		// Copy finding tags (same slug model as flow tags).
+		if trows, err := peer.Query(`SELECT tag FROM finding_tags WHERE finding_id=?`, pf.peerID); err == nil {
+			var tags []string
+			for trows.Next() {
+				var tag string
+				if err := trows.Scan(&tag); err == nil && tag != "" {
+					tags = append(tags, tag)
+				}
+			}
+			trows.Close()
+			if len(tags) > 0 {
+				_, _ = s.SetFindingTags(newID, tags)
+			}
+		}
 		seenFindings[sig] = true
 		stats.FindingsAdded++
 	}

@@ -195,6 +195,13 @@ CREATE TABLE IF NOT EXISTS finding_flows (
 );
 CREATE INDEX IF NOT EXISTS idx_finding_flows_finding ON finding_flows(finding_id);
 
+CREATE TABLE IF NOT EXISTS finding_tags (
+  finding_id INTEGER NOT NULL,
+  tag TEXT NOT NULL,
+  PRIMARY KEY (finding_id, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_finding_tags_tag ON finding_tags(tag);
+
 CREATE TABLE IF NOT EXISTS flow_tags (
   flow_id INTEGER NOT NULL,
   tag TEXT NOT NULL,

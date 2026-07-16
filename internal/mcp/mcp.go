@@ -177,7 +177,7 @@ func mcpInstructions() string {
 		"AUTH: list_flows tag=auth → promote_flow_to_authz (Surveyor, Admin, …) → authz_run inScope:true → set_login_macro_from_flow → run_login_macro (refresh CSRF).\n\n" +
 		"RECON: run content discovery with a real tool (feroxbuster / gobuster / ffuf) pointed THROUGH this proxy so hits land in History — Interseptor has no built-in forced-browser. Then triage with list_flows / host_stats.\n\n" +
 		"SCAN: run_scanner (passive) → active_scan arm:true inScope:true csrfAware:true → cross_host_token_replay mode:auto for SSO/JWT apps → oob_* for blind callbacks.\n\n" +
-		"RECORD: write findings point-first — create_finding with title (+ impact/why/target when known) → add_finding_poc for Before/Action/After flows → render_flow_preview for HTTP PNG evidence → add_finding_image only for real browser/device screenshots. Keep body as a short PoC timeline (text → flow → text → image), never a wall of prose. Prefer attaching flows/images over pasting raw HTTP into detail/evidence.\n\n" +
+		"RECORD: write findings point-first — create_finding with title (+ impact/why/target when known; tags for report scope e.g. cms|website|app|api|out-of-scope) → add_finding_poc for Before/Action/After flows → render_flow_preview for HTTP PNG evidence → add_finding_image only for real browser/device screenshots. Keep body as a short PoC timeline (text → flow → text → image), never a wall of prose. Prefer attaching flows/images over pasting raw HTTP into detail/evidence.\n\n" +
 		findingFormatGuide + "\n\n" +
 		"Everything you do is tagged AI. Pass optional `intent` on consequential tools.\n\n" +
 		"HUMAN INPUT (Interseptor / target engagement only): Use request_human_input for scope ambiguity, destructive or high-blast-radius target actions (mass IDOR fuzz, active scan arm, Intruder against prod-like targets), auth/identity choices that change what gets tested, or anything that exceeds the operator's declared engagement authority. Do NOT use it for local machine/OS admin (sudo, Remote Login, package installs, SSH/Tailscale host setup), general coding/git/Cursor questions, or non-Interseptor tooling — ask in the normal chat UI, or stop and tell the human what local command to run.\n\n" +
@@ -468,6 +468,36 @@ func argStr(a map[string]any, key string) string {
 		return s
 	}
 	return fmt.Sprint(v)
+}
+
+// argTags accepts a comma/space-separated string or a JSON array of strings.
+func argTags(a map[string]any, key string) []string {
+	v, ok := a[key]
+	if !ok || v == nil {
+		return nil
+	}
+	var raw []string
+	switch x := v.(type) {
+	case string:
+		for _, p := range strings.FieldsFunc(x, func(r rune) bool {
+			return r == ',' || r == ';' || r == ' ' || r == '\t' || r == '\n'
+		}) {
+			if p = strings.TrimSpace(p); p != "" {
+				raw = append(raw, p)
+			}
+		}
+	case []any:
+		for _, el := range x {
+			if s := strings.TrimSpace(fmt.Sprint(el)); s != "" && s != "<nil>" {
+				raw = append(raw, s)
+			}
+		}
+	case []string:
+		raw = append(raw, x...)
+	default:
+		return nil
+	}
+	return raw
 }
 
 func argInt(a map[string]any, key string, def int) int {
@@ -989,6 +1019,7 @@ func (s *Server) registerTools() {
 			"cvss":                     p("string", "CVSS score or vector string"),
 			"verificationInstructions": p("string", "when status is needs_verification: exact steps for the human"),
 			"body":                     p("string", "JSON PoC timeline [{type:'text',md},{type:'flow',flowId,note},{type:'image',...}]"),
+			"tags":                     p("string", "report-scope labels (comma/space-separated or array): cms, website, app, api, out-of-scope"),
 			"intent":                   p("string", "optional: short 'why' shown in Activity"),
 		}, "title"),
 		func(a map[string]any) (string, error) {
@@ -1043,6 +1074,9 @@ func (s *Server) registerTools() {
 			if v := argStr(a, "body"); v != "" {
 				reqBody["body"] = v
 			}
+			if tags := argTags(a, "tags"); tags != nil {
+				reqBody["tags"] = tags
+			}
 			result, err := s.api(http.MethodPost, "/api/findings", reqBody)
 			if err != nil {
 				return result, err
@@ -1058,8 +1092,8 @@ func (s *Server) registerTools() {
 		})
 
 	s.add("list_findings",
-		"List the project's findings (with their attached PoC flows), optionally filtered by severity or status (open|needs_verification|verified|false_positive|wont_fix|fixed). Use this to track progress and avoid re-reporting.",
-		obj(map[string]any{"severity": pt("string"), "status": pt("string")}),
+		"List the project's findings (with their attached PoC flows), optionally filtered by severity, status (open|needs_verification|verified|false_positive|wont_fix|fixed), or tag (report scope: cms|website|app|api|…). Use this to track progress and avoid re-reporting.",
+		obj(map[string]any{"severity": pt("string"), "status": pt("string"), "tag": p("string", "filter to findings with this tag")}),
 		func(a map[string]any) (string, error) {
 			q := url.Values{}
 			if v := argStr(a, "severity"); v != "" {
@@ -1068,6 +1102,9 @@ func (s *Server) registerTools() {
 			if v := argStr(a, "status"); v != "" {
 				q.Set("status", v)
 			}
+			if v := argStr(a, "tag"); v != "" {
+				q.Set("tag", v)
+			}
 			p := "/api/findings"
 			if len(q) > 0 {
 				p += "?" + q.Encode()
@@ -1075,8 +1112,13 @@ func (s *Server) registerTools() {
 			return s.apiGet(p)
 		})
 
+	s.add("list_finding_tags",
+		"List tags in use on findings (with counts) — reuse these for report scoping (cms, website, app, api, out-of-scope) instead of inventing near-duplicates.",
+		obj(map[string]any{}),
+		func(a map[string]any) (string, error) { return s.apiGet("/api/findings/tags") })
+
 	s.add("update_finding",
-		"Update a finding (only fields you pass change). "+findingFormatGuide+" Set impact/why/target for report-ready; body is the PoC timeline (send FULL array when rewriting). Returns updated finding + UI URL.",
+		"Update a finding (only fields you pass change). "+findingFormatGuide+" Set impact/why/target for report-ready; body is the PoC timeline (send FULL array when rewriting); tags replaces the finding's tag set. Returns updated finding + UI URL.",
 		obj(map[string]any{
 			"id":                       pt("integer"),
 			"status":                   p("string", "open|needs_verification|verified|false_positive|wont_fix|fixed"),
@@ -1093,6 +1135,7 @@ func (s *Server) registerTools() {
 			"cvss":                     p("string", "CVSS score or vector"),
 			"verificationInstructions": p("string", "exact steps when status is needs_verification"),
 			"body":                     p("string", "JSON PoC timeline — send the FULL ordered array when rewriting"),
+			"tags":                     p("string", "replace tag set (comma/space-separated or array); pass [] to clear"),
 		}, "id"),
 		func(a map[string]any) (string, error) {
 			id, err := reqInt(a, "id")
@@ -1140,6 +1183,12 @@ func (s *Server) registerTools() {
 			for _, k := range []string{"status", "severity", "title", "target", "detail", "evidence", "impact", "why", "cwe", "environment", "fix", "cvss", "verificationInstructions", "body"} {
 				if v, ok := a[k]; ok {
 					body[k] = v
+				}
+			}
+			if _, ok := a["tags"]; ok {
+				body["tags"] = argTags(a, "tags")
+				if body["tags"] == nil {
+					body["tags"] = []string{}
 				}
 			}
 			result, err := s.api(http.MethodPatch, fmt.Sprintf("/api/findings/%d", id), body)

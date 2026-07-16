@@ -108,11 +108,11 @@ func TestFindingsCRUDAndPoCFlows(t *testing.T) {
 	if err := s.UpdateFinding(id, nil, &verified, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil); err != nil {
 		t.Fatalf("UpdateFinding: %v", err)
 	}
-	open, _ := s.ListFindings("", "open")
+	open, _ := s.ListFindings("", "open", "")
 	if len(open) != 0 {
 		t.Fatalf("status filter: expected 0 open, got %d", len(open))
 	}
-	ver, _ := s.ListFindings("", "verified")
+	ver, _ := s.ListFindings("", "verified", "")
 	if len(ver) != 1 || ver[0].UpdatedTS < ver[0].TS {
 		t.Fatalf("status filter: expected 1 verified with bumped updated_ts, got %+v", ver)
 	}
@@ -130,7 +130,7 @@ func TestFindingsCRUDAndPoCFlows(t *testing.T) {
 	if err := s.DeleteFinding(id); err != nil {
 		t.Fatalf("DeleteFinding: %v", err)
 	}
-	all, _ := s.ListFindings("", "")
+	all, _ := s.ListFindings("", "", "")
 	if len(all) != 0 {
 		t.Fatalf("expected 0 findings after delete, got %d", len(all))
 	}
@@ -459,6 +459,9 @@ func TestEmptyFindingJSONSlices(t *testing.T) {
 	if got.Blocks == nil {
 		t.Fatal("Blocks should be non-nil empty slice")
 	}
+	if got.Tags == nil {
+		t.Fatal("Tags should be non-nil empty slice")
+	}
 	b, err := json.Marshal(got)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -468,6 +471,9 @@ func TestEmptyFindingJSONSlices(t *testing.T) {
 	}
 	if strings.Contains(string(b), `"blocks":null`) {
 		t.Fatalf("blocks marshaled as null: %s", b)
+	}
+	if strings.Contains(string(b), `"tags":null`) {
+		t.Fatalf("tags marshaled as null: %s", b)
 	}
 }
 
@@ -528,7 +534,7 @@ func TestFindingVerificationInstructionsRoundTrip(t *testing.T) {
 		t.Fatalf("after update instructions = %q, want %q", got.VerificationInstructions, updated)
 	}
 
-	listed, err := s.ListFindings("", "needs_verification")
+	listed, err := s.ListFindings("", "needs_verification", "")
 	if err != nil {
 		t.Fatalf("ListFindings: %v", err)
 	}

@@ -123,6 +123,7 @@ func (h *Hub) registerScopeRoutes(sc *scopeAPI) {
 
 func (h *Hub) registerFindingsRoutes(fd *findingsAPI) {
 	h.mux.HandleFunc("GET /api/findings", fd.listFindings)
+	h.mux.HandleFunc("GET /api/findings/tags", fd.listFindingTags)
 	h.mux.HandleFunc("GET /api/findings/report", fd.findingsReport)
 	h.mux.HandleFunc("GET /api/findings/images/{hash}", fd.getFindingImage)
 	h.mux.HandleFunc("POST /api/findings", fd.createFinding)

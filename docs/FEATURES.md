@@ -47,6 +47,8 @@ The full rundown. For the short version, see the [README](../README.md#what-it-d
   settings).
 - **BYO-key AI assist** — explain a request, suggest payloads, or summarize findings via your own
   **Anthropic** or **OpenRouter** key (off until you set one; the exchange is sent only on request).
+- **Finding tags** — report-scope labels on curated findings (same slug model as History tags), with
+  list filters and export grouping (`cms` / `website` / `app` / `api` / `out-of-scope` convention).
 - **API & MCP** — a REST control API + SSE event stream and a full **Model Context Protocol** server
-  (92 tools, stdio **and** Streamable-HTTP) so an agent or script drives the same core as the UI. See
+  (93 tools, stdio **and** Streamable-HTTP) so an agent or script drives the same core as the UI. See
   [API & MCP](api-and-mcp.md).

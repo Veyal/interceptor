@@ -271,7 +271,7 @@ func TestVerifiedCandidateFilesFinding(t *testing.T) {
 	}
 	w.wait(t)
 
-	findings, _ := s.ListFindings("", "")
+	findings, _ := s.ListFindings("", "", "")
 	if len(findings) != 1 {
 		t.Fatalf("expected exactly 1 filed finding, got %d", len(findings))
 	}
@@ -441,7 +441,7 @@ func TestVerifiedBlindCandidateFiles(t *testing.T) {
 	}
 	w.wait(t)
 
-	findings, _ := s.ListFindings("", "")
+	findings, _ := s.ListFindings("", "", "")
 	if len(findings) != 1 {
 		t.Fatalf("expected 1 finding, got %d", len(findings))
 	}
@@ -558,7 +558,7 @@ func TestBudgetExhaustionStops(t *testing.T) {
 	}
 	w.wait(t)
 	// At most one finding filed; run stopped by budget.
-	findings, _ := s.ListFindings("", "")
+	findings, _ := s.ListFindings("", "", "")
 	if len(findings) > 1 {
 		t.Fatalf("budget cap should limit filings; got %d", len(findings))
 	}
@@ -676,7 +676,7 @@ func TestOutOfScopeAndOwnListenerCandidatesSkipped(t *testing.T) {
 	w.wait(t)
 
 	// Exactly the in-scope candidate files.
-	findings, _ := s.ListFindings("", "")
+	findings, _ := s.ListFindings("", "", "")
 	if len(findings) != 1 {
 		t.Fatalf("expected exactly the in-scope finding, got %d", len(findings))
 	}
@@ -754,14 +754,14 @@ func TestPanicInPhaseDoesNotBrickEngine(t *testing.T) {
 		t.Fatalf("re-Start on the recovered engine failed: %v", err)
 	}
 	w3.wait(t)
-	if f, _ := s.ListFindings("", ""); len(f) == 0 {
+	if f, _ := s.ListFindings("", "", ""); len(f) == 0 {
 		t.Fatal("recovered engine should be able to file again")
 	}
 }
 
 func assertNoFindings(t *testing.T, s *store.Store) {
 	t.Helper()
-	if f, _ := s.ListFindings("", ""); len(f) != 0 {
+	if f, _ := s.ListFindings("", "", ""); len(f) != 0 {
 		t.Fatalf("expected no findings filed, got %d", len(f))
 	}
 }

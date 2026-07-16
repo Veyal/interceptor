@@ -251,6 +251,9 @@ func renderFinding(b *strings.Builder, n int, f store.Finding) {
 	if f.Environment != "" {
 		b.WriteString("- **Environment:** " + sanitizeLine(f.Environment) + "\n")
 	}
+	if len(f.Tags) > 0 {
+		b.WriteString("- **Tags:** " + sanitizeLine(strings.Join(f.Tags, ", ")) + "\n")
+	}
 	b.WriteString("\n")
 
 	if f.Impact != "" {
@@ -456,4 +459,131 @@ func orVal(s, def string) string {
 		return def
 	}
 	return s
+}
+
+// ProjectGroupedByTag is like Project but sections active findings under ## Tag: <name>
+// headings. tagOrder prefers section order (e.g. cms, website, app, api); remaining
+// tags follow alphabetically; untagged findings go last under ## Untagged.
+// omitTags drops those tags from sections and excludes findings that only carry
+// omitted tags (typical for out-of-scope).
+func ProjectGroupedByTag(findings []store.Finding, issues []store.Issue, tagOrder, omitTags []string) string {
+	omit := map[string]bool{}
+	for _, t := range store.NormalizeTags(omitTags) {
+		omit[t] = true
+	}
+	order := store.NormalizeTags(tagOrder)
+
+	var active, excluded []store.Finding
+	for _, f := range findings {
+		if f.Status == "false_positive" {
+			excluded = append(excluded, f)
+			continue
+		}
+		if findingOnlyOmittedTags(f, omit) {
+			continue
+		}
+		active = append(active, f)
+	}
+
+	var b strings.Builder
+	b.WriteString("# Interseptor — Engagement Report\n\n")
+	b.WriteString("_Grouped by finding tag (report scoping)._\n\n")
+	if len(active) == 0 && len(excluded) == 0 && len(issues) == 0 {
+		b.WriteString("_No findings recorded._\n")
+		return b.String()
+	}
+
+	sections := groupFindingsByTag(active, order, omit)
+	for _, sec := range sections {
+		b.WriteString("\n## " + sec.Title + "\n")
+		sorted := append([]store.Finding(nil), sec.Findings...)
+		sort.SliceStable(sorted, func(i, j int) bool {
+			ri, rj := rank(sorted[i].Severity), rank(sorted[j].Severity)
+			if ri != rj {
+				return ri < rj
+			}
+			if sorted[i].Title != sorted[j].Title {
+				return sorted[i].Title < sorted[j].Title
+			}
+			return sorted[i].ID < sorted[j].ID
+		})
+		for n, f := range sorted {
+			renderFinding(&b, n+1, f)
+		}
+	}
+
+	if len(excluded) > 0 {
+		b.WriteString("\n---\n\n## Excluded — False Positives\n\n")
+		for n, f := range excluded {
+			fmt.Fprintf(&b, "\n### %d. %s\n", n+1, sanitizeLine(f.Title))
+			if len(f.Tags) > 0 {
+				b.WriteString("- **Tags:** " + sanitizeLine(strings.Join(f.Tags, ", ")) + "\n")
+			}
+		}
+	}
+	if len(issues) > 0 {
+		b.WriteString("\n---\n\n## Appendix: Passive Scan Issues\n\n")
+		b.WriteString(stripTitle(Findings(issues)))
+	}
+	return b.String()
+}
+
+type tagSection struct {
+	Title    string
+	Findings []store.Finding
+}
+
+func findingOnlyOmittedTags(f store.Finding, omit map[string]bool) bool {
+	if len(omit) == 0 || len(f.Tags) == 0 {
+		return false
+	}
+	for _, t := range f.Tags {
+		if !omit[t] {
+			return false
+		}
+	}
+	return true
+}
+
+func groupFindingsByTag(active []store.Finding, order []string, omit map[string]bool) []tagSection {
+	byTag := map[string][]store.Finding{}
+	var untagged []store.Finding
+	seen := map[string]bool{}
+	for _, f := range active {
+		placed := false
+		for _, t := range f.Tags {
+			if omit[t] {
+				continue
+			}
+			byTag[t] = append(byTag[t], f)
+			seen[t] = true
+			placed = true
+		}
+		if !placed {
+			untagged = append(untagged, f)
+		}
+	}
+	var sections []tagSection
+	used := map[string]bool{}
+	for _, t := range order {
+		if !seen[t] || omit[t] {
+			continue
+		}
+		sections = append(sections, tagSection{Title: "Tag: " + t, Findings: byTag[t]})
+		used[t] = true
+	}
+	var rest []string
+	for t := range byTag {
+		if !used[t] {
+			rest = append(rest, t)
+		}
+	}
+	sort.Strings(rest)
+	for _, t := range rest {
+		sections = append(sections, tagSection{Title: "Tag: " + t, Findings: byTag[t]})
+	}
+	if len(untagged) > 0 {
+		sections = append(sections, tagSection{Title: "Untagged", Findings: untagged})
+	}
+	return sections
 }

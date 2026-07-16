@@ -42,6 +42,8 @@ type Finding struct {
 	Body                     string         `json:"body,omitempty"` // stored JSON blocks (use Blocks for rendering)
 	Flows                    []FindingFlow  `json:"flows"`          // attached flow metadata (for list sidebar count)
 	Blocks                   []FindingBlock `json:"blocks"`         // ordered narrative body (source of truth for UI)
+	// Tags are report-scoping labels (same slug model as flow tags), e.g. cms / api / out-of-scope.
+	Tags []string `json:"tags"`
 	// Ready / Missing are computed at read time (not stored) — report-ready checklist.
 	Ready   bool     `json:"ready"`
 	Missing []string `json:"missing,omitempty"`
@@ -449,6 +451,15 @@ func (s *Store) CreateFinding(f *Finding) (int64, error) {
 	}
 	id, _ := res.LastInsertId()
 	f.ID = id
+	if len(f.Tags) > 0 {
+		norm, err := s.SetFindingTags(id, f.Tags)
+		if err != nil {
+			return 0, err
+		}
+		f.Tags = norm
+	} else if f.Tags == nil {
+		f.Tags = []string{}
+	}
 	return id, nil
 }
 
@@ -546,6 +557,9 @@ func (s *Store) DeleteFinding(id int64) error {
 	}
 	defer tx.Rollback()
 	if _, err := tx.Exec(`DELETE FROM finding_flows WHERE finding_id=?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM finding_tags WHERE finding_id=?`, id); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`DELETE FROM findings WHERE id=?`, id); err != nil {
@@ -687,13 +701,22 @@ func (s *Store) GetFinding(id int64) (*Finding, error) {
 		f.Blocks = []FindingBlock{}
 	}
 	s.enrichImageBlocks(f.Blocks)
+	if tags, err := s.FindingTags(id); err != nil {
+		return nil, err
+	} else {
+		f.Tags = tags
+	}
+	if f.Tags == nil {
+		f.Tags = []string{}
+	}
 	f.EnrichCompleteness()
 	return f, nil
 }
 
 // ListFindings returns findings ordered by severity (High→Info) then newest, each
-// with its PoC flows and narrative blocks. Empty severity/status means "any".
-func (s *Store) ListFindings(severity, status string) ([]Finding, error) {
+// with its PoC flows and narrative blocks. Empty severity/status/tag means "any".
+// When tag is set, only findings carrying that normalized tag are returned.
+func (s *Store) ListFindings(severity, status, tag string) ([]Finding, error) {
 	where := []string{"1=1"}
 	args := []any{}
 	if severity != "" {
@@ -703,6 +726,10 @@ func (s *Store) ListFindings(severity, status string) ([]Finding, error) {
 	if status != "" {
 		where = append(where, "status=?")
 		args = append(args, normalizeFindingStatus(status))
+	}
+	if t := normalizeTag(tag); t != "" {
+		where = append(where, "EXISTS (SELECT 1 FROM finding_tags ft WHERE ft.finding_id = findings.id AND ft.tag = ?)")
+		args = append(args, t)
 	}
 	rows, err := s.db.Query(
 		`SELECT `+findingCols+` FROM findings WHERE `+strings.Join(where, " AND ")+
@@ -732,10 +759,18 @@ func (s *Store) ListFindings(severity, status string) ([]Finding, error) {
 		if err != nil {
 			return nil, err
 		}
+		tagsByID, err := s.TagsForFindings(ids)
+		if err != nil {
+			return nil, err
+		}
 		for i := range out {
 			out[i].Flows = flowsByID[out[i].ID]
 			if out[i].Flows == nil {
 				out[i].Flows = []FindingFlow{}
+			}
+			out[i].Tags = tagsByID[out[i].ID]
+			if out[i].Tags == nil {
+				out[i].Tags = []string{}
 			}
 			out[i].Blocks = buildBlocks(out[i].Body, out[i].Detail, out[i].Evidence, out[i].Flows)
 			if out[i].Blocks == nil {

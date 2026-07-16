@@ -78,7 +78,7 @@ func checkFindingBodySize(body, detail, evidence, fix string) string {
 
 func (h *findingsAPI) listFindings(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	fs, err := h.st.ListFindings(q.Get("severity"), q.Get("status"))
+	fs, err := h.st.ListFindings(q.Get("severity"), q.Get("status"), q.Get("tag"))
 	if err != nil {
 		httpInternalErr(w, err)
 		return
@@ -89,42 +89,87 @@ func (h *findingsAPI) listFindings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"findings": fs})
 }
 
+func (h *findingsAPI) listFindingTags(w http.ResponseWriter, r *http.Request) {
+	tags, err := h.st.DistinctFindingTags()
+	if err != nil {
+		httpInternalErr(w, err)
+		return
+	}
+	if tags == nil {
+		tags = []store.TagCount{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tags": tags})
+}
+
 // findingsReport renders the curated findings (with PoC flows) as a downloadable
 // engagement report. Passive-scan issues are omitted by default; pass ?issues=1 to
-// append the passive-scan appendix. ?format=html returns a standalone HTML document.
+// append the passive-scan appendix. ?format=html|json returns HTML or JSON;
+// ?tag= filters; ?groupBy=tag sections by finding tag; ?omitTags=a,b excludes
+// those tags from a grouped export (findings carrying only omitted tags drop out).
 // Full reconstructed request/response bodies for PoC flows are included by default
 // (?includeBodies=0 to omit — useful for huge projects).
 func (h *findingsAPI) findingsReport(w http.ResponseWriter, r *http.Request) {
-	fs, err := h.st.ListFindings("", "")
+	q := r.URL.Query()
+	fs, err := h.st.ListFindings("", "", q.Get("tag"))
 	if err != nil {
 		httpInternalErr(w, err)
 		return
 	}
 	var issues []store.Issue
-	if r.URL.Query().Get("issues") == "1" {
+	if q.Get("issues") == "1" {
 		if iss, err := h.st.ListIssues(); err == nil {
 			issues = iss
 		}
 	}
 	includeBodies := true
-	if v := r.URL.Query().Get("includeBodies"); v == "0" || strings.EqualFold(v, "false") {
+	if v := q.Get("includeBodies"); v == "0" || strings.EqualFold(v, "false") {
 		includeBodies = false
 	}
 	if includeBodies {
 		h.enrichFindingReportBodies(fs)
 	}
-	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+	format := strings.ToLower(strings.TrimSpace(q.Get("format")))
+	groupByTag := strings.EqualFold(q.Get("groupBy"), "tag")
+	omitTags := splitCSV(q.Get("omitTags"))
+	tagOrder := splitCSV(q.Get("tagOrder"))
 	switch format {
+	case "json":
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="interseptor-report.json"`)
+		writeJSON(w, http.StatusOK, map[string]any{"findings": fs, "issues": issues})
 	case "html":
 		h.enrichFindingReportImages(fs)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Disposition", `attachment; filename="interseptor-report.html"`)
-		w.Write([]byte(report.ProjectHTML(fs, issues)))
+		if groupByTag {
+			w.Write([]byte(report.ProjectHTMLGroupedByTag(fs, issues, tagOrder, omitTags)))
+		} else {
+			w.Write([]byte(report.ProjectHTML(fs, issues)))
+		}
 	default:
 		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 		w.Header().Set("Content-Disposition", `attachment; filename="interseptor-report.md"`)
-		w.Write([]byte(report.Project(fs, issues)))
+		if groupByTag {
+			w.Write([]byte(report.ProjectGroupedByTag(fs, issues, tagOrder, omitTags)))
+		} else {
+			w.Write([]byte(report.Project(fs, issues)))
+		}
 	}
+}
+
+func splitCSV(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // reportBodyCap bounds each reconstructed req/res in the export so huge downloads
@@ -214,9 +259,10 @@ func (h *findingsAPI) createFinding(w http.ResponseWriter, r *http.Request) {
 		Cwe                      string  `json:"cwe"`
 		Environment              string  `json:"environment"` // prod | staging | local
 		Cvss                     string  `json:"cvss"`
-		VerificationInstructions string  `json:"verificationInstructions"`
-		Body                     string  `json:"body"`    // JSON blocks (PoC timeline)
-		FlowIDs                  []int64 `json:"flowIds"` // optional: attach these PoC flows on create
+		VerificationInstructions string   `json:"verificationInstructions"`
+		Body                     string   `json:"body"`    // JSON blocks (PoC timeline)
+		FlowIDs                  []int64  `json:"flowIds"` // optional: attach these PoC flows on create
+		Tags                     []string `json:"tags"`    // report-scoping labels (cms, api, …)
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		httpErr(w, http.StatusBadRequest, "bad json")
@@ -235,6 +281,7 @@ func (h *findingsAPI) createFinding(w http.ResponseWriter, r *http.Request) {
 		Title: in.Title, Target: in.Target, Detail: in.Detail, Evidence: in.Evidence, Fix: in.Fix,
 		Impact: in.Impact, Why: in.Why, Cwe: in.Cwe, Environment: in.Environment,
 		Cvss: in.Cvss, VerificationInstructions: in.VerificationInstructions, Body: in.Body,
+		Tags: in.Tags,
 	}
 	id, err := h.st.CreateFinding(f)
 	if err != nil {
@@ -310,8 +357,9 @@ func (h *findingsAPI) updateFinding(w http.ResponseWriter, r *http.Request) {
 		Cwe                      *string `json:"cwe"`
 		Environment              *string `json:"environment"`
 		Cvss                     *string `json:"cvss"`
-		VerificationInstructions *string `json:"verificationInstructions"`
-		Body                     *string `json:"body"` // JSON blocks (PoC timeline)
+		VerificationInstructions *string   `json:"verificationInstructions"`
+		Body                     *string   `json:"body"` // JSON blocks (PoC timeline)
+		Tags                     *[]string `json:"tags"` // when present (incl. []), replaces the tag set
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		httpErr(w, http.StatusBadRequest, "bad json")
@@ -338,6 +386,12 @@ func (h *findingsAPI) updateFinding(w http.ResponseWriter, r *http.Request) {
 	if err := h.st.UpdateFinding(id, in.Severity, in.Status, in.Title, in.Target, in.Detail, in.Evidence, in.Fix, in.Body, in.Impact, in.Why, in.Cwe, in.Environment, in.Cvss, in.VerificationInstructions); err != nil {
 		httpInternalErr(w, err)
 		return
+	}
+	if in.Tags != nil {
+		if _, err := h.st.SetFindingTags(id, *in.Tags); err != nil {
+			httpInternalErr(w, err)
+			return
+		}
 	}
 	h.broadcast(map[string]any{"type": "findings.update"})
 	out, err := h.st.GetFinding(id)

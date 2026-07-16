@@ -25,7 +25,7 @@ func (h *aiAPI) collectProjectAssistFlows() ([]assistFlow, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list project scope: %w", err)
 	}
-	findings, err := h.st.ListFindings("", "")
+	findings, err := h.st.ListFindings("", "", "")
 	if err != nil {
 		return nil, fmt.Errorf("list project findings: %w", err)
 	}

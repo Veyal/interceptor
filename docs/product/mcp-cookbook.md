@@ -57,11 +57,11 @@ captured flows, no separate Discover tab.
 **Goal:** Leave a report-ready project, not a History pile.
 
 ```
-1. list_findings — triage status / severity / ready flags
-2. For each stub: update_finding with Impact / Why / Target pillars
+1. list_finding_tags / list_findings — triage status / severity / ready / tags
+2. For each stub: update_finding with Impact / Why / Target + tags (cms|website|app|api)
 3. get_flow + add_finding_poc for proof flows (and screenshots if needed)
 4. Mark uncertain items needs_verification with concrete check steps
-5. export_findings_report (or UI Export report) → Markdown/HTML for the client
+5. Export via UI (Group by tag) or GET /api/findings/report?groupBy=tag&omitTags=out-of-scope
 6. Optional: export_full_project for a portable archive
 ```
 

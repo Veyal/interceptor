@@ -251,7 +251,7 @@ func waitRunDone(t *testing.T, e *Engine) {
 // suffix, or fails.
 func findingForPath(t *testing.T, s *store.Store, pathSuffix string) store.Finding {
 	t.Helper()
-	findings, err := s.ListFindings("", "")
+	findings, err := s.ListFindings("", "", "")
 	if err != nil {
 		t.Fatalf("ListFindings: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestE2E_RealWire_ReflectedAndErrorFileNegativeRejected(t *testing.T) {
 	waitRunDone(t, e)
 
 	// --- Positive: exactly two verified findings (reflected + error). ---
-	findings, err := s.ListFindings("", "")
+	findings, err := s.ListFindings("", "", "")
 	if err != nil {
 		t.Fatalf("ListFindings: %v", err)
 	}
@@ -464,7 +464,7 @@ func TestE2E_RealWire_BlindSSRF_OOBCorrelationFiles(t *testing.T) {
 	w.wait(t)
 	waitRunDone(t, e)
 
-	findings, err := s.ListFindings("", "")
+	findings, err := s.ListFindings("", "", "")
 	if err != nil {
 		t.Fatalf("ListFindings: %v", err)
 	}
@@ -537,7 +537,7 @@ func assertBlindNoCallbackRejected(t *testing.T, vs *vulnServer, oobBase string)
 	w.wait(t)
 	waitRunDone(t, e)
 
-	if f, _ := s.ListFindings("", ""); len(f) != 0 {
+	if f, _ := s.ListFindings("", "", ""); len(f) != 0 {
 		t.Fatalf("blind candidate without a callback must not file; got %d findings", len(f))
 	}
 	if st := e.State(); st.Rejected != 1 {

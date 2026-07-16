@@ -9,7 +9,15 @@ import (
 // ProjectHTML renders the same engagement report as Project, as a self-contained
 // HTML document suitable for download or print-to-PDF.
 func ProjectHTML(findings []store.Finding, issues []store.Issue) string {
-	md := Project(findings, issues)
+	return projectHTMLFromMD(Project(findings, issues))
+}
+
+// ProjectHTMLGroupedByTag is the HTML counterpart of ProjectGroupedByTag.
+func ProjectHTMLGroupedByTag(findings []store.Finding, issues []store.Issue, tagOrder, omitTags []string) string {
+	return projectHTMLFromMD(ProjectGroupedByTag(findings, issues, tagOrder, omitTags))
+}
+
+func projectHTMLFromMD(md string) string {
 	body := markdownToHTML(md)
 	var b strings.Builder
 	b.WriteString("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n")

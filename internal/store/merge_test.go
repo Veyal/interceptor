@@ -78,7 +78,7 @@ func TestMergeFromUnionsAndIsIdempotent(t *testing.T) {
 	if len(flows) != 3 {
 		t.Fatalf("expected 3 flows after merge, got %d", len(flows))
 	}
-	finds, _ := local.ListFindings("", "")
+	finds, _ := local.ListFindings("", "", "")
 	if len(finds) != 1 {
 		t.Fatalf("expected 1 merged finding, got %d", len(finds))
 	}

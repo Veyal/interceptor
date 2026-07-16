@@ -7,7 +7,7 @@ import { flowPopup } from './flowmodal.js';
 // and flow-reference blocks (PoC request/response) interleaved freely, like a report.
 
 const STATUSES = ['open', 'needs_verification', 'verified', 'false_positive', 'wont_fix', 'fixed'];
-let findings = [], selFinding = null;
+let findings = [], selFinding = null, findTagFilter = '', findTagCounts = [];
 
 // Body editor state for the active finding.
 let bodyBlocks = [];
@@ -52,6 +52,8 @@ function findingListMeta(f) {
     ? '<span class="find-ready">Ready</span>'
     : '<span class="find-draft">Draft</span>';
   const parts = [ready, st];
+  const tags = f.tags || [];
+  if (tags.length) parts.push('<span class="find-tags-inline">' + tags.map(t => esc(t)).join(' · ') + '</span>');
   const pocs = findingPocCount(f);
   if (pocs) parts.push(pocs + ' PoC');
   if (f.target) parts.push('<span class="hint">' + esc(f.target.length > 28 ? f.target.slice(0, 27) + '…' : f.target) + '</span>');
@@ -60,20 +62,72 @@ function findingListMeta(f) {
   return parts.join(' · ');
 }
 
+function parseFindTags(s) {
+  return String(s || '').split(/[,;\s]+/).map(x => x.trim()).filter(Boolean);
+}
+
+function visibleFindings() {
+  if (!findTagFilter) return findings;
+  return findings.filter(f => (f.tags || []).includes(findTagFilter));
+}
+
+function renderFindTagFilter() {
+  const box = $('#findTagFilter'); if (!box) return;
+  const tags = findTagCounts.length ? findTagCounts : (() => {
+    const m = {};
+    for (const f of findings) for (const t of (f.tags || [])) m[t] = (m[t] || 0) + 1;
+    return Object.keys(m).sort().map(tag => ({ tag, count: m[tag] }));
+  })();
+  if (!tags.length && !findTagFilter) { box.innerHTML = ''; return; }
+  box.innerHTML = `<button type="button" class="btn xs find-tag-chip${!findTagFilter ? ' on' : ''}" data-tag="">All</button>` +
+    tags.map(t => `<button type="button" class="btn xs find-tag-chip${findTagFilter === t.tag ? ' on' : ''}" data-tag="${escAttr(t.tag)}">${esc(t.tag)} <span class="hint">${t.count}</span></button>`).join('');
+  box.querySelectorAll('[data-tag]').forEach(b => {
+    b.onclick = () => {
+      findTagFilter = b.dataset.tag || '';
+      renderFindTagFilter();
+      renderFindings();
+    };
+  });
+}
+
 export async function loadFindings() {
-  try { const d = await api('/api/findings'); findings = d.findings || []; renderFindings(); }
-  catch (e) { toast(e.message); }
+  try {
+    const q = findTagFilter ? '?tag=' + encodeURIComponent(findTagFilter) : '';
+    // Always load the full set for the sidebar filter counts; filter client-side
+    // so switching chips is instant. Server ?tag= still used by MCP/API.
+    const [d, tags] = await Promise.all([
+      api('/api/findings'),
+      api('/api/findings/tags').catch(() => ({ tags: [] })),
+    ]);
+    findings = d.findings || [];
+    findTagCounts = tags.tags || [];
+    renderFindTagFilter();
+    renderFindings();
+    void q;
+  } catch (e) { toast(e.message); }
 }
 
 function renderFindings() {
   const box = $('#findList'); if (!box) return;
-  const c = $('#findCount'); if (c) c.textContent = findings.length ? findings.length + ' finding' + (findings.length === 1 ? '' : 's') : '';
+  const list = visibleFindings();
+  const c = $('#findCount');
+  if (c) {
+    const n = list.length;
+    const total = findings.length;
+    c.textContent = total
+      ? (findTagFilter ? `${n} of ${total} finding${total === 1 ? '' : 's'}` : `${total} finding${total === 1 ? '' : 's'}`)
+      : '';
+  }
   if (!findings.length) {
     box.innerHTML = '<div class="state-empty"><div class="state-empty-icon">🔎</div><div class="state-empty-title">No findings yet</div><p class="state-empty-hint">Create one, or the AI records them as it tests.</p><p class="state-empty-hint state-empty-cmdk">Wrapping up? File PoCs here, then <b>Export report</b> — checklist: <code>docs/engagement-closeout.md</code></p></div>';
     selFinding = null; renderFindingDetail(); return;
   }
-  if (!selFinding || !findings.some(f => f.id === selFinding)) selFinding = findings[0].id;
-  box.innerHTML = findings.map(f => `<div class="find-row${f.id === selFinding ? ' sel' : ''}${!(f.ready) ? ' find-row-empty' : ''}${f.status === 'needs_verification' ? ' find-row-needs-verif' : ''}" data-id="${f.id}">
+  if (!list.length) {
+    box.innerHTML = `<div class="state-empty"><div class="state-empty-icon">🏷️</div><div class="state-empty-title">No findings with tag “${esc(findTagFilter)}”</div><p class="state-empty-hint">Clear the tag filter or tag a finding in the detail pane.</p></div>`;
+    selFinding = null; renderFindingDetail(); return;
+  }
+  if (!selFinding || !list.some(f => f.id === selFinding)) selFinding = list[0].id;
+  box.innerHTML = list.map(f => `<div class="find-row${f.id === selFinding ? ' sel' : ''}${!(f.ready) ? ' find-row-empty' : ''}${f.status === 'needs_verification' ? ' find-row-needs-verif' : ''}" data-id="${f.id}">
     <span class="sev" style="color:${sevColor(f.severity)}">${esc(f.severity)}</span>
     <span class="find-title">${esc(f.title)}</span>
     <span class="find-meta">${findingListMeta(f)}</span>
@@ -374,6 +428,11 @@ function renderFindingDetail() {
         <button class="btn accent" id="findAskAi" data-ai-ui title="Ask AI about this finding">✨ Ask AI</button>
         <button class="btn danger xs" id="findDelete">Delete</button>
       </div>
+      <div class="find-tags-bar">
+        <span class="hint">Tags</span>
+        <div class="find-tag-chips" id="findTagsChips">${(f.tags || []).map(t => `<span class="find-tag-chip">${esc(t)}</span>`).join('') || '<span class="hint">none — e.g. cms, api, out-of-scope</span>'}</div>
+        <button class="btn xs" id="findEditTags" title="Edit report-scope tags">✎ Tags</button>
+      </div>
     </header>
     ${completeBar}
     ${missBanner}
@@ -466,6 +525,18 @@ function renderFindingDetail() {
     try { await api('/api/findings/' + f.id, { method: 'DELETE' }); selFinding = null; toast('finding deleted'); loadFindings(); }
     catch (err) { toast(err.message); }
   };
+  $('#findEditTags') && ($('#findEditTags').onclick = async () => {
+    const cur = (f.tags || []).join(' ');
+    const v = await uiPrompt({ title: 'Finding tags (report scope)', value: cur, placeholder: 'cms website app api out-of-scope' });
+    if (v == null) return;
+    const tags = parseFindTags(v);
+    try {
+      await patchFinding(f.id, { tags });
+      f.tags = tags;
+      toast(tags.length ? 'tags: ' + tags.join(', ') : 'tags cleared');
+      await loadFindings();
+    } catch (err) { toast(err.message); }
+  });
   $('#findAskAi') && ($('#findAskAi').onclick = () => openAi({ findingId: f.id }));
   $('#findAddText').onclick = () => {
     bodyBlocks.push({ type: 'text', md: '' });
@@ -720,11 +791,22 @@ $('#ftRun') && ($('#ftRun').onclick = async () => {
   }
 });
 
+function findReportQuery(extra) {
+  const q = new URLSearchParams(extra || {});
+  if (findTagFilter) q.set('tag', findTagFilter);
+  if ($('#findExportGroupByTag')?.checked) {
+    q.set('groupBy', 'tag');
+    q.set('omitTags', 'out-of-scope');
+    q.set('tagOrder', 'cms,website,app,api');
+  }
+  const s = q.toString();
+  return s ? '?' + s : '';
+}
 $('#findExport') && ($('#findExport').onclick = async () => {
   const fmt = ($('#findExportFmt') || {}).value || 'md';
   try {
     if (fmt === 'pdf') {
-      const html = await api('/api/findings/report?format=html');
+      const html = await api('/api/findings/report' + findReportQuery({ format: 'html' }));
       // Note: 'noopener' makes window.open return null per spec, which would
       // always trip the pop-up blocker branch and skip the print entirely.
       const w = window.open('', '_blank');
@@ -735,8 +817,15 @@ $('#findExport') && ($('#findExport').onclick = async () => {
       toast('Print dialog — choose Save as PDF');
       return;
     }
+    if (fmt === 'json') {
+      const body = await api('/api/findings/report' + findReportQuery({ format: 'json' }));
+      const text = typeof body === 'string' ? body : JSON.stringify(body, null, 2);
+      await saveFile(new Blob([text], { type: 'application/json' }), 'interseptor-report.json', 'application/json');
+      toast('Report downloaded');
+      return;
+    }
     const isHtml = fmt === 'html';
-    const body = await api('/api/findings/report' + (isHtml ? '?format=html' : ''));
+    const body = await api('/api/findings/report' + findReportQuery(isHtml ? { format: 'html' } : {}));
     const mime = isHtml ? 'text/html' : 'text/markdown';
     await saveFile(new Blob([body], { type: mime }), 'interseptor-report.' + (isHtml ? 'html' : 'md'), mime);
     toast('Report downloaded');
