@@ -172,12 +172,33 @@ export async function repSend(){
 }
 export async function renderRepResponse(){
   const t=repCur();if(!t||!t.resId)return;
-  try{const raw=await api('/api/flows/'+t.resId+'/raw?side=res');
+  try{
+    // Message-codec Decoded view (same engine as History inspect).
+    if((t.resView||'pretty')==='decoded'){
+      const d=await api('/api/flows/'+t.resId+'/decoded?side=res');
+      if(repCur()!==t)return;
+      if(!d.matched){
+        $('#repResView').innerHTML=`<div class="hint" style="padding:14px;line-height:1.7">No project message codec matched this response.<br>
+          Add one under <b>Scanner → Codecs</b> (or <code>project/codecs/*.star</code>).</div>`;
+        return;
+      }
+      if(d.error){
+        $('#repResView').innerHTML=`<div class="hint" style="padding:14px;color:var(--red)">Codec <b>${esc(d.codecId||'')}</b> error: ${esc(d.error)}</div>`;
+        return;
+      }
+      const fields=d.fields&&Object.keys(d.fields).length
+        ? `<div class="hint" style="padding:8px 0 10px">Decoded fields: ${Object.keys(d.fields).map(k=>`<code>${esc(k)}</code>`).join(', ')}</div>` : '';
+      const badge=`<div class="hint" style="padding:0 0 8px">Decoded for display · <b>${esc(d.title||d.codecId||'')}</b>${d.note?' · '+esc(d.note):''}</div>`;
+      const body=typeof d.plaintext==='string'?d.plaintext:'';
+      $('#repResView').innerHTML=badge+fields+'<pre style="margin:0;white-space:pre-wrap">'+highlightBodyText(body,'application/json')+'</pre>';
+      return;
+    }
+    const raw=await api('/api/flows/'+t.resId+'/raw?side=res');
     // A tab switch during the fetch would otherwise paint this response into the
     // now-active tab's shared #repResView pane.
     if(repCur()!==t)return;
-    $('#repResView').innerHTML=highlightHTTP((t.resView==='pretty')?prettify(raw):raw,t.resView==='pretty',contentTypeFromRaw(raw));}
-  catch(e){if(repCur()===t)$('#repResView').textContent='(error: '+e.message+')';}
+    $('#repResView').innerHTML=highlightHTTP((t.resView==='pretty')?prettify(raw):raw,t.resView==='pretty',contentTypeFromRaw(raw));
+  }catch(e){if(repCur()===t)$('#repResView').textContent='(error: '+e.message+')';}
 }
 export async function loadRepHistory(){
   const box=$('#repHistory');if(!box)return;const t=repCur();const ep=repTabEndpoint(t);
@@ -302,7 +323,12 @@ $('#repReqSeg')&&$('#repReqSeg').querySelectorAll('button').forEach(b=>b.onclick
   repRefreshHL();
   repPersistDebounced();
 });
-$('#repResSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{const t=repCur();if(t)t.resView=b.dataset.view;$('#repResSeg').querySelectorAll('button').forEach(x=>{x.classList.toggle('on',x===b);x.setAttribute('aria-pressed',x===b?'true':'false');});renderRepResponse();});
+$('#repResSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  const t=repCur();if(!t)return;
+  t.resView=b.dataset.view;
+  $('#repResSeg').querySelectorAll('button').forEach(x=>{x.classList.toggle('on',x===b);x.setAttribute('aria-pressed',x===b?'true':'false');});
+  renderRepResponse();
+});
 
 /* ---- intruder ---- */
 // Per-position colours tie each §-marker to its payload list (cycle if > 6 markers).
