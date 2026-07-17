@@ -80,6 +80,9 @@ func (h *Hub) StopTunnel() {
 func (h *Hub) Close() {
 	h.tunnelCloseOnce.Do(func() {
 		h.StopTunnel()
+		if h.intr != nil {
+			h.intr.Close()
+		}
 		if h.tun != nil {
 			h.tun.Close()
 		}

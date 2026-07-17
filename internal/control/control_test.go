@@ -31,6 +31,7 @@ func newHub(t *testing.T) (*Hub, *store.Store, *intercept.Engine) {
 	t.Cleanup(func() { s.Close() })
 	eng := intercept.New()
 	h := New(s, eng, nil, nil, nil)
+	t.Cleanup(h.Close)
 	return h, s, eng
 }
 

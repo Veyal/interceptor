@@ -11,10 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - **Dev-build fallback version advanced to the published `1.5.4`.**
+- **Keyboard-first UI foundation.** Added a shared high-contrast focus ring and reduced-motion behavior, stack-correct dialog focus management, accessible command-palette and custom-select keyboard semantics, and panel-scoped shortcuts that do not override editing keystrokes.
 
 ### Fixed
 - **Backend reliability preflight and persistence.** Autopilot now requires an enabled include scope rule, readiness reports AI-provider and scope prerequisites, body GC coordinates with in-flight flow publication, sender capture errors clean up temporary files, and full-project imports/merges verify body hashes and use rollback-safe staged overwrite.
 - **Backend network reliability.** Chained HTTP(S) proxies now normalize scheme case and apply default ports, TLS, SNI, authentication, and bounded CONNECT deadlines on custom paths; concurrent TLS auto-bypass updates retain and persist the complete host list; quick-tunnel URL notifications are generation-ordered, stale-safe, and reentrant across stop/restart, with shutdown rejecting new starts and reaping child processes after the control server closes.
+- **Intruder shutdown lifecycle.** Control-plane shutdown now permanently closes Intruder, cancels delayed and in-flight requests, joins its workers before closing the project store, and rejects later starts with a clear unavailable response.
 
 ## [1.5.4] - 2026-07-17
 
