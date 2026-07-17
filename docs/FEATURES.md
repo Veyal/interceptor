@@ -38,6 +38,9 @@ The full rundown. For the short version, see the [README](../README.md#what-it-d
   (drop a `.star` in `~/.interseptor/checks/`), install **official packs** from Scanner → Checks
   (or upload a `.tar.gz`), and share community packs. See
   [custom checks](custom-checks.md), [rule packs](rule-packs.md), and [`examples/checks/`](../examples/checks/).
+- **Message codecs** — project-scoped Starlark encrypt/decrypt for app payloads (AES-ECB helpers,
+  Decoded view in History/Repeater/Intercept, opt-in re-encode on send). See
+  [message codecs](message-codecs.md) and [`examples/codecs/`](../examples/codecs/).
 - **Target scope** — include/exclude rules that focus history, the intercept gate, and the scanner.
 - **WebSocket** capture (`ws://`/`wss://` per-frame) **and replay** (a WebSocket Repeater).
 - **Session / auth injection** — auto-apply an `Authorization`/`Cookie` to every Repeater & Intruder
@@ -50,5 +53,5 @@ The full rundown. For the short version, see the [README](../README.md#what-it-d
 - **Finding tags** — report-scope labels on curated findings (same slug model as History tags), with
   list filters and export grouping (`cms` / `website` / `app` / `api` / `out-of-scope` convention).
 - **API & MCP** — a REST control API + SSE event stream and a full **Model Context Protocol** server
-  (93 tools, stdio **and** Streamable-HTTP) so an agent or script drives the same core as the UI. See
+  (99 tools, stdio **and** Streamable-HTTP) so an agent or script drives the same core as the UI. See
   [API & MCP](api-and-mcp.md).

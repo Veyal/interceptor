@@ -1,4 +1,4 @@
-import { $, $$, esc, escAttr, state, toast, api, methodColor, statusColor, statusText, mimeLabel, fmtSize, fmtBytes, fmtTime, fmtDur, FLAG_WS, FLAG_TLS, FLAG_AI, FLAG_DISCOVERY, RENDER_CAP, highlightHTTP, prettify, copyText, uiPrompt, uiConfirm, closeModals, openModal, closeModal, isBinaryMime, bodyMime, headerBlockText, hideCtxMenu, openCtxMenu, closeAllUiSelects, flowBodyDownloadName, flowBodyDownloadHref, selectionWithin, wireSelectionDecode, wireRowKey, createFlowStore, loadFlowStore, upsertFlow as storeUpsertFlow, appendFlows, dropFlowsFrom, removeFlow, createVirtualList } from './core.js';
+import { $, $$, esc, escAttr, state, toast, api, methodColor, statusColor, statusText, mimeLabel, fmtSize, fmtBytes, fmtTime, fmtDur, FLAG_WS, FLAG_TLS, FLAG_AI, FLAG_DISCOVERY, RENDER_CAP, highlightHTTP, highlightBodyText, prettify, copyText, uiPrompt, uiConfirm, closeModals, openModal, closeModal, isBinaryMime, bodyMime, headerBlockText, hideCtxMenu, openCtxMenu, closeAllUiSelects, flowBodyDownloadName, flowBodyDownloadHref, selectionWithin, wireSelectionDecode, wireRowKey, createFlowStore, loadFlowStore, upsertFlow as storeUpsertFlow, appendFlows, dropFlowsFrom, removeFlow, createVirtualList } from './core.js';
 import { flowFindings, addFlowToFinding, openFinding, updateFindPocBtn } from './findings.js';
 import { tagChipStyle, renderTagBar, tagActionTargets, mutateFlowTags, openTagChipMenu } from './tags.js';
 import { sendToRepeater, sendToIntruder, repNewTab, renderRepTabs, repLoadEditor, repPersist, repTitle, headersToText } from './tools.js';
@@ -805,7 +805,28 @@ export async function renderSide(side){
   if(dec)dec.hidden=true;
   if(!state.selId){return;}
   const draw=async()=>{
-    try{const raw=await api('/api/flows/'+state.selId+'/raw?side='+side);
+    try{
+      if(state.view[side]==='decoded'){
+        const d=await api('/api/flows/'+state.selId+'/decoded?side='+side);
+        if(!d.matched){
+          el.innerHTML=`<div class="hint" style="padding:14px;line-height:1.7">No project message codec matched this ${side==='req'?'request':'response'}.<br>
+            Add one under <b>Scanner → Codecs</b> (or <code>project/codecs/*.star</code>).</div>`;
+          return;
+        }
+        if(d.error){
+          el.innerHTML=`<div class="hint" style="padding:14px;color:var(--red)">Codec <b>${esc(d.codecId||'')}</b> error: ${esc(d.error)}</div>`;
+          return;
+        }
+        const fields=d.fields&&Object.keys(d.fields).length
+          ? `<div class="hint" style="padding:8px 0 10px">Decoded fields: ${Object.keys(d.fields).map(k=>`<code>${esc(k)}</code>`).join(', ')}</div>` : '';
+        const badge=`<div class="hint" style="padding:0 0 8px">Decoded for display · <b>${esc(d.title||d.codecId||'')}</b>${d.applyOnSend?' · apply_on_send':''}${d.note?' · '+esc(d.note):''}</div>`;
+        const body=typeof d.plaintext==='string'?d.plaintext:'';
+        el._rawText=body;
+        el._pretty=true;
+        el.innerHTML=badge+fields+'<pre style="margin:0;white-space:pre-wrap">'+highlightBodyText(body, mime||'application/json')+'</pre>';
+        return;
+      }
+      const raw=await api('/api/flows/'+state.selId+'/raw?side='+side);
       el._rawText=raw;
       el._pretty=state.view[side]==='pretty';
       if(side==='res'&&state.view.res==='render'&&mime&&/html/i.test(mime)){

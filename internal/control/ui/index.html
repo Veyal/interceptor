@@ -154,7 +154,7 @@
     <div id="inspect">
       <div class="pane">
         <div class="pane-head"><span class="lbl">REQUEST</span>
-          <div class="seg" data-side="req"><button data-view="raw">Raw</button><button class="on" data-view="pretty">Pretty</button></div>
+          <div class="seg" data-side="req"><button data-view="raw">Raw</button><button class="on" data-view="pretty">Pretty</button><button data-view="decoded" title="Message codec plaintext">Decoded</button></div>
           <div class="spacer"></div>
           <button class="btn btn-compact" id="aiExplainBtn" data-ai-ui title="Ask AI about this flow" aria-label="Ask AI about this flow">✨</button>
         </div>
@@ -170,7 +170,7 @@
       <div class="pane">
         <div class="pane-head"><span class="lbl">RESPONSE</span>
           <span id="resStatus" class="statusline"></span>
-          <div class="seg" data-side="res"><button data-view="raw">Raw</button><button class="on" data-view="pretty">Pretty</button><button data-view="render">Render</button></div>
+          <div class="seg" data-side="res"><button data-view="raw">Raw</button><button class="on" data-view="pretty">Pretty</button><button data-view="decoded" title="Message codec plaintext">Decoded</button><button data-view="render">Render</button></div>
           <div id="inspectFind" class="inspect-find" style="display:none">
             <input id="inspectFindIn" type="search" aria-label="Find in response" placeholder="Find…">
             <span id="inspectFindStat" class="hint"></span>
@@ -217,9 +217,11 @@
         <div class="icpt-edhead" id="heldEditor" style="display:none">
           <div class="icpt-edtitle" id="heldTitle"></div>
           <div class="spacer"></div>
+          <button class="btn" id="heldDecodeBtn" title="Show message-codec plaintext for the body">Decoded</button>
           <button class="btn btn-primary" id="forwardBtn" title="Forward (Ctrl+Shift+F)">▶ Forward</button>
           <button class="btn btn-danger" id="dropBtn" title="Drop (Ctrl+D)">✕ Drop</button>
         </div>
+        <pre id="heldDecoded" class="icpt-raw" style="display:none;margin:0;white-space:pre-wrap" hidden></pre>
         <textarea class="icpt-raw" id="heldRaw" spellcheck="false" style="display:none" aria-label="Held message — edit the raw HTTP before forwarding"></textarea>
         <div class="state-empty" id="heldEmpty">
           <div class="state-empty-icon">⏸</div>
@@ -266,7 +268,8 @@
           <textarea id="repHeaders" class="rep-edit" spellcheck="false" placeholder="Header: value (one per line)"></textarea>
         </div>
         <div class="rep-sub row"><span>BODY</span><div class="spacer"></div>
-          <div class="seg rep-req-seg" id="repReqSeg"><button data-view="raw">Raw</button><button class="on" data-view="pretty">Pretty</button></div>
+          <div class="seg rep-req-seg" id="repReqSeg"><button data-view="raw">Raw</button><button class="on" data-view="pretty">Pretty</button><button data-view="decoded" title="Edit codec plaintext (re-encode on send if apply_on_send)">Decoded</button></div>
+          <span id="repCodecBadge" class="hint" style="display:none;margin-left:8px"></span>
         </div>
         <div class="rep-field rep-field-body">
           <pre class="rep-hl" id="repBodyHL" aria-hidden="true"></pre>
@@ -351,6 +354,7 @@ Content-Type: application/json
       <input id="scanFilter" class="btn btn-field scan-filter" aria-label="Path filter" placeholder="path filter">
       <button class="btn btn-primary" id="scanRun">Run scan ▸</button>
       <button class="btn" id="checksBtn" aria-label="Custom checks">✎ Checks</button>
+      <button class="btn" id="codecsBtn" aria-label="Message codecs">🔐 Codecs</button>
       <span id="scanCount" class="count"></span>
       <div class="spacer"></div>
       </div>
@@ -1154,6 +1158,36 @@ Content-Type: application/json
           <div id="checkDocs" class="check-docs"><span class="hint">Loading reference…</span></div>
         </div>
         <div id="checkOut"><span class="hint">Test runs against the selected flow (or the latest). Save validates &amp; writes the check.</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="codecsModal" class="modal-overlay" style="display:none">
+  <div role="dialog" aria-modal="true" aria-labelledby="codecsModalTitle" class="modal-shell checks-dialog">
+    <div class="row modal-shell-head">
+      <span id="codecsModalTitle" class="modal-shell-title">🔐 Message codecs</span>
+      <div class="spacer"></div>
+      <button class="btn" id="codecsClose" aria-label="Close">✕</button>
+    </div>
+    <div class="checks-work">
+      <div class="checks-sidebar">
+        <div id="codecsList" style="flex:1;overflow:auto"></div>
+        <div style="padding:8px;border-top:1px solid var(--line)">
+          <button class="btn btn-primary" id="codecNew" style="width:100%">+ New codec</button>
+          <div class="hint" id="codecsDirHint" style="margin-top:8px"></div>
+        </div>
+      </div>
+      <div class="checks-editor">
+        <div class="row" style="padding:8px 12px;gap:8px;border-bottom:1px solid var(--line);flex:none">
+          <input id="codecId" class="btn btn-field" style="width:210px" aria-label="Codec ID" placeholder="codec-id">
+          <button class="btn" id="codecTest">Test ▸</button>
+          <button class="btn btn-primary" id="codecSave">Save</button>
+          <div class="spacer"></div>
+          <button class="btn" id="codecDelete" style="color:var(--red)">🗑 Delete</button>
+        </div>
+        <p class="hint" style="padding:8px 12px;margin:0;border-bottom:1px solid var(--line)">Project-scoped Starlark encrypt/decrypt for app payloads. Display-only unless <code>apply_on_send</code>. Never runs on the proxy hot path.</p>
+        <textarea id="codecSrc" class="rep-edit" spellcheck="false" style="border-top:none;flex:1;min-height:280px"></textarea>
+        <pre id="codecTestOut" style="margin:0;padding:10px 12px;border-top:1px solid var(--line);max-height:160px;overflow:auto;white-space:pre-wrap" class="hint">Test against the selected History flow (or latest).</pre>
       </div>
     </div>
   </div>

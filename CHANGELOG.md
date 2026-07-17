@@ -9,8 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Changed
-- **Dev-build fallback version advanced to the published `1.5.2`.**
+## [1.5.3] - 2026-07-17
+
+### Added
+- **Message codecs (#28).** Project-scoped Starlark encrypt/decrypt for app-layer bodies (`<project>/codecs/*.star`). History / Repeater / Intercept **Decoded** view; opt-in `apply_on_send` re-encode on Repeater Send; REST `/api/codecs` + `GET /api/flows/{id}/decoded`; MCP `list_codecs` / `test_codec` / `save_codec` / `delete_codec` / `get_flow_decoded` / `encode_codec`. New builtins `aes_ecb_encrypt` / `aes_ecb_decrypt`. Example + docs: [`examples/codecs/`](examples/codecs/), [`docs/message-codecs.md`](docs/message-codecs.md). Codecs never run on the proxy hot path. MCP tool count is now **99**.
 
 ## [1.5.2] - 2026-07-17
 

@@ -16,7 +16,7 @@ proxy depth**, then **(D) reach / packaging**. See [improvements.md](improvement
 
 ## ✅ Shipped (through v1.5.0)
 
-MCP (93 tools), scope, Repeater/Intruder, scanner + active scan + Autopilot, findings
+MCP (99 tools), scope, Repeater/Intruder, scanner + active scan + Autopilot, findings
 redesign, rule packs + check CLI + Starlark stdlib, project-scoped + project-DB UI tabs,
 Intruder Numbers / AI payloads / result viewer, retention, OpenAPI, mobile helpers,
 remote/tunnel pieces, HAR + full project export.
@@ -40,7 +40,7 @@ remote/tunnel pieces, HAR + full project export.
 | HTTP/2 MITM support | Trustworthy core | L | [#19](https://github.com/Veyal/interseptor/issues/19) |
 | Content discovery (scope-aware soft-404) return | Table stakes | L | [#22](https://github.com/Veyal/interseptor/issues/22) |
 | Signed rule packs (minisign) | Packs ecosystem | M | [#24](https://github.com/Veyal/interseptor/issues/24) |
-| Message codecs (project-scoped decrypt/encrypt) | Differentiator | L–XL | [#28](https://github.com/Veyal/interseptor/issues/28) |
+| Message codecs (project-scoped decrypt/encrypt) | Differentiator | Shipped in 1.5.3 | [#28](https://github.com/Veyal/interseptor/issues/28) |
 
 ## Later
 

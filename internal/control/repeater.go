@@ -11,10 +11,14 @@ import (
 )
 
 type repeaterSendJSON struct {
-	Method  string          `json:"method"`
-	URL     string          `json:"url"`
-	Headers json.RawMessage `json:"headers"` // "Key: Value" lines or {"Key":"Value"} object
-	Body    string          `json:"body"`
+	Method   string          `json:"method"`
+	URL      string          `json:"url"`
+	Headers  json.RawMessage `json:"headers"` // "Key: Value" lines or {"Key":"Value"} object
+	Body     string          `json:"body"`
+	BodyMode string          `json:"bodyMode"` // ""|"raw" (default) or "decoded"
+	CodecID  string          `json:"codecId"`  // required when bodyMode=decoded
+	FlowID   int64           `json:"flowId"`   // optional context for encode()
+	RawBody  string          `json:"rawBody"`  // wire body for encode context (prefix/fields)
 }
 
 // aiSourceFlag returns store.FlagAI when a request was issued by the AI assistant
@@ -43,11 +47,24 @@ func (h *toolsAPI) repeaterSend(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	body := in.Body
+	if strings.EqualFold(in.BodyMode, "decoded") {
+		if in.CodecID == "" {
+			httpErr(w, http.StatusBadRequest, "codecId required when bodyMode=decoded")
+			return
+		}
+		wire, err := h.encodeWithCodec(in.CodecID, in.FlowID, "req", in.Body, in.RawBody)
+		if err != nil {
+			httpErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		body = wire
+	}
 	flow, err := h.snd.Send(sender.Request{
 		Method:  in.Method,
 		URL:     in.URL,
 		Headers: hdr,
-		Body:    []byte(in.Body),
+		Body:    []byte(body),
 		Flags:   store.FlagRepeater | aiSourceFlag(r),
 	})
 	if err != nil {

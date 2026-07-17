@@ -27,7 +27,7 @@ function repStatusLine(f){
 const REP_RES_EMPTY='<div class="state-empty"><div class="state-empty-icon">▸</div><div class="state-empty-title">No response yet</div><p class="state-empty-hint">Send a request to see the response.</p></div>';
 
 /* ---- repeater (multi-tab; each tab = an endpoint with its own history) ---- */
-export function repBlank(seq){return {tid:seq,title:'new tab',method:'GET',url:'',headers:'',body:'',reqView:'pretty',resId:null,resView:'pretty',status:'',color:''};}
+export function repBlank(seq){return {tid:seq,title:'new tab',method:'GET',url:'',headers:'',body:'',reqView:'pretty',resId:null,resView:'pretty',status:'',color:'',sourceFlowId:null,codecId:'',rawBody:'',applyOnSend:false,decodedPlain:''};}
 // repReqContentType reads Content-Type from the editable headers pane so the body
 // overlay highlights with the right syntax (JSON/markup/CSS) even before a send.
 function repReqContentType(){const h=$('#repHeaders');if(!h)return'';const m=(h.value||'').match(/^content-type:\s*(\S.*?)(?:\s*;|\s*$)/im);return m?m[1].trim():'';}
@@ -82,8 +82,8 @@ export const repTabs=createTabManager({
   title:repTitle,
   onSave:()=>repSaveEditor(),
   onLoad:()=>repLoadEditor(),
-  normalize:t=>({tid:t.tid,method:t.method||'GET',url:t.url||'',headers:t.headers||'',body:t.body||'',reqView:t.reqView||'pretty',resView:t.resView||'pretty',resId:null,status:'',color:'',title:''}),
-  serialize:t=>({tid:t.tid,method:t.method,url:t.url,headers:t.headers,body:t.body,reqView:t.reqView||'pretty',resView:t.resView}),
+  normalize:t=>({tid:t.tid,method:t.method||'GET',url:t.url||'',headers:t.headers||'',body:t.body||'',reqView:t.reqView||'pretty',resView:t.resView||'pretty',resId:null,status:'',color:'',title:'',sourceFlowId:t.sourceFlowId||null,codecId:t.codecId||'',rawBody:t.rawBody||'',applyOnSend:!!t.applyOnSend,decodedPlain:t.decodedPlain||''}),
+  serialize:t=>({tid:t.tid,method:t.method,url:t.url,headers:t.headers,body:t.body,reqView:t.reqView||'pretty',resView:t.resView,sourceFlowId:t.sourceFlowId||null,codecId:t.codecId||'',rawBody:t.rawBody||'',applyOnSend:!!t.applyOnSend,decodedPlain:t.decodedPlain||''}),
   labelStyle:(t,active)=>`color:${active?methodColor(t.method):'inherit'}`,
   onPersist:blob=>persistUIState('repeater',blob),
 });
@@ -93,32 +93,76 @@ export function repSwitch(tid){repTabs.switchTo(tid);}
 export function repCloseTab(tid){repTabs.close(tid);}
 export function repPersist(){repTabs.persist();}
 export function repPersistDebounced(){repTabs.persistDebounced();}
-export function repSaveEditor(){const t=repCur();if(!t)return;t.method=$('#repMethod').value;t.url=$('#repUrl').value;t.headers=$('#repHeaders').value;t.body=$('#repBody').value;t.title=repTitle(t);}
+export function repSaveEditor(){
+  const t=repCur();if(!t)return;
+  t.method=$('#repMethod').value;t.url=$('#repUrl').value;t.headers=$('#repHeaders').value;
+  const v=$('#repBody').value;
+  if((t.reqView||'raw')==='decoded')t.decodedPlain=v;
+  else t.body=v;
+  t.title=repTitle(t);
+}
+function repCodecBadge(t){
+  const b=$('#repCodecBadge');if(!b)return;
+  if((t.reqView||'')==='decoded'&&t.codecId){
+    b.style.display='';
+    b.textContent=(t.applyOnSend?'re-encode on send · ':'display · ')+(t.codecId);
+  }else{b.style.display='none';b.textContent='';}
+}
 export function repNewTab(){repSaveEditor();const t=repBlank(repTabs.seq++);repTabs.tabs.push(t);repTabs.active=t.tid;renderRepTabs();return t;}
 export function repLoadEditor(){
   const t=repCur();if(!t)return;
   $('#repMethod').value=t.method||'GET';$('#repUrl').value=t.url||'';$('#repHeaders').value=t.headers||'';
   const rv=t.reqView||'raw';
   repSyncReqSeg(rv);
-  $('#repBody').value=repBodyForDisplay(t.body,rv);
+  if(rv==='decoded')$('#repBody').value=t.decodedPlain||'';
+  else $('#repBody').value=repBodyForDisplay(t.body,rv);
+  repCodecBadge(t);
   repRefreshHL();
   $('#repResSeg').querySelectorAll('button').forEach(x=>{const on=x.dataset.view===(t.resView||'pretty');x.classList.toggle('on',on);x.setAttribute('aria-pressed',on?'true':'false');});
   if(t.resId){$('#repStatus').textContent=t.status||'';$('#repStatus').style.color=t.color||'var(--fg3)';renderRepResponse();}
   else{$('#repStatus').textContent='';$('#repResView').innerHTML=REP_RES_EMPTY;}
   loadRepHistory();
 }
+async function repEnterDecoded(t){
+  const flowId=t.sourceFlowId||t.resId;
+  const wire=t.body||'';
+  try{
+    let d;
+    if(flowId){
+      d=await api('/api/flows/'+flowId+'/decoded?side=req');
+    }else{
+      d=await api('/api/codecs/test',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({side:'req',rawBody:wire,host:(()=>{try{return new URL(t.url).host;}catch(e){return'';})()})});
+    }
+    if(!d.matched){toast('no message codec matched');t.reqView='pretty';repSyncReqSeg('pretty');repCodecBadge(t);return false;}
+    if(d.error){toast(d.error);t.reqView='pretty';repSyncReqSeg('pretty');repCodecBadge(t);return false;}
+    t.codecId=d.codecId||'';t.applyOnSend=!!d.applyOnSend;t.rawBody=wire;t.decodedPlain=d.plaintext||'';
+    $('#repBody').value=t.decodedPlain;repCodecBadge(t);repRefreshHL();return true;
+  }catch(e){toast(e.message);t.reqView='pretty';repSyncReqSeg('pretty');return false;}
+}
 export async function repSend(){
   repSaveEditor();const t=repCur();if(!t)return;
   if(!(t.url||'').trim()){toast('enter a URL');return;}
-  t.body=compactBody(t.body);
-  if((t.reqView||'raw')==='pretty')$('#repBody').value=repBodyForDisplay(t.body,'pretty');
-  else $('#repBody').value=t.body;
+  let body=t.body,payload={method:t.method,url:t.url.trim(),headers:t.headers,body};
+  if((t.reqView||'raw')==='decoded'){
+    if(t.applyOnSend&&t.codecId){
+      payload.bodyMode='decoded';payload.codecId=t.codecId;payload.body=t.decodedPlain||'';
+      payload.rawBody=t.rawBody||t.body||'';
+      if(t.sourceFlowId)payload.flowId=t.sourceFlowId;
+    }else{
+      toast('decoded view is display-only for this codec — sending raw wire body');
+      payload.body=t.rawBody||t.body||'';
+    }
+  }else{
+    t.body=compactBody(t.body);payload.body=t.body;
+    if((t.reqView||'raw')==='pretty')$('#repBody').value=repBodyForDisplay(t.body,'pretty');
+    else $('#repBody').value=t.body;
+  }
   repRefreshHL();
   $('#repSend').textContent='Sending…';$('#repSend').disabled=true;
   $('#repStatus').textContent='sending…';$('#repStatus').style.color='var(--fg3)';
   $('#repResView').innerHTML='<span class="blink" style="color:var(--fg3)">sending…</span>';
   try{
-    const flow=await api('/api/repeater/send',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({method:t.method,url:t.url.trim(),headers:t.headers,body:t.body})});
+    const flow=await api('/api/repeater/send',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
     t.resId=flow.id;t.status=repStatusLine(flow);t.color=statusColor(flow.status);
     $('#repStatus').textContent=t.status;$('#repStatus').style.color=t.color;
     if(flow.status===401) toast('401 Unauthorized — run login macro in Settings → Session or enable Re-auth on 401');
@@ -162,6 +206,7 @@ export async function repLoadSend(id){
     const i=raw.indexOf('\r\n\r\n');
     t.method=d.method;t.url=`${d.scheme}://${d.host}${def?'':':'+d.port}${d.path}`;t.headers=headersToText(d.reqHeaders);
     t.body=i>=0?raw.slice(i+4):'';
+    t.sourceFlowId=id;t.codecId='';t.decodedPlain='';t.rawBody='';t.applyOnSend=false;
     t.resId=id;t.status=repStatusLine(d);t.color=statusColor(d.status);t.title=repTitle(t);
     renderRepTabs();repLoadEditor();repPersist();
   }catch(e){toast(e.message);}
@@ -178,6 +223,7 @@ export async function sendToRepeater(f){
     const def=(d.scheme==='https'&&d.port===443)||(d.scheme==='http'&&d.port===80);
     t.method=d.method;t.url=`${d.scheme}://${d.host}${def?'':':'+d.port}${d.path}`;t.headers=headersToText(d.reqHeaders);
     const raw=await api('/api/flows/'+f.id+'/raw?side=req');const i=raw.indexOf('\r\n\r\n');t.body=i>=0?raw.slice(i+4):'';
+    t.sourceFlowId=f.id;t.codecId='';t.decodedPlain='';t.rawBody='';t.applyOnSend=false;
     t.resId=null;t.status='';t.color='';t.title=repTitle(t);
     renderRepTabs();repLoadEditor();repPersist();
     toast('loaded #'+f.id+' into Repeater');
@@ -234,15 +280,25 @@ function repWireEncodeCtx(){
   });
 }
 $('#repSend').onclick=repSend;
-$('#repReqSeg')&&$('#repReqSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+$('#repReqSeg')&&$('#repReqSeg').querySelectorAll('button').forEach(b=>b.onclick=async()=>{
   const t=repCur();if(!t)return;
   const next=b.dataset.view;
   if(next===(t.reqView||'raw'))return;
   repSaveEditor();
   if((t.reqView||'raw')==='pretty'&&next==='raw')t.body=compactBody(t.body);
+  if((t.reqView||'raw')==='decoded'&&next!=='decoded'){
+    // leave decoded — wire body stays in t.body/rawBody
+    if(t.rawBody)t.body=t.rawBody;
+  }
   t.reqView=next;
   repSyncReqSeg(next);
-  $('#repBody').value=repBodyForDisplay(t.body,next);
+  if(next==='decoded'){
+    const ok=await repEnterDecoded(t);
+    if(!ok){$('#repBody').value=repBodyForDisplay(t.body,'pretty');}
+  }else{
+    $('#repBody').value=repBodyForDisplay(t.body,next);
+    repCodecBadge(t);
+  }
   repRefreshHL();
   repPersistDebounced();
 });

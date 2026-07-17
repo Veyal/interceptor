@@ -42,8 +42,10 @@ func Predeclared() starlark.StringDict {
 		"b64encode":  starlark.NewBuiltin("b64encode", B64EncodeBuiltin),
 		"url_decode": starlark.NewBuiltin("url_decode", URLDecodeBuiltin),
 		"url_encode": starlark.NewBuiltin("url_encode", URLEncodeBuiltin),
-		"hash":       starlark.NewBuiltin("hash", HashBuiltin),
-		"hmac":       starlark.NewBuiltin("hmac", HMACBuiltin),
+		"hash":             starlark.NewBuiltin("hash", HashBuiltin),
+		"hmac":             starlark.NewBuiltin("hmac", HMACBuiltin),
+		"aes_ecb_encrypt":  starlark.NewBuiltin("aes_ecb_encrypt", AESECBEncryptBuiltin),
+		"aes_ecb_decrypt":  starlark.NewBuiltin("aes_ecb_decrypt", AESECBDecryptBuiltin),
 	}
 }
 

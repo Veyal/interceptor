@@ -40,6 +40,7 @@ function showEditor(h){
   if(!h){if(head)head.style.display='none';if(ta)ta.style.display='none';if(empty)empty.style.display='flex';return;}
   if(head)head.style.display='flex';
   if(empty)empty.style.display='none';
+  const dec=$('#heldDecoded');if(dec){dec.style.display='none';dec.hidden=true;dec.textContent='';}
   if(ta){ta.style.display='block';ta.value=h.raw||'';}
   if(title)title.innerHTML=h.side==='resp'
     ?`<span class="icpt-tag resp" style="margin-right:8px">RESP</span><span class="u">${esc(h.host)}${esc(h.path)}</span>`
@@ -88,6 +89,26 @@ $('#forwardBtn').onclick=async()=>{const sel=state.heldSel;if(!sel)return;
   try{await api(base+sel.id+'/forward',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({raw:$('#heldRaw').value})});
     heldRawCache.delete(sel.side+':'+sel.id);
     toast(sel.side==='resp'?'response forwarded':'forwarded');}catch(e){toast(e.message);}};
+$('#heldDecodeBtn')&&($('#heldDecodeBtn').onclick=async()=>{
+  const sel=state.heldSel;if(!sel)return;
+  const rawEl=$('#heldRaw'),decEl=$('#heldDecoded');
+  if(!rawEl||!decEl)return;
+  if(decEl.style.display&&decEl.style.display!=='none'){
+    decEl.style.display='none';decEl.hidden=true;rawEl.style.display='block';return;
+  }
+  const raw=rawEl.value||'';
+  const i=raw.indexOf('\r\n\r\n');const body=i>=0?raw.slice(i+4):raw;
+  const hostLine=(raw.match(/^Host:\s*(.+)$/im)||[])[1]||'';
+  const side=sel.side==='resp'?'res':'req';
+  try{
+    const d=await api('/api/codecs/test',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({side,rawBody:body,host:hostLine.trim()})});
+    if(!d.matched){toast('no message codec matched');return;}
+    if(d.error){toast(d.error);return;}
+    decEl.textContent=(d.title||d.codecId||'decoded')+'\n\n'+(d.plaintext||'');
+    decEl.hidden=false;decEl.style.display='block';rawEl.style.display='none';
+  }catch(e){toast(e.message);}
+});
 $('#dropBtn').onclick=async()=>{const sel=state.heldSel;if(!sel)return;
   const base=sel.side==='resp'?'/api/intercept/response/':'/api/intercept/';
   try{await api(base+sel.id+'/drop',{method:'POST'});

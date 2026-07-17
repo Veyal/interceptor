@@ -55,6 +55,7 @@ independently tested.
 | `internal/activescript` | Runs user-authored **active** scanner checks in Starlark — the active twin of `internal/checkscript` |
 | `internal/oob` | Out-of-band interaction catcher (blind SSRF/XXE/SQLi/RCE callbacks) |
 | `internal/checkscript` | Runs user-authored Starlark scanner checks (sandboxed, bounded) |
+| `internal/msgcodec` | Project-scoped Starlark message codecs (app-layer encrypt/decrypt for History/Repeater; never on the proxy hot path) |
 | `internal/curlgen` · `internal/report` | Render a flow as `curl`; render findings as Markdown |
 | `internal/wsrepeater` | WebSocket Repeater (RFC 6455 handshake + masked frames, no deps) |
 | `internal/harx` | HAR 1.2 import/export |

@@ -7,6 +7,7 @@ import { selectFlow, renderChips, loadFlows, loadScope, loadViews, scheduleReloa
 import { renderIntercept, toggleIntercept, loadRules } from './intercept.js';
 import { repInit, intrInit, repSend, sendToRepeater, sendToIntruder, scheduleIntr } from './tools.js';
 import { loadIssues, runScan, loadScanTargets, openActive, openDecoder, openChecks, loadActive, loadChecksList, loadOob, renderAsScopePanel } from './scanner.js';
+import { openCodecs, loadCodecsList } from './codecs.js';
 import { loadSettings, loadSysProxy, loadAndroid, loadIOS, loadIOSSsh, loadSession, loadProject, openProjectModal, applyAiDisabledUI, applyOobDisabledUI, loadDeviceProxyEndpoint } from './settings.js';
 import { loadNotes, flushNotesSave, focusNotes, organizeNotes } from './notes.js';
 import { renderActivity, onActivity, loadActivity, clearActSeen } from './activity.js';
@@ -243,6 +244,7 @@ function onModalUpdate(modalId,reloadFn){
 // not a full replacement of the if/else chain (see the comment above).
 const SSE_HANDLERS={
   'checks.update':{contract:'modal-gated nudge',run:()=>onModalUpdate('checksModal',loadChecksList)},
+  'codecs.update':{contract:'modal-gated nudge',run:()=>onModalUpdate('codecsModal',loadCodecsList)},
   'activescan.update':{contract:'modal-gated nudge',run:()=>onModalUpdate('activeModal',loadActive)},
   'oob.update':{contract:'modal-gated nudge',run:()=>onModalUpdate('oobModal',loadOob)},
   'notes.update':{contract:'always-reload',run:loadNotes},
@@ -338,6 +340,7 @@ function cmdkCommands(){
     {t:'Go to Map',kw:'endpoints attack surface graph tree headers body search',run:go('map')},
     {t:'Go to Notes',kw:'scratchpad markdown findings notebook',run:goToNotes},
     {t:'Edit custom scanner checks',kw:'starlark checks passive custom rules',run:openChecks},
+    {t:'Edit message codecs',kw:'encrypt decrypt aes codec plaintext decoded',run:openCodecs},
     {t:'Open active scan',kw:'active attack payloads consent arm fuzz',run:openActive},
     ...(state.oobEnabled?[{t:'Open OOB catcher',kw:'out of band blind ssrf callback collab',run:()=>{openModal($('#oobModal'));loadOob();}}]:[]),
     ...(state.aiDisabled?[]:[{t:'Organize project notes with AI',kw:'notes structure sort clean headings findings todo',run:()=>{goToNotes();organizeNotes();}}]),

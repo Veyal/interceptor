@@ -964,7 +964,7 @@ document.addEventListener('keydown',e=>{
 });
 
 /* ---- modals: close on Escape and on backdrop click (consistent across all) ---- */
-export const MODAL_IDS=['aiModal','notesAiModal','checksModal','activeModal','oobModal','authzModal','decModal','flowModal','confirmModal','shortcutsModal','projModal','compareModal','findCreateModal','findPickModal','findFlowPickModal','imgLightbox'];
+export const MODAL_IDS=['aiModal','notesAiModal','checksModal','codecsModal','activeModal','oobModal','authzModal','decModal','flowModal','confirmModal','shortcutsModal','projModal','compareModal','findCreateModal','findPickModal','findFlowPickModal','imgLightbox'];
 export function closeModals(){let n=0;MODAL_IDS.forEach(id=>{const m=$('#'+id);if(m&&m.style.display&&m.style.display!=='none'){closeModal(m);n++;}});return n>0;}
 MODAL_IDS.forEach(id=>{const m=$('#'+id);if(m)m.addEventListener('mousedown',e=>{if(e.target===m)closeModal(m);});});
 

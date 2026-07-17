@@ -227,6 +227,7 @@ func run() error {
 	hub.ActiveChecksDir = activeChecksDir
 	hub.ProjectName = projectName
 	hub.ProjectDir = dir
+	_ = os.MkdirAll(filepath.Join(dir, "codecs"), 0o755)
 	hub.GlobalDir = globalDir
 	// Switching projects re-execs this binary with --project <target>: a clean
 	// fresh start on the new project's store/CA, no mid-session store swapping.

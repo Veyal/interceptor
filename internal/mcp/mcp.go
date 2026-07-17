@@ -1411,22 +1411,39 @@ func (s *Server) registerTools() {
 		})
 
 	s.add("send_request",
-		"Send an HTTP request (Repeater) and record it. Returns the flow id+status; get_flow that id for the body.",
+		"Send an HTTP request (Repeater) and record it. Returns the flow id+status; get_flow that id for the body. Optional bodyMode=decoded + codecId re-encodes plaintext via a message codec before send (pass rawBody for encode context when needed).",
 		obj(map[string]any{
-			"method":  pt("string"),
-			"url":     p("string", "absolute URL"),
-			"headers": map[string]any{"oneOf": []any{map[string]any{"type": "string", "description": "'Key: Value' lines"}, map[string]any{"type": "object", "description": "header map e.g. {\"User-Agent\":\"bot\"}"}}},
-			"body":    pt("string"),
+			"method":   pt("string"),
+			"url":      p("string", "absolute URL"),
+			"headers":  map[string]any{"oneOf": []any{map[string]any{"type": "string", "description": "'Key: Value' lines"}, map[string]any{"type": "object", "description": "header map e.g. {\"User-Agent\":\"bot\"}"}}},
+			"body":     pt("string"),
+			"bodyMode": p("string", "raw (default) | decoded"),
+			"codecId":  p("string", "required when bodyMode=decoded"),
+			"flowId":   p("integer", "optional encode context"),
+			"rawBody":  p("string", "wire body for encode context"),
 		}, "url"),
 		func(a map[string]any) (string, error) {
 			hdr, err := argHeaderLines(a, "headers")
 			if err != nil {
 				return "", err
 			}
-			out, err := s.api(http.MethodPost, "/api/repeater/send", map[string]any{
+			payload := map[string]any{
 				"method": argStr(a, "method"), "url": argStr(a, "url"),
 				"headers": hdr, "body": argStr(a, "body"),
-			})
+			}
+			if bm := argStr(a, "bodyMode"); bm != "" {
+				payload["bodyMode"] = bm
+			}
+			if id := argStr(a, "codecId"); id != "" {
+				payload["codecId"] = id
+			}
+			if fid := argInt(a, "flowId", 0); fid != 0 {
+				payload["flowId"] = fid
+			}
+			if rb := argStr(a, "rawBody"); rb != "" {
+				payload["rawBody"] = rb
+			}
+			out, err := s.api(http.MethodPost, "/api/repeater/send", payload)
 			if err != nil {
 				return "", err
 			}
@@ -1553,6 +1570,91 @@ func (s *Server) registerTools() {
 		obj(map[string]any{"id": pt("string")}, "id"),
 		func(a map[string]any) (string, error) {
 			return s.api(http.MethodDelete, "/api/active-checks/"+url.PathEscape(argStr(a, "id")), nil)
+		})
+
+	// Project-scoped message codecs: app-layer encrypt/decrypt for History/Repeater.
+	s.add("list_codecs",
+		"List project Starlark message codecs (id, source, meta, compile error). Used to decrypt/encrypt app payloads in History/Repeater — not Content-Encoding and not the one-shot Decoder tool.",
+		obj(map[string]any{}),
+		func(a map[string]any) (string, error) { return s.apiGet("/api/codecs") })
+
+	s.add("test_codec",
+		"Compile+match/decode a message codec against a flow WITHOUT saving. Omit flowId for the latest flow. Shape: meta={...}; def match(flow,side); def decode(flow,side,raw); optional def encode(...). Builtins include aes_ecb_encrypt/decrypt, hash, hmac, b64*, json_*, re_search.",
+		obj(map[string]any{
+			"source": p("string", "Starlark source (or omit and pass id of a saved codec)"),
+			"id":     p("string", "saved codec id when source omitted"),
+			"flowId": p("integer", "default latest"),
+			"side":   p("string", "req | res (default req)"),
+		}),
+		func(a map[string]any) (string, error) {
+			body := map[string]any{"flowId": argInt(a, "flowId", 0), "side": argStr(a, "side")}
+			if src := argStr(a, "source"); src != "" {
+				body["source"] = src
+			}
+			if id := argStr(a, "id"); id != "" {
+				body["id"] = id
+			}
+			return s.api(http.MethodPost, "/api/codecs/test", body)
+		})
+
+	s.add("save_codec",
+		"Save a project message codec by id (letters/digits/-/_); must compile. Lives under the project codecs/ dir. test_codec first.",
+		obj(map[string]any{
+			"id":     pt("string"),
+			"source": p("string", "Starlark source"),
+		}, "id", "source"),
+		func(a map[string]any) (string, error) {
+			return s.api(http.MethodPut, "/api/codecs/"+url.PathEscape(argStr(a, "id")), map[string]any{"source": argStr(a, "source")})
+		})
+
+	s.add("delete_codec", "Delete a project message codec by id.",
+		obj(map[string]any{"id": pt("string")}, "id"),
+		func(a map[string]any) (string, error) {
+			return s.api(http.MethodDelete, "/api/codecs/"+url.PathEscape(argStr(a, "id")), nil)
+		})
+
+	s.add("get_flow_decoded",
+		"Return app-layer decoded plaintext for a flow when a project message codec matches (display-only). side=req|res.",
+		obj(map[string]any{
+			"id":   pt("integer"),
+			"side": p("string", "req | res (default req)"),
+		}, "id"),
+		func(a map[string]any) (string, error) {
+			id, err := reqFlowID(a)
+			if err != nil {
+				return "", err
+			}
+			side := argStr(a, "side")
+			if side == "" {
+				side = "req"
+			}
+			return s.apiGet(fmt.Sprintf("/api/flows/%d/decoded?side=%s", id, url.QueryEscape(side)))
+		})
+
+	s.add("encode_codec",
+		"Re-encode edited plaintext into a wire body via a message codec (for Repeater send with apply_on_send). Prefer send_request with bodyMode=decoded.",
+		obj(map[string]any{
+			"id":        p("string", "saved codec id (or pass source)"),
+			"source":    p("string", "Starlark source when id omitted"),
+			"plaintext": pt("string"),
+			"flowId":    p("integer", "context flow for encode()"),
+			"side":      p("string", "req | res (default req)"),
+			"rawBody":   p("string", "optional wire body for encode context (prefix/fields)"),
+		}, "plaintext"),
+		func(a map[string]any) (string, error) {
+			body := map[string]any{
+				"plaintext": argStr(a, "plaintext"),
+				"flowId":    argInt(a, "flowId", 0),
+				"side":      argStr(a, "side"),
+				"rawBody":   argStr(a, "rawBody"),
+			}
+			if id := argStr(a, "id"); id != "" {
+				body["id"] = id
+			}
+			if src := argStr(a, "source"); src != "" {
+				body["source"] = src
+			}
+			return s.api(http.MethodPost, "/api/codecs/encode", body)
 		})
 
 	// Rule packs are read-only for the agent: installing checks runs code on every
