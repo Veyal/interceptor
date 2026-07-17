@@ -122,7 +122,7 @@ function renderFindings() {
       : '';
   }
   if (!findings.length) {
-    box.innerHTML = '<div class="state-empty"><div class="state-empty-icon">🔎</div><div class="state-empty-title">No findings yet</div><p class="state-empty-hint">Create one, or the AI records them as it tests.</p><p class="state-empty-hint state-empty-cmdk">Wrapping up? File PoCs here, then <b>Export report</b> — checklist: <code>docs/engagement-closeout.md</code></p></div>';
+    box.innerHTML = '<div class="state-empty"><div class="state-empty-icon">🔎</div><div class="state-empty-title">No findings yet</div><p class="state-empty-hint">Create one, or the AI records them as it tests.</p><p class="state-empty-hint state-empty-cmdk">Wrapping up? File PoCs here, then <b>Export report</b> — <a href="https://github.com/Veyal/interseptor/blob/main/docs/engagement-closeout.md" target="_blank" rel="noopener">open the engagement close-out checklist</a>.</p></div>';
     selFinding = null; renderFindingDetail(); return;
   }
   if (!list.length) {

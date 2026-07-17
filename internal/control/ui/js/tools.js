@@ -543,7 +543,7 @@ $('#intrHistToggle')&&($('#intrHistToggle').onclick=()=>{const h=$('#intrHistory
 
 function intrModeText(){
   if(intrState.type==='repeat')
-    return 'Null — resend the template verbatim with no payloads or § markers. Use for duplicate submits, idempotency checks, rate limits, or concurrent replays (raise threads, 0 ms delay).';
+    return 'Race / repeat — resend the template verbatim with no payloads or § markers. Use for duplicate submits, idempotency checks, rate limits, or concurrent replays (raise threads, 0 ms delay).';
   if(intrState.type==='battering')
     return 'Battering ram — one payload list applied to every § marker at once (same value in all positions). Good for hitting every field with the same token.';
   if(intrState.type==='cluster')
@@ -651,7 +651,7 @@ function wireIntrNumbers(wrap){
 function renderPayloadInputs(){
   const wrap=$('#intrPayloadsWrap');if(!wrap)return;
   if(intrState.type==='repeat'){
-    wrap.innerHTML='<div class="hint">Null mode — no payload lists. The request above is sent verbatim <b>×'+(parseInt($('#intrRepeat').value,10)||0)+'</b> times across <b>'+(parseInt($('#intrThreads').value,10)||1)+'</b> threads.</div>';
+    wrap.innerHTML='<div class="hint">Race / repeat — no payload lists. The request above is sent verbatim <b>×'+(parseInt($('#intrRepeat').value,10)||0)+'</b> times across <b>'+(parseInt($('#intrThreads').value,10)||1)+'</b> threads.</div>';
     updateIntrCount();return;
   }
   if(intrState.type!=='pitchfork'&&intrState.type!=='cluster'){
@@ -785,7 +785,7 @@ export async function intrStart(){
     body.repeat=Math.max(1,parseInt($('#intrRepeat').value,10)||1);
   }else{
     const mk=intrMarkers();
-    if(!mk.length){toast('mark at least one § injection point — or use Null mode for payload-free resends');$('#intrTemplate').focus();return;}
+    if(!mk.length){toast('mark at least one § injection point — or use Race / repeat for payload-free resends');$('#intrTemplate').focus();return;}
     if(intrState.type==='pitchfork'||intrState.type==='cluster'){
       body.payloads=mk.map((_,i)=>intrGetPayloadLines(i));
       if(body.payloads.some(l=>!l.length)){toast('add payloads for every § position');return;}

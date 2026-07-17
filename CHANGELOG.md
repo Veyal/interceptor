@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Dev-build fallback version advanced to the published `1.5.4`.**
 - **Keyboard-first UI foundation.** Added a shared high-contrast focus ring and reduced-motion behavior, stack-correct dialog focus management, accessible command-palette and custom-select keyboard semantics, and panel-scoped shortcuts that do not override editing keystrokes.
 - **Safer scanner and report journeys.** Scanner targets use an exhaustive distinct in-scope host inventory, bounded rescans reconcile only scanned/out-of-scope/orphaned passive issues while preserving older unscanned results and curated Findings, and report exports default to actionable/open/verified/fixed statuses with explicit status selection.
+- **Capability parity and docs truth.** MCP gains response forward/drop plus rule update/delete and full Intruder Race/repeat parameters; Settings exposes HAR import/export; `/openapi.json` is labeled as a route discovery index; AI provider docs cover Anthropic/OpenRouter/GLM/Zhipu/OpenAI; Intruder UI uses “Race / repeat”; and stale historical audit/roadmap docs are marked as snapshots.
 
 ### Fixed
 - **End-to-end reliability UX.** Added visible inspector replay actions and keyboard context menus, resilient project-scoped setup initialization with readiness evidence, explicitly project-global mobile diagnosis guidance, retryable stale/error states, session-only intercept enablement with persistent warnings, precise project-switch rejection handling, and prerequisite-gated sharing.

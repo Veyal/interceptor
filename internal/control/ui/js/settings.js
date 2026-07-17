@@ -805,6 +805,7 @@ $('#retSelectAll')&&($('#retSelectAll').onclick=function(){
 });
 
 $('#exportProject').onclick=()=>toast('Downloading project export…');
+const exportHAR=$('#exportHAR');if(exportHAR)exportHAR.onclick=()=>toast('Downloading HAR export…');
 const exportFull=$('#exportFull');if(exportFull)exportFull.onclick=()=>toast('Downloading full project archive…');
 const importFullBtn=$('#importFullBtn');if(importFullBtn)importFullBtn.onclick=()=>$('#importFullFile').click();
 const importFullFile=$('#importFullFile');
@@ -830,6 +831,22 @@ $('#importProjectFile').onchange=async e=>{
   try{const text=await f.text();const r=await api('/api/import/project',{method:'POST',headers:{'content-type':'application/json'},body:text});
     toast(`imported ${r.importedFlows} flows · ${r.importedRules} rules · ${r.importedScope} scope`);
     loadFlows();loadRules();loadScope();loadSettings();}catch(err){toast('import: '+err.message);}
+  e.target.value='';
+};
+const importHARBtn=$('#importHARBtn');if(importHARBtn)importHARBtn.onclick=()=>$('#importHARFile').click();
+const importHARFile=$('#importHARFile');
+if(importHARFile)importHARFile.onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  const confirmed=await uiConfirm('Import HAR',
+    'Merge entries from <b style="color:var(--accent)">'+esc(f.name||'this HAR')+'</b> into this project\'s History? Existing flows are kept.','Import','btn accent','');
+  if(!confirmed){e.target.value='';return;}
+  try{
+    const text=await f.text();
+    const r=await api('/api/import/har',{method:'POST',headers:{'content-type':'application/json'},body:text});
+    const n=r.imported!=null?r.imported:(r.importedFlows!=null?r.importedFlows:0);
+    toast('HAR import: '+n+' entr'+(n===1?'y':'ies')+' merged');
+    loadFlows();
+  }catch(err){toast('HAR import: '+err.message);}
   e.target.value='';
 };
 // ---- project switching (close current, open another / a new path) ----
