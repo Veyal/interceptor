@@ -9,8 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Changed
-- **Dev-build fallback version advanced to the published `1.5.3`.**
+## [1.5.4] - 2026-07-17
+
+### Fixed
+- **Repeater Decoded view syntax (#29).** Closed a missing `}` in the request-side host IIFE so `/js/tools.js` parses again after message codecs landed.
+- **Repeater response Decoded (#30).** Response pane gains a Decoded segment that uses `/api/flows/{id}/decoded?side=res` (request-side already worked).
 
 ## [1.5.3] - 2026-07-17
 
