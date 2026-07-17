@@ -58,6 +58,17 @@ go install github.com/Veyal/interseptor/cmd/interseptor@latest
 interseptor
 ```
 
+Package managers (after the tap/bucket is seeded for a release — see [packaging/](packaging/README.md)):
+
+```bash
+brew install Veyal/tap/interseptor
+```
+
+```powershell
+scoop bucket add Veyal https://github.com/Veyal/scoop-bucket
+scoop install interseptor
+```
+
 That starts the proxy on `127.0.0.1:8080` and the UI on `127.0.0.1:9966`. Point your traffic at the
 proxy, trust the CA from **Settings** to decrypt HTTPS, and you're intersep-ing.
 

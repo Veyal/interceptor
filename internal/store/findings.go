@@ -44,6 +44,8 @@ type Finding struct {
 	Blocks                   []FindingBlock `json:"blocks"`         // ordered narrative body (source of truth for UI)
 	// Tags are report-scoping labels (same slug model as flow tags), e.g. cms / api / out-of-scope.
 	Tags []string `json:"tags"`
+	// Verification is the Autopilot/machine proof-record when present (not stored on the finding row).
+	Verification *FindingVerification `json:"verification,omitempty"`
 	// Ready / Missing are computed at read time (not stored) — report-ready checklist.
 	Ready   bool     `json:"ready"`
 	Missing []string `json:"missing,omitempty"`
@@ -709,6 +711,11 @@ func (s *Store) GetFinding(id int64) (*Finding, error) {
 	if f.Tags == nil {
 		f.Tags = []string{}
 	}
+	if v, err := s.GetFindingVerification(id); err == nil {
+		f.Verification = v
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
 	f.EnrichCompleteness()
 	return f, nil
 }
@@ -763,6 +770,10 @@ func (s *Store) ListFindings(severity, status, tag string) ([]Finding, error) {
 		if err != nil {
 			return nil, err
 		}
+		verByID, err := s.VerificationsForFindings(ids)
+		if err != nil {
+			return nil, err
+		}
 		for i := range out {
 			out[i].Flows = flowsByID[out[i].ID]
 			if out[i].Flows == nil {
@@ -771,6 +782,9 @@ func (s *Store) ListFindings(severity, status, tag string) ([]Finding, error) {
 			out[i].Tags = tagsByID[out[i].ID]
 			if out[i].Tags == nil {
 				out[i].Tags = []string{}
+			}
+			if v := verByID[out[i].ID]; v != nil {
+				out[i].Verification = v
 			}
 			out[i].Blocks = buildBlocks(out[i].Body, out[i].Detail, out[i].Evidence, out[i].Flows)
 			if out[i].Blocks == nil {

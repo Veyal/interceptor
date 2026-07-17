@@ -1,31 +1,43 @@
 # Packaging
 
-Distribution templates for package managers. These are kept here so a maintainer
-(or goreleaser, once `brews`/`scoops` are enabled in `.goreleaser.yaml`) can
-publish Interseptor to Homebrew, Scoop, etc. without reinventing the metadata.
+Distribution for Homebrew and Scoop. Core release binaries always ship via
+GitHub Releases + GoReleaser; package-manager publish is **optional** and never
+blocks a release.
 
-## Homebrew
+## Install (once taps are seeded)
 
-`homebrew/interseptor.rb` is a formula template. To serve it from a tap:
+```bash
+# macOS / Linux (Homebrew)
+brew install Veyal/tap/interseptor
+```
 
-1. Create a `homebrew-tap` repo under the org (e.g. `Veyal/homebrew-tap`).
-2. Enable the `brews:` block in `.goreleaser.yaml` (currently commented),
-   pointing `repository.owner`/`name` at the tap.
-3. Users then install with `brew install Veyal/tap/interseptor`.
+```powershell
+# Windows (Scoop)
+scoop bucket add Veyal https://github.com/Veyal/scoop-bucket
+scoop install interseptor
+```
 
-## Scoop (Windows)
+Until the tap/bucket have a formula for the latest tag, use the
+[Releases](https://github.com/Veyal/interseptor/releases) page or
+`interseptor update`.
 
-`scoop/interseptor.json` is a Scoop manifest. To publish to a bucket:
+## How publish works
 
-1. Create a `scoop-bucket` repo.
-2. Enable the `scoops:` block in `.goreleaser.yaml`, pointing at the bucket.
-3. Users install with:
-   ```powershell
-   scoop bucket add Veyal https://github.com/Veyal/scoop-bucket
-   scoop install interseptor
-   ```
+1. Create (public) repos:
+   - `Veyal/homebrew-tap`
+   - `Veyal/scoop-bucket`
+2. Add repository secrets on **interseptor**:
+   - `HOMEBREW_TAP_TOKEN` — PAT with `contents:write` on `homebrew-tap`
+   - `SCOOP_BUCKET_TOKEN` — PAT with `contents:write` on `scoop-bucket`
+     (or one PAT for both)
+3. On each GitHub Release, workflow
+   [`.github/workflows/publish-packages.yml`](../.github/workflows/publish-packages.yml)
+   regenerates the formula/manifest from `checksums.txt`.
 
-The version + SHA256 in these templates are placeholders; goreleaser fills the
-real values per release when the blocks are enabled. Until then, the prebuilt
-binaries on the GitHub Releases page (and `interseptor update`) are the
-supported install paths.
+If those secrets are unset, the workflow exits 0 and skips — releases stay green.
+
+## Local templates
+
+`homebrew/interseptor.rb` and `scoop/interseptor.json` are reference shapes.
+The publish workflow writes live versions into the tap/bucket repos (not these
+files). Keep the templates in sync when formula fields change.

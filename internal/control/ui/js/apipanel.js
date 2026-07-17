@@ -4,7 +4,7 @@ import { $, esc, escAttr, api, toast, methodColor, copyText, uiConfirm } from '.
 $('#apiSub').querySelectorAll('button').forEach(b=>b.onclick=()=>{
   $('#apiSub').querySelectorAll('button').forEach(x=>{x.classList.toggle('on',x===b);x.setAttribute('aria-pressed',x===b?'true':'false');});
   ['Keys','Share','Rest','Mcp'].forEach(s=>{const el=$('#api'+s);if(el)el.style.display=(s.toLowerCase()===b.dataset.s)?'block':'none';});
-  if(b.dataset.s==='share')loadShare();
+  if(b.dataset.s==='share'){loadShare();loadMergeStatus();}
 });
 export async function loadApiKeys(){
   try{const d=await api('/api/keys');const keys=d.keys||[];
@@ -75,15 +75,45 @@ async function stopShare(){
   try{await api('/api/share/stop',{method:'POST'});toast('tunnel stopped');loadShare();}
   catch(e){toast(e.message);}
 }
+async function loadMergeStatus(){
+  const el=$('#mergePresence'); if(!el) return;
+  try{
+    const s=await api('/api/merge/status');
+    if(!s.lastAt){el.textContent='No peer sync yet.';return;}
+    const when=new Date(Number(s.lastAt)).toLocaleString();
+    el.innerHTML=`Last <b>${esc(s.lastDir||'sync')}</b> ${s.lastLabel?('· '+esc(s.lastLabel)+' '):''}· ${esc(when)}${s.lastPeer?`<div class="hint font-mono">${esc(s.lastPeer)}</div>`:''}`;
+  }catch{el.textContent='';}
+}
 async function peerMerge(dir){
   const peerUrl=$('#peerUrl').value.trim(),key=$('#peerKey').value.trim(),label=$('#peerLabel').value.trim();
   if(!peerUrl||!key){toast('peer URL and key are required');return;}
   const verb=dir==='pull'?'Pull from':'Push to';
-  if(!await uiConfirm(verb+' peer',verb+' <b>'+esc(peerUrl)+'</b>? '+(dir==='pull'?'Their flows &amp; findings will be merged into this project.':'This project will be merged into theirs.'),verb.split(' ')[0],'btn accent','var(--accent)'))return;
+  $('#mergeResult').textContent='Previewing…';
+  let previewMsg='';
+  try{
+    const prev=await api('/api/merge/'+dir,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({peerUrl,key,label,dryRun:true})});
+    if(dir==='pull'){
+      previewMsg=`Would add <b>${prev.flowsAdded||0}</b> flows + <b>${prev.findingsAdded||0}</b> findings`
+        +` (skip ${prev.flowsSkipped||0}/${prev.findingsSkipped||0} already present`
+        +(prev.bodiesAdded?`; ${prev.bodiesAdded} new bodies`:'')+`).`;
+    }else{
+      previewMsg=`Would send <b>${prev.localFlows||0}</b> flows + <b>${prev.localFindings||0}</b> findings to peer.`
+        +(prev.note?` <span class="hint">${esc(prev.note)}</span>`:'');
+    }
+    $('#mergeResult').innerHTML=previewMsg;
+  }catch(e){
+    $('#mergeResult').innerHTML='<span style="color:var(--red)">preview: '+esc(e.message)+'</span>';
+    return;
+  }
+  if(!await uiConfirm(verb+' peer',previewMsg+'<br><br>'+verb+' <b>'+esc(peerUrl)+'</b>?',verb.split(' ')[0],'btn accent','var(--accent)')){
+    $('#mergeResult').textContent='Cancelled.';
+    return;
+  }
   $('#mergeResult').textContent=verb.toLowerCase()+'ing…';
   try{const r=await api('/api/merge/'+dir,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({peerUrl,key,label})});
     $('#mergeResult').innerHTML='<span style="color:var(--accent)">Done.</span> '+r.flowsAdded+' flows + '+r.findingsAdded+' findings added ('+r.flowsSkipped+'/'+r.findingsSkipped+' already present).';
     toast('sync complete');
+    loadMergeStatus();
   }catch(e){$('#mergeResult').innerHTML='<span style="color:var(--red)">'+esc(e.message)+'</span>';}
 }
 // Live tunnel URL arrival (SSE) refreshes the panel if it's open.

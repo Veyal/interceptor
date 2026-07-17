@@ -38,11 +38,9 @@ remote/tunnel pieces, HAR + full project export.
 | Item | Theme | Effort | Issue |
 |---|---|---|---|
 | HTTP/2 MITM support | Trustworthy core | L | [#19](https://github.com/Veyal/interseptor/issues/19) |
-| Autopilot confidence in Findings detail | Trustworthy AI | M | [#20](https://github.com/Veyal/interseptor/issues/20) |
-| Collaboration: merge conflict preview + presence | Reach | L | [#21](https://github.com/Veyal/interseptor/issues/21) |
 | Content discovery (scope-aware soft-404) return | Table stakes | L | [#22](https://github.com/Veyal/interseptor/issues/22) |
-| Enable Homebrew tap / Scoop bucket | Reach | S | [#23](https://github.com/Veyal/interseptor/issues/23) |
 | Signed rule packs (minisign) | Packs ecosystem | M | [#24](https://github.com/Veyal/interseptor/issues/24) |
+| Message codecs (project-scoped decrypt/encrypt) | Differentiator | L–XL | [#28](https://github.com/Veyal/interseptor/issues/28) |
 
 ## Later
 

@@ -287,6 +287,7 @@ func (h *Hub) registerMetaRoutes(meta *metaAPI) {
 	h.mux.HandleFunc("POST /api/share/start", h.shareStart)
 	h.mux.HandleFunc("POST /api/share/stop", h.shareStop)
 	// Project merge (pull/push union with a peer).
+	h.mux.HandleFunc("GET /api/merge/status", h.mergeStatus)
 	h.mux.HandleFunc("POST /api/merge/file", h.mergeFile)
 	h.mux.HandleFunc("POST /api/merge/pull", h.mergePull)
 	h.mux.HandleFunc("POST /api/merge/push", h.mergePush)

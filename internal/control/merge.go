@@ -24,21 +24,63 @@ import (
 // mergeArchiveFile unpacks a full-project archive to a scratch dir and merges it
 // into the active project, returning the merge stats. Shared by mergeFile/mergePull.
 func (h *Hub) mergeArchiveFile(zipPath, label string) (store.MergeStats, error) {
-	scratch, err := os.MkdirTemp("", "interseptor-merge-*")
+	peerDB, peerBodies, cleanup, err := unpackMergeScratch(zipPath)
 	if err != nil {
 		return store.MergeStats{}, err
 	}
-	defer os.RemoveAll(scratch)
-	// Reuse the export unpacker: zip-slip guarded, member-allowlisted, requires the DB.
-	if err := unpackFullArchive(zipPath, scratch); err != nil {
+	defer cleanup()
+	return h.st.MergeFrom(peerDB, peerBodies, label)
+}
+
+// mergeArchivePreview is the dry-run counterpart of mergeArchiveFile.
+func (h *Hub) mergeArchivePreview(zipPath, label string) (store.MergeStats, error) {
+	peerDB, peerBodies, cleanup, err := unpackMergeScratch(zipPath)
+	if err != nil {
 		return store.MergeStats{}, err
 	}
-	peerDB := filepath.Join(scratch, archiveDBName)
-	peerBodies := filepath.Join(scratch, archiveBodyRoot)
-	if _, err := os.Stat(peerBodies); err != nil {
-		peerBodies = "" // archive had no bodies
+	defer cleanup()
+	return h.st.MergePreview(peerDB, peerBodies, label)
+}
+
+func unpackMergeScratch(zipPath string) (peerDB, peerBodies string, cleanup func(), err error) {
+	scratch, err := os.MkdirTemp("", "interseptor-merge-*")
+	if err != nil {
+		return "", "", func() {}, err
 	}
-	return h.st.MergeFrom(peerDB, peerBodies, label)
+	cleanup = func() { os.RemoveAll(scratch) }
+	if err := unpackFullArchive(zipPath, scratch); err != nil {
+		cleanup()
+		return "", "", func() {}, err
+	}
+	peerDB = filepath.Join(scratch, archiveDBName)
+	peerBodies = filepath.Join(scratch, archiveBodyRoot)
+	if _, err := os.Stat(peerBodies); err != nil {
+		peerBodies = ""
+	}
+	return peerDB, peerBodies, cleanup, nil
+}
+
+func (h *Hub) recordMergePresence(dir, peerURL, label string) {
+	if h.st == nil {
+		return
+	}
+	_ = h.st.SetSetting("merge.lastDir", dir)
+	_ = h.st.SetSetting("merge.lastPeer", peerURL)
+	_ = h.st.SetSetting("merge.lastLabel", label)
+	_ = h.st.SetSetting("merge.lastAt", fmt.Sprintf("%d", time.Now().UnixMilli()))
+}
+
+func (h *Hub) mergeStatus(w http.ResponseWriter, r *http.Request) {
+	get := func(k string) string {
+		v, _, _ := h.st.GetSetting(k)
+		return v
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"lastDir":   get("merge.lastDir"),
+		"lastPeer":  get("merge.lastPeer"),
+		"lastLabel": get("merge.lastLabel"),
+		"lastAt":    get("merge.lastAt"),
+	})
 }
 
 // mergeFile is the push RECEIVER: it ingests an uploaded project archive and
@@ -75,6 +117,7 @@ func (h *Hub) mergePull(w http.ResponseWriter, r *http.Request) {
 		PeerURL string `json:"peerUrl"`
 		Key     string `json:"key"`
 		Label   string `json:"label"`
+		DryRun  bool   `json:"dryRun"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in); err != nil {
 		httpErr(w, http.StatusBadRequest, "bad json")
@@ -95,11 +138,25 @@ func (h *Hub) mergePull(w http.ResponseWriter, r *http.Request) {
 	if label == "" {
 		label = hostLabel(base)
 	}
+	if in.DryRun {
+		stats, err := h.mergeArchivePreview(tmpPath, label)
+		if err != nil {
+			httpErr(w, http.StatusBadRequest, "preview failed: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"dryRun": true, "flowsAdded": stats.FlowsAdded, "flowsSkipped": stats.FlowsSkipped,
+			"findingsAdded": stats.FindingsAdded, "findingsSkipped": stats.FindingsSkipped,
+			"bodiesAdded": stats.BodiesAdded,
+		})
+		return
+	}
 	stats, err := h.mergeArchiveFile(tmpPath, label)
 	if err != nil {
 		httpErr(w, http.StatusBadRequest, "merge failed: "+err.Error())
 		return
 	}
+	h.recordMergePresence("pull", base, label)
 	h.broadcast(map[string]any{"type": "flow.new"})
 	h.broadcast(map[string]any{"type": "findings.update"})
 	writeJSON(w, http.StatusOK, stats)
@@ -112,6 +169,7 @@ func (h *Hub) mergePush(w http.ResponseWriter, r *http.Request) {
 		PeerURL string `json:"peerUrl"`
 		Key     string `json:"key"`
 		Label   string `json:"label"`
+		DryRun  bool   `json:"dryRun"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in); err != nil {
 		httpErr(w, http.StatusBadRequest, "bad json")
@@ -120,6 +178,22 @@ func (h *Hub) mergePush(w http.ResponseWriter, r *http.Request) {
 	base := strings.TrimRight(strings.TrimSpace(in.PeerURL), "/")
 	if base == "" || in.Key == "" {
 		httpErr(w, http.StatusBadRequest, "peerUrl and key are required")
+		return
+	}
+	label := in.Label
+	if label == "" && h.ProjectName != "" {
+		label = h.ProjectName
+	}
+	if in.DryRun {
+		// Push dry-run: we cannot count peer-side skips without their DB. Report
+		// what we would send (local archive inventory) so the operator can confirm.
+		findings, _ := h.st.ListFindings("", "", "")
+		nFlows, _ := h.st.FlowCount()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"dryRun": true, "direction": "push",
+			"localFlows": nFlows, "localFindings": len(findings),
+			"note": "Push preview lists what this project would send; peer-side add/skip counts are returned after a real push.",
+		})
 		return
 	}
 	// Build a snapshot archive to a temp file.
@@ -143,15 +217,12 @@ func (h *Hub) mergePush(w http.ResponseWriter, r *http.Request) {
 	}
 	arc.Close()
 
-	label := in.Label
-	if label == "" && h.ProjectName != "" {
-		label = h.ProjectName
-	}
 	stats, err := uploadPeerArchive(base+"/api/merge/file?label="+label, in.Key, arcPath)
 	if err != nil {
 		httpErr(w, http.StatusBadGateway, "push failed: "+err.Error())
 		return
 	}
+	h.recordMergePresence("push", base, label)
 	writeJSON(w, http.StatusOK, stats)
 }
 

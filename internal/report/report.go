@@ -254,6 +254,14 @@ func renderFinding(b *strings.Builder, n int, f store.Finding) {
 	if len(f.Tags) > 0 {
 		b.WriteString("- **Tags:** " + sanitizeLine(strings.Join(f.Tags, ", ")) + "\n")
 	}
+	if f.Verification != nil {
+		v := f.Verification
+		fmt.Fprintf(b, "- **Autopilot confidence:** %d%%", v.Confidence)
+		if v.VulnClass != "" {
+			b.WriteString(" (" + sanitizeLine(v.VulnClass) + ")")
+		}
+		b.WriteString("\n")
+	}
 	b.WriteString("\n")
 
 	if f.Impact != "" {

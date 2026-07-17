@@ -54,6 +54,9 @@ function findingListMeta(f) {
   const parts = [ready, st];
   const tags = f.tags || [];
   if (tags.length) parts.push('<span class="find-tags-inline">' + tags.map(t => esc(t)).join(' · ') + '</span>');
+  if (f.verification && f.verification.confidence != null) {
+    parts.push('<span class="find-conf" title="Autopilot verifier confidence">⚙ ' + esc(String(f.verification.confidence)) + '%</span>');
+  }
   const pocs = findingPocCount(f);
   if (pocs) parts.push(pocs + ' PoC');
   if (f.target) parts.push('<span class="hint">' + esc(f.target.length > 28 ? f.target.slice(0, 27) + '…' : f.target) + '</span>');
@@ -405,6 +408,31 @@ function renderFindingDetail() {
         <div class="find-verif-title">⚠ Needs human verification</div>
         <textarea id="findVerifInstr" class="find-verif-text" rows="3" placeholder="What should the human check? Exact steps…">${esc(f.verificationInstructions || '')}</textarea>
       </div>` : '';
+  const machineProof = (() => {
+    const v = f.verification;
+    if (!v) return '';
+    let gates = {};
+    try { gates = typeof v.gates === 'string' ? JSON.parse(v.gates || '{}') : (v.gates || {}); } catch { gates = {}; }
+    const gateKeys = Object.keys(gates);
+    const gateRows = gateKeys.length
+      ? gateKeys.map(k => {
+          const g = gates[k] || {};
+          let ok = false, detail = '';
+          if (k === 'differential') { ok = !!g.reproduced; detail = g.detail || (g.reproN != null ? 'repro ×' + g.reproN : ''); }
+          else if (k === 'agent') { ok = g.verdict === 'real'; detail = g.reasoning || g.verdict || ''; }
+          else if (k === 'oob') { ok = !!g.confirmed; detail = g.detail || (g.token ? 'token present' : ''); }
+          else if (k === 'human') { ok = !!g.confirmed; detail = g.note || g.answeredBy || ''; }
+          else { ok = g.ok === true || g.passed === true || g.confirmed === true || g.verdict === 'real'; detail = g.detail || g.reasoning || g.note || ''; }
+          return `<div class="find-gate-row"><span class="find-gate-name">${esc(k)}</span><span class="find-gate-ok" style="color:${ok ? 'var(--accent)' : 'var(--amber)'}">${ok ? 'pass' : 'fail'}</span>${detail ? `<span class="hint">${esc(String(detail).slice(0, 160))}</span>` : ''}</div>`;
+        }).join('')
+      : '<span class="hint">Gate detail unavailable</span>';
+    return `<div class="find-machine-proof" role="status">
+      <div class="find-machine-title">⚙ Autopilot trust · confidence <b>${esc(String(v.confidence ?? 0))}%</b></div>
+      <div class="hint">Class <b>${esc(v.vulnClass || '—')}</b>${v.runId ? ' · run #' + esc(String(v.runId)) : ''}${v.reproCount ? ' · repro ×' + esc(String(v.reproCount)) : ''}${v.oobToken ? ' · OOB' : ''}</div>
+      <div class="find-gate-list">${gateRows}</div>
+      ${(v.baselineFlow || v.payloadFlow) ? `<div class="hint">PoC flows: ${[v.baselineFlow && ('#' + v.baselineFlow), v.payloadFlow && ('#' + v.payloadFlow)].filter(Boolean).join(' · ')}</div>` : ''}
+    </div>`;
+  })();
 
   box.innerHTML = `<article class="find-article">
     <header class="find-header">
@@ -437,6 +465,7 @@ function renderFindingDetail() {
     ${completeBar}
     ${missBanner}
     ${verifBanner}
+    ${machineProof}
 
     <section class="find-sec" id="find-sec-impact">
       <h3>Impact</h3>

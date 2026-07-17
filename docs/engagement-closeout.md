@@ -23,6 +23,7 @@ The goal is a **report-ready project**, not just a pile of History rows.
 ## 3. Autopilot / active work
 
 - [ ] Review Autopilot **Trust ledger** — filed vs rejected vs skipped
+- [ ] On each Autopilot-filed finding, read the **Autopilot trust** block (confidence + gates)
 - [ ] Promote only verified Autopilot findings you accept; delete or revise noise
 - [ ] Confirm Critical/High with a human read of the PoC
 

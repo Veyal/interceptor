@@ -33,6 +33,47 @@ func seedFlow(t *testing.T, s *Store, host, path, body string, tsMs int64) int64
 
 func peerBodiesDir(s *Store) string { return s.BodiesDir() }
 
+func TestMergePreviewMatchesFirstMergeCounts(t *testing.T) {
+	peerDir := t.TempDir()
+	peer, err := Open(peerDir)
+	if err != nil {
+		t.Fatalf("open peer: %v", err)
+	}
+	f1 := seedFlow(t, peer, "victim.test", "/a", "resp-a", 1000)
+	seedFlow(t, peer, "victim.test", "/b", "resp-b", 2000)
+	_, _ = peer.CreateFinding(&Finding{Severity: "High", Title: "IDOR", Target: "https://victim.test/a"})
+	_ = f1
+	peerDBPath := filepath.Join(peerDir, currentDBName)
+	peerBodies := peerBodiesDir(peer)
+	peer.Close()
+
+	local, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open local: %v", err)
+	}
+	defer local.Close()
+	seedFlow(t, local, "other.test", "/x", "resp-x", 500)
+
+	prev, err := local.MergePreview(peerDBPath, peerBodies, "alice")
+	if err != nil {
+		t.Fatalf("MergePreview: %v", err)
+	}
+	if prev.FlowsAdded != 2 || prev.FindingsAdded != 1 {
+		t.Fatalf("preview = %+v; want 2 flows / 1 finding", prev)
+	}
+	flows, _ := local.QueryFlows(100)
+	if len(flows) != 1 {
+		t.Fatalf("preview must not mutate; got %d flows", len(flows))
+	}
+	stats, err := local.MergeFrom(peerDBPath, peerBodies, "alice")
+	if err != nil {
+		t.Fatalf("MergeFrom: %v", err)
+	}
+	if stats.FlowsAdded != prev.FlowsAdded || stats.FindingsAdded != prev.FindingsAdded {
+		t.Fatalf("merge %+v != preview %+v", stats, prev)
+	}
+}
+
 func TestMergeFromUnionsAndIsIdempotent(t *testing.T) {
 	// Peer project with 2 flows + 1 finding referencing a flow.
 	peerDir := t.TempDir()

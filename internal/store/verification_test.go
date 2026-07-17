@@ -85,6 +85,36 @@ func TestFindingVerificationUpsert(t *testing.T) {
 
 // TestGetFindingVerificationMissing verifies a finding with no proof-record yields
 // sql.ErrNoRows (so callers can distinguish machine-proven from hand-set verified).
+func TestGetFindingIncludesVerification(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	fid, err := s.CreateFinding(&Finding{Severity: "High", Title: "SQLi", Source: "ai", Status: "verified"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SaveFindingVerification(&FindingVerification{
+		FindingID: fid, RunID: 7, VulnClass: "sqli-error", Gates: `{"differential":{"reproduced":true}}`,
+		ReproCount: 2, Confidence: 85, TS: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetFinding(fid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Verification == nil || got.Verification.Confidence != 85 || got.Verification.VulnClass != "sqli-error" {
+		t.Fatalf("verification = %+v", got.Verification)
+	}
+	listed, err := s.ListFindings("", "", "")
+	if err != nil || len(listed) != 1 || listed[0].Verification == nil || listed[0].Verification.Confidence != 85 {
+		t.Fatalf("list verification = %+v err=%v", listed, err)
+	}
+}
+
 func TestGetFindingVerificationMissing(t *testing.T) {
 	s, err := Open(t.TempDir())
 	if err != nil {

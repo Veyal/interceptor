@@ -1,5 +1,7 @@
 package store
 
+import "strings"
+
 // FindingVerification is the machine proof-record behind a `verified` Finding: the
 // concrete evidence the 4-gate verifier produced, distinguishing a machine-proven
 // finding from an operator's hand-set `verified` status. It is 1:1 with a Finding
@@ -63,4 +65,34 @@ func (s *Store) GetFindingVerification(findingID int64) (*FindingVerification, e
 		return nil, err
 	}
 	return &v, nil
+}
+
+// VerificationsForFindings batch-loads proof-records for many findings.
+// Findings without a machine verification are absent from the map.
+func (s *Store) VerificationsForFindings(ids []int64) (map[int64]*FindingVerification, error) {
+	out := map[int64]*FindingVerification{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	ph := strings.TrimRight(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := s.db.Query(
+		`SELECT `+findingVerificationCols+` FROM finding_verification WHERE finding_id IN (`+ph+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var v FindingVerification
+		if err := rows.Scan(&v.ID, &v.FindingID, &v.RunID, &v.VulnClass, &v.Gates, &v.ReproCount,
+			&v.OOBToken, &v.BaselineFlow, &v.PayloadFlow, &v.Confidence, &v.TS); err != nil {
+			return nil, err
+		}
+		vv := v
+		out[v.FindingID] = &vv
+	}
+	return out, rows.Err()
 }
