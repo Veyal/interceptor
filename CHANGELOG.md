@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Dev-build fallback version advanced to the published `1.5.3`.**
+
 ## [1.5.3] - 2026-07-17
 
 ### Added
