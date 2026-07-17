@@ -216,6 +216,7 @@ func run() error {
 	pm := &proxyManager{}
 	cm := &controlManager{}
 	hub := control.New(st, eng, ca, pm, sc)
+	defer hub.Close()
 	hub.SetControlRebinder(cm)
 	// User-authored Starlark scanner checks are global (shared across projects).
 	checksDir := filepath.Join(globalDir, "checks")
@@ -346,12 +347,24 @@ func run() error {
 
 	log.Println("shutting down…")
 	close(retentionStop)
-	hub.StopTunnel() // tear down any Cloudflare quick tunnel child process
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	cm.Shutdown(ctx)
-	pm.Shutdown(ctx)
+	shutdownRuntime(ctx, cm, hub, pm)
 	return nil
+}
+
+type runtimeShutdowner interface {
+	Shutdown(context.Context)
+}
+
+type runtimeCloser interface {
+	Close()
+}
+
+func shutdownRuntime(ctx context.Context, control runtimeShutdowner, hub runtimeCloser, proxy runtimeShutdowner) {
+	control.Shutdown(ctx)
+	hub.Close()
+	proxy.Shutdown(ctx)
 }
 
 // controlManager owns the control-plane listener and supports runtime rebinding.

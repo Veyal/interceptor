@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - **Backend reliability preflight and persistence.** Autopilot now requires an enabled include scope rule, readiness reports AI-provider and scope prerequisites, body GC coordinates with in-flight flow publication, sender capture errors clean up temporary files, and full-project imports/merges verify body hashes and use rollback-safe staged overwrite.
+- **Backend network reliability.** Chained HTTP(S) proxies now normalize scheme case and apply default ports, TLS, SNI, authentication, and bounded CONNECT deadlines on custom paths; concurrent TLS auto-bypass updates retain and persist the complete host list; quick-tunnel URL notifications are generation-ordered, stale-safe, and reentrant across stop/restart, with shutdown rejecting new starts and reaping child processes after the control server closes.
 
 ## [1.5.4] - 2026-07-17
 

@@ -117,7 +117,8 @@ type Hub struct {
 	mcpSrv      *mcp.Server // lazily built streamable-HTTP MCP front end (POST /mcp)
 	mcpKeysSeen atomic.Bool // last-known "API keys exist" — mcpAuthorized fails closed on a store error once true
 
-	tun *tunnel.Manager // Cloudflare quick-tunnel manager (remote sharing)
+	tun             tunnelManager // Cloudflare quick-tunnel manager (remote sharing)
+	tunnelCloseOnce sync.Once
 
 	as asState // active-scan state (armed/running/findings)
 
