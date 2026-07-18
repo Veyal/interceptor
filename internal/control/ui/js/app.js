@@ -411,6 +411,7 @@ function exactModifiers(e,{mod=false,shift=false,alt=false}={}){
   return !!(e.ctrlKey||e.metaKey)===mod&&!!e.shiftKey===shift&&!!e.altKey===alt;
 }
 function isModShortcut(e,key){return e.key.toLowerCase()===key.toLowerCase()&&exactModifiers(e,{mod:true});}
+function isModSpace(e){return (e.key===' '||e.code==='Space')&&exactModifiers(e,{mod:true});}
 function isPlainShortcut(e,key,{shift=false}={}){return e.key.toLowerCase()===key.toLowerCase()&&exactModifiers(e,{shift});}
 function isHelpShortcut(e){return e.key==='?'&&!e.ctrlKey&&!e.metaKey&&!e.altKey;}
 function isTypingTarget(t){
@@ -421,6 +422,7 @@ function isTypingTarget(t){
 function workflowShortcutBlocked(){return MODAL_IDS.some(id=>{const m=$('#'+id);return m&&m.style.display==='flex';});}
 // Flow send shortcuts apply only where History selection is the focus — not Settings, Repeater, etc.
 function flowSendShortcutAllowed(){return activePanel()==='proxy';}
+function sendSelectedFlow(to){const f=selectedFlow();if(f){(to==='intruder'?sendToIntruder:sendToRepeater)(f);return true;}return false;}
 const GO_MNEMONICS={o:'autopwn',p:'proxy',i:'intercept',r:'repeater',u:'intruder',s:'scanner',m:'map',f:'findings',n:'notes',a:'activity',t:'settings'};
 let gotoPending=false,gotoTimer=null;
 function resetGoto(){gotoPending=false;clearTimeout(gotoTimer);}
@@ -430,6 +432,8 @@ document.addEventListener('keydown',e=>{
   if(isModShortcut(e,'k')){e.preventDefault();cmdk.open?cmdkClose():cmdkOpen();return;}
   if(cmdk.open)return; // the palette handles its own keys
   if(e.key==='Escape'){resetGoto();return;}
+  // Repeater Send works while the request editor is focused (caret in textarea).
+  if(activePanel()==='repeater'&&(isModSpace(e)||isModShortcut(e,'Enter'))){e.preventDefault();repSend();return;}
   if(typing)return;
   if(isHelpShortcut(e)){e.preventDefault();openModal($('#shortcutsModal'));return;} // ?: keyboard cheatsheet
   if(workflowShortcutBlocked())return;
@@ -442,10 +446,12 @@ document.addEventListener('keydown',e=>{
   if(isPlainShortcut(e,'g')){
     e.preventDefault();gotoPending=true;gotoTimer=setTimeout(resetGoto,1200);return;
   }
-  if(activePanel()==='repeater'&&isModShortcut(e,'Enter')){e.preventDefault();repSend();return;}
-  if(flowSendShortcutAllowed()&&(isPlainShortcut(e,'r')||isPlainShortcut(e,'i'))){
-    const f=selectedFlow();
-    if(f){e.preventDefault();(e.key==='r'?sendToRepeater:sendToIntruder)(f);}
+  if(flowSendShortcutAllowed()&&(isModShortcut(e,'r')||isPlainShortcut(e,'r'))){
+    if(sendSelectedFlow('repeater'))e.preventDefault();
+    return;
+  }
+  if(flowSendShortcutAllowed()&&(isModShortcut(e,'i')||isPlainShortcut(e,'i'))){
+    if(sendSelectedFlow('intruder'))e.preventDefault();
     return;
   }
   if(activePanel()==='intercept'&&(isPlainShortcut(e,'f')||isPlainShortcut(e,'d'))){

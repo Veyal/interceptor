@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 - **Dev-build fallback version advanced to the published `1.5.4`.**
 - **Keyboard-first UI foundation.** Added a shared high-contrast focus ring and reduced-motion behavior, stack-correct dialog focus management, accessible command-palette and custom-select keyboard semantics, and panel-scoped shortcuts that do not override editing keystrokes.
+- **Softer Repeater/Intruder focus cue.** Full-bleed editors use a thin inset accent bar instead of the loud outer focus outline; Ctrl/⌘+R / +I (and plain `r`/`i`) send Proxy flows again, and Ctrl/⌘+Space (plus Ctrl/⌘+Enter) sends from Repeater even while the editor is focused.
+- **Message codecs list.** Codecs sidebar rows reuse the Checks list layout (title, id/status badges, inset selection) instead of unstyled history `.h` stubs; the project path hint truncates.
+- **Message codecs editor parity.** Codecs modal matches Checks: filter, Code / Describe / Docs panes, status out, `/api/codecs/reference`, and BYO-key `POST /api/ai/codecs/generate`.
+- **Findings empty state.** Empty Findings uses a full-width centered empty state with New / Ask AI actions instead of a cramped list column plus a redundant “nothing selected” detail pane.
 - **Safer scanner and report journeys.** Scanner targets use an exhaustive distinct in-scope host inventory, bounded rescans reconcile only scanned/out-of-scope/orphaned passive issues while preserving older unscanned results and curated Findings, and report exports default to actionable/open/verified/fixed statuses with explicit status selection.
 - **Capability parity and docs truth.** MCP gains response forward/drop plus rule update/delete and full Intruder Race/repeat parameters; Settings exposes HAR import/export; `/openapi.json` is labeled as a route discovery index; AI provider docs cover Anthropic/OpenRouter/GLM/Zhipu/OpenAI; Intruder UI uses “Race / repeat”; and stale historical audit/roadmap docs are marked as snapshots.
 

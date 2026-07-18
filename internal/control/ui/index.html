@@ -260,7 +260,7 @@
       <select id="repMethod" class="rep-method" aria-label="HTTP method"><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option></select>
       <input id="repUrl" class="repurl" aria-label="Request URL" placeholder="https://api.example.com/v1/resource" spellcheck="false">
       <button class="btn" id="repHistToggle" title="Show/hide this tab's send history">⟲ History</button>
-      <button class="btn btn-primary" id="repSend" title="Send (Ctrl/⌘+Enter)">Send ▸<span class="kbd">Ctrl/⌘+Enter</span></button>
+      <button class="btn btn-primary" id="repSend" title="Send (Ctrl/⌘+Space or Ctrl/⌘+Enter)">Send ▸<span class="kbd">Ctrl/⌘+Space</span></button>
     </div>
     <div class="rep-work">
       <aside id="repHistory" class="rep-hist" style="display:none"></aside>
@@ -410,13 +410,17 @@ Content-Type: application/json
       </div>
       <div id="findTagFilter" class="find-tag-filter" aria-label="Filter findings by tag"></div>
     </div>
-    <div id="scanFindingsView" class="find-view">
+    <div id="scanFindingsView" class="find-view is-empty">
       <div id="findList" class="scan-list">
-        <div class="state-empty">
+        <div class="state-empty find-empty">
           <div class="state-empty-icon">🔎</div>
           <div class="state-empty-title">No findings yet</div>
-          <p class="state-empty-hint">Create one, or the AI records them as it tests.</p>
-          <p class="state-empty-hint state-empty-cmdk">Wrapping up? File PoCs here, then <b>Export report</b> — <a href="https://github.com/Veyal/interseptor/blob/main/docs/engagement-closeout.md" target="_blank" rel="noopener">open the engagement close-out checklist</a>.</p>
+          <p class="state-empty-hint">File a vulnerability with PoC evidence — manually, from Autopilot, or by asking AI to triage history.</p>
+          <div class="find-empty-actions">
+            <button type="button" class="btn btn-primary" id="findEmptyNew">＋ New finding</button>
+            <button type="button" class="btn accent" id="findEmptyAskAi" data-ai-ui>✨ Ask AI for findings</button>
+          </div>
+          <p class="state-empty-hint state-empty-cmdk">Later: <b>Export report</b> · <a href="https://github.com/Veyal/interseptor/blob/main/docs/engagement-closeout.md" target="_blank" rel="noopener">engagement close-out checklist</a></p>
         </div>
       </div>
       <div id="findDetail" class="find-detail">
@@ -1101,7 +1105,9 @@ Content-Type: application/json
         <div class="sc-card"><div class="sc-keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>A</kbd></div><p class="sc-desc">Select or clear all shown flows</p></div>
         <h3 class="sc-section">Send &amp; replay</h3>
         <div class="sc-card"><div class="sc-keys"><kbd>r</kbd><kbd>i</kbd></div><p class="sc-desc">Send selected Proxy flow → Repeater / Intruder</p></div>
-        <div class="sc-card"><div class="sc-keys"><kbd>Ctrl/⌘</kbd><kbd>Enter</kbd></div><p class="sc-desc">Send the current Repeater request</p></div>
+        <div class="sc-card"><div class="sc-keys"><kbd>Ctrl/⌘</kbd><kbd>R</kbd></div><p class="sc-desc">Send selected Proxy flow → Repeater</p></div>
+        <div class="sc-card"><div class="sc-keys"><kbd>Ctrl/⌘</kbd><kbd>I</kbd></div><p class="sc-desc">Send selected Proxy flow → Intruder</p></div>
+        <div class="sc-card"><div class="sc-keys"><kbd>Ctrl/⌘</kbd><kbd>Space</kbd></div><p class="sc-desc">Send the current Repeater request (also Ctrl/⌘+Enter)</p></div>
         <h3 class="sc-section">Tools</h3>
         <div class="sc-card"><div class="sc-keys">📂</div><p class="sc-desc">Intruder and Decoder support <b>Load file</b> for payloads, templates, and blobs</p></div>
         <div class="sc-card"><div class="sc-keys">Map ▾</div><p class="sc-desc">Search scope: path/host, headers, body, or all — body search is server-side and bounded</p></div>
@@ -1184,23 +1190,48 @@ Content-Type: application/json
     </div>
     <div class="checks-work">
       <div class="checks-sidebar">
-        <div id="codecsList" style="flex:1;overflow:auto"></div>
+        <div class="checks-search-wrap">
+          <input id="codecsSearch" class="btn checks-search" placeholder="🔎 filter codecs…" aria-label="Filter codecs" spellcheck="false">
+        </div>
+        <div id="codecsList" class="codecs-list" style="flex:1;overflow:auto" role="listbox" aria-label="Message codecs"></div>
         <div style="padding:8px;border-top:1px solid var(--line)">
           <button class="btn btn-primary" id="codecNew" style="width:100%">+ New codec</button>
-          <div class="hint" id="codecsDirHint" style="margin-top:8px"></div>
+          <div class="hint codecs-dir-hint" id="codecsDirHint" style="margin-top:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
         </div>
       </div>
       <div class="checks-editor">
         <div class="row" style="padding:8px 12px;gap:8px;border-bottom:1px solid var(--line);flex:none">
-          <input id="codecId" class="btn btn-field" style="width:210px" aria-label="Codec ID" placeholder="codec-id">
+          <input id="codecId" class="btn btn-field" style="width:210px" aria-label="Codec ID" placeholder="codec-id (letters, - or _)">
           <button class="btn" id="codecTest">Test ▸</button>
           <button class="btn btn-primary" id="codecSave">Save</button>
           <div class="spacer"></div>
           <button class="btn" id="codecDelete" style="color:var(--red)">🗑 Delete</button>
         </div>
-        <p class="hint" style="padding:8px 12px;margin:0;border-bottom:1px solid var(--line)">Project-scoped Starlark encrypt/decrypt for app payloads. Display-only unless <code>apply_on_send</code>. Never runs on the proxy hot path.</p>
-        <textarea id="codecSrc" class="rep-edit" spellcheck="false" style="border-top:none;flex:1;min-height:280px"></textarea>
-        <pre id="codecTestOut" style="margin:0;padding:10px 12px;border-top:1px solid var(--line);max-height:160px;overflow:auto;white-space:pre-wrap" class="hint">Test against the selected History flow (or latest).</pre>
+        <div class="row checks-mode-bar" style="padding:6px 12px;gap:10px;border-bottom:1px solid var(--line);flex:none">
+          <div class="seg" id="codecModeSeg" role="tablist" aria-label="Codec editor mode">
+            <button type="button" class="on" data-mode="code" role="tab" aria-selected="true">Code</button>
+            <button type="button" data-mode="describe" data-ai-ui role="tab" aria-selected="false">✨ Describe</button>
+            <button type="button" data-mode="docs" role="tab" aria-selected="false">Docs</button>
+          </div>
+          <span class="hint" id="codecFlowHint">Test uses selected flow or latest capture</span>
+        </div>
+        <div id="codecPaneCode" class="check-pane">
+          <textarea id="codecSrc" class="rep-edit" spellcheck="false" style="border-top:none" placeholder="meta = {&#10;    &quot;id&quot;: &quot;aes-content-field&quot;,&#10;    &quot;title&quot;: &quot;JSON content&quot;,&#10;    &quot;apply_on_send&quot;: False,&#10;}&#10;&#10;def match(flow, side):&#10;    return True&#10;&#10;def decode(flow, side, raw):&#10;    return raw"></textarea>
+        </div>
+        <div id="codecPaneDescribe" class="check-pane" data-ai-ui style="display:none">
+          <div class="check-describe-wrap">
+            <p class="hint" style="margin:0 0 8px;line-height:1.5">Describe the wire format / crypto in plain English. AI writes a Starlark message codec, then runs <b>Test</b> against your selected flow.</p>
+            <textarea id="codecDescribe" class="rep-edit" spellcheck="true" placeholder="Example: JSON bodies have a content field = 32-char prefix + Base64(AES-ECB(plaintext)). Decrypt with key = SHA-512(prefix + SECRET)[:32]. Display-only."></textarea>
+            <div class="row" style="margin-top:8px;gap:8px">
+              <button class="btn btn-primary" id="codecAiGen">✨ Generate &amp; test</button>
+              <span class="hint" id="codecAiStatus"></span>
+            </div>
+          </div>
+        </div>
+        <div id="codecPaneDocs" class="check-pane" style="display:none">
+          <div id="codecDocs" class="check-docs"><span class="hint">Loading reference…</span></div>
+        </div>
+        <div id="codecOut"><span class="hint">Test runs against the selected flow (or the latest). Save validates &amp; writes the codec under this project.</span></div>
       </div>
     </div>
   </div>

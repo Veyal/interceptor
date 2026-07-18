@@ -47,12 +47,18 @@
 html,body{height:100%}
 body{background:var(--grad-bg);color:var(--fg);font-family:var(--mono);font-size:13px;display:flex;flex-direction:column;overflow:hidden;min-width:1024px}
 button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit;background:none;border:none;transition:border-color 0.2s, background 0.2s, box-shadow 0.2s}
-/* Shared keyboard focus ring, including full-bleed text editors. The inspector
-   splitter keeps its specialized high-contrast resize treatment below. */
-:where(button,a[href],input,select,textarea,summary,[contenteditable="true"],[role="button"],[role="option"],[role="menuitem"],[tabindex]):not(#inspectSplitter):focus-visible{
+/* Shared keyboard focus ring for controls. Full-bleed editors (.rep-edit /
+   .notes-edit) use a soft inset accent instead — a thick outer outline looks
+   harsh on large Repeater/Intruder panes. The inspector splitter keeps its
+   specialized high-contrast resize treatment below. */
+:where(button,a[href],input:not(.rep-edit):not(.notes-edit),select,textarea:not(.rep-edit):not(.notes-edit),summary,[contenteditable="true"],[role="button"],[role="option"],[role="menuitem"],[tabindex]):not(#inspectSplitter):focus-visible{
   outline:3px solid var(--focus-ring);
   outline-offset:2px;
   box-shadow:0 0 0 2px var(--bg);
+}
+.rep-edit:focus-visible,.notes-edit:focus-visible{
+  outline:none;
+  box-shadow:inset 3px 0 0 var(--accent);
 }
 ::-webkit-scrollbar{width:8px;height:8px}
 .row{display:flex;align-items:center}
@@ -744,6 +750,11 @@ textarea.raw{width:100%;height:200px;resize:vertical;background:var(--bg);color:
 .find-tag-chips{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
 .find-tag-chip,.find-tag-filter .find-tag-chip{font-family:var(--mono);font-size:11px}
 .find-tag-filter{display:flex;flex-wrap:wrap;gap:4px;padding:4px 12px 8px;border-bottom:1px solid var(--line)}
+.find-tag-filter:empty{display:none;padding:0;border:none}
+.find-view.is-empty .scan-list{width:auto;flex:1;border-right:none;display:flex}
+.find-view.is-empty .find-detail{display:none}
+.find-empty{width:100%;max-width:520px;margin:0 auto}
+.find-empty-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:6px}
 .find-tag-filter .find-tag-chip.on{background:var(--sel);border-color:var(--accent)}
 .find-tags-inline{font-family:var(--mono);color:var(--fg2)}
 .find-groupby{display:inline-flex;align-items:center;gap:4px;margin-left:4px;user-select:none}
@@ -1008,6 +1019,10 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--bg2);border:1px soli
 .checks-row .checks-title{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 .checks-row .checks-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:4px}
 .checks-cat{font-size:9px;color:var(--fg3);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+/* Message codecs sidebar reuses checks-row; keep a dedicated hook for empty/list spacing. */
+.codecs-list .codecs-row{cursor:pointer}
+.codecs-list .codecs-row:hover,.codecs-list .codecs-row.sel{background:var(--bg3)}
+.codecs-dir-hint{max-width:100%}
 .checks-work{flex:1;display:flex;min-height:0;overflow:hidden}
 .checks-editor{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
 .check-pane{flex:1;display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden}
@@ -1019,7 +1034,7 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--bg2);border:1px soli
 .check-docs th,.check-docs td{border:1px solid var(--line);padding:5px 8px;text-align:left}
 .check-docs th{background:var(--bg1)}
 #checkSrc{flex:1;min-height:420px;font-size:12.5px;line-height:1.55}
-#checkOut{flex:none;min-height:110px;max-height:34vh;overflow:auto;border-top:1px solid var(--line);padding:10px 12px;font-size:11.5px}
+#checkOut,#codecOut{flex:none;min-height:110px;max-height:34vh;overflow:auto;border-top:1px solid var(--line);padding:10px 12px;font-size:11.5px}
 .check-status{border-left:3px solid var(--line2);border-radius:6px;background:var(--bg1);padding:8px 10px;margin-bottom:8px}
 .check-status:last-child{margin-bottom:0}
 .check-status-error{border-color:var(--red)}

@@ -49,11 +49,18 @@ func TestUIFoundationFocusAndReducedMotionContracts(t *testing.T) {
 		"animation:none!important",
 		"transition:none!important",
 	)
-	for _, line := range strings.Split(css, "\n") {
-		if strings.Contains(line, "outline:none") && !strings.Contains(line, "#inspectSplitter") {
-			t.Errorf("interactive app style still suppresses focus outline: %s", line)
+	lines := strings.Split(css, "\n")
+	for i, line := range lines {
+		if !strings.Contains(line, "outline:none") || strings.Contains(line, "#inspectSplitter") {
+			continue
 		}
+		// Full-bleed editors intentionally drop the outer ring in favor of an inset accent.
+		if i > 0 && (strings.Contains(lines[i-1], ".rep-edit:focus-visible") || strings.Contains(lines[i-1], ".notes-edit:focus-visible")) {
+			continue
+		}
+		t.Errorf("interactive app style still suppresses focus outline: %s", line)
 	}
+	requireUIContains(t, css, ".rep-edit:focus-visible,.notes-edit:focus-visible", "inset 3px 0 0 var(--accent)")
 	if strings.Contains(readUIAsset(t, "js/app.js"), "outline:none") {
 		t.Error("command palette still suppresses its inline focus outline")
 	}
@@ -167,10 +174,14 @@ func TestUIFoundationShortcutContract(t *testing.T) {
 		"if(gotoPending)",
 		"function exactModifiers(e,",
 		"function isModShortcut(e,key)",
+		"function isModSpace(e)",
 		"function isPlainShortcut(e,key",
 		"function isHelpShortcut(e)",
 		"isModShortcut(e,'k')",
 		"isModShortcut(e,'Enter')",
+		"isModSpace(e)",
+		"isModShortcut(e,'r')",
+		"isModShortcut(e,'i')",
 		"isHelpShortcut(e)",
 		`closest?.('[role="combobox"],[role="listbox"]')`,
 		"if(gotoPending&&(typing||hasAnyModifier(e)))resetGoto()",
@@ -180,13 +191,22 @@ func TestUIFoundationShortcutContract(t *testing.T) {
 	)
 	requireUIRegex(t, app, `function exactModifiers\(e,\{mod=false,shift=false,alt=false\}=\{\}\)\{[^}]*ctrlKey\|\|e\.metaKey[^}]*shiftKey[^}]*altKey`)
 	requireUIRegex(t, app, `function isHelpShortcut\(e\)\{return e\.key==='\?'&&!e\.ctrlKey&&!e\.metaKey&&!e\.altKey;\}`)
+	// Repeater Send (Mod+Space / Mod+Enter) must run before the typing early-return.
+	requireUIRegex(t, app, `(?s)if\(activePanel\(\)==='repeater'&&\(isModSpace\(e\)\|\|isModShortcut\(e,'Enter'\)\)\).*?if\(typing\)return`)
 	requireUIRegex(t, app, `(?s)if\(gotoPending&&\(typing\|\|hasAnyModifier\(e\)\)\)resetGoto\(\).*?if\(typing\)return`)
 	requireUIContains(t, index,
 		`<kbd>g</kbd><kbd>p</kbd>`,
 		`<kbd>r</kbd><kbd>i</kbd>`,
-		`Ctrl/⌘+Enter`,
+		`<kbd>Ctrl/⌘</kbd><kbd>R</kbd>`,
+		`<kbd>Ctrl/⌘</kbd><kbd>I</kbd>`,
+		`<kbd>Ctrl/⌘</kbd><kbd>Space</kbd>`,
 		`title="Forward (F)"`,
 		`title="Drop (D)"`,
+	)
+	css := readUIAsset(t, "app.css")
+	requireUIContains(t, css,
+		".rep-edit:focus-visible,.notes-edit:focus-visible",
+		"inset 3px 0 0 var(--accent)",
 	)
 	for _, removed := range []string{
 		"mod&&e.key.toLowerCase()==='b'",
@@ -197,7 +217,6 @@ func TestUIFoundationShortcutContract(t *testing.T) {
 		"!mod&&(e.key==='r'||e.key==='i')",
 		"!mod&&(e.key==='f'||e.key==='d')",
 		"isPlainShortcut(e,'?',{shift:true})",
-		"Ctrl+Space",
 		"Ctrl+Shift+F",
 		"Ctrl+D",
 	} {

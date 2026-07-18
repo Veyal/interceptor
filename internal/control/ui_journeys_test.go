@@ -122,4 +122,43 @@ func TestUIJourneyReadinessProjectScannerReportInterceptAndShareContracts(t *tes
 		`id="scanRescanState"`,
 		`id="sharePrereq"`,
 	)
+	requireUIContains(t, index, `id="findEmptyNew"`, `id="findEmptyAskAi"`, `find-view is-empty`, `class="state-empty find-empty"`)
+	requireUIContains(t, findings, "findingsEmptyHTML(", "setFindingsViewEmpty(", "findEmptyNew", "is-empty")
+}
+
+func TestUIJourneyCodecsListUsesChecksRowLayout(t *testing.T) {
+	index := readUIAsset(t, "index.html")
+	codecs := executableJS(readUIAsset(t, "js/codecs.js"))
+	css := readUIAsset(t, "app.css")
+	requireUIContains(t, index,
+		`id="codecsList"`,
+		`class="codecs-list"`,
+		`id="codecsDirHint"`,
+		`id="codecModeSeg"`,
+		`id="codecPaneCode"`,
+		`id="codecPaneDescribe"`,
+		`id="codecPaneDocs"`,
+		`id="codecDocs"`,
+		`id="codecOut"`,
+		`id="codecsSearch"`,
+	)
+	requireUIContains(t, codecs,
+		"checks-row checks-pick codecs-row",
+		"checks-title",
+		"checks-meta",
+		"wireRowKey(",
+		"re-encode on send",
+		"codecsDirLabel(",
+		"codecSetMode(",
+		"/api/codecs/reference",
+		"/api/ai/codecs/generate",
+		"loadCodecDocs(",
+	)
+	if strings.Contains(codecs, `class="h${`) || strings.Contains(codecs, `".h${codecSel`) {
+		t.Error("codecs list still renders unstyled history .h rows")
+	}
+	if strings.Contains(index, `id="codecTestOut"`) {
+		t.Error("codecs modal still uses legacy codecTestOut instead of Checks-style panes")
+	}
+	requireUIContains(t, css, ".codecs-list .codecs-row", ".codecs-dir-hint", "#codecOut")
 }
