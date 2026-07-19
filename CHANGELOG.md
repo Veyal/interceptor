@@ -9,8 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Fixed
-- **UI/UX gaps operators notice.** Version badge links to `Veyal/interseptor` (not the old `interceptor` 404); Intercept `f`/`d` work while editing held raw; Map Discovery requires a real host (no `app.example.com` copy trap); auto retention policy controls in Settings → Project; session-only intercept warning; Findings empty copy; AI-off hint; DSC badge labeled legacy; History `h2` chip; legacy `discover` tab restore → Map.
+## [1.6.0] - 2026-07-19
 
 ### Added
 - **Project vault (Tailscale-friendly backups).** New `interseptor vault` process stores full-project zip revisions under a configurable dir (default `~/.interseptor/vault`, `--keep` N). Bearer tokens (`iv_…`); bootstrap writes `vault.token`. Control plane proxies backup/list/import/merge via `/api/vault/*` and machine-wide `~/.interseptor/vault-client.json`. UI: Settings → API → Share → Project Vault. MCP: `vault_list` / `vault_backup` / `vault_import` / `vault_merge`. Docs: [`docs/vault.md`](docs/vault.md).
@@ -30,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Capability parity and docs truth.** MCP gains response forward/drop plus rule update/delete and full Intruder Race/repeat parameters; Settings exposes HAR import/export; `/openapi.json` is labeled as a route discovery index; AI provider docs cover Anthropic/OpenRouter/GLM/Zhipu/OpenAI; Intruder UI uses “Race / repeat”; and stale historical audit/roadmap docs are marked as snapshots.
 
 ### Fixed
+- **UI/UX gaps operators notice.** Version badge links to `Veyal/interseptor` (not the old `interceptor` 404); Intercept `f`/`d` work while editing held raw; Map Discovery requires a real host (no `app.example.com` copy trap); auto retention policy controls in Settings → Project; session-only intercept warning; Findings empty copy; AI-off hint; DSC badge labeled legacy; History `h2` chip; legacy `discover` tab restore → Map.
 - **End-to-end reliability UX.** Added visible inspector replay actions and keyboard context menus, resilient project-scoped setup initialization with readiness evidence, explicitly project-global mobile diagnosis guidance, retryable stale/error states, session-only intercept enablement with persistent warnings, precise project-switch rejection handling, and prerequisite-gated sharing.
 - **Backend reliability preflight and persistence.** Autopilot now requires an enabled include scope rule, readiness reports AI-provider and scope prerequisites, body GC coordinates with in-flight flow publication, sender capture errors clean up temporary files, and full-project imports/merges verify body hashes and use rollback-safe staged overwrite.
 - **Backend network reliability.** Chained HTTP(S) proxies now normalize scheme case and apply default ports, TLS, SNI, authentication, and bounded CONNECT deadlines on custom paths; concurrent TLS auto-bypass updates retain and persist the complete host list; quick-tunnel URL notifications are generation-ordered, stale-safe, and reentrant across stop/restart, with shutdown rejecting new starts and reaping child processes after the control server closes.
