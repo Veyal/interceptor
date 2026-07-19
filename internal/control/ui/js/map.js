@@ -662,6 +662,7 @@ $('#mapDomain') && ($('#mapDomain').onchange = e => {
   if(mapState.domain) mapState.collapsed.clear();
   else mapCollapseHosts();
   mapState._needFit = true;
+  if($('#mapDiscoveryPanel')&&!$('#mapDiscoveryPanel').hidden) refreshMapDiscoveryPanel();
   if(mapUsesServerSearch()) loadEndpoints();
   else renderMap();
 });
@@ -699,11 +700,21 @@ $('#mapHideNoise')&&($('#mapHideNoise').onclick=()=>{
   syncMapHideNoise();
   loadEndpoints();
 });
+function mapDiscoveryHost(){
+  const d=(mapState.domain&&String(mapState.domain).trim())||'';
+  if(d) return d;
+  // Prefer the first host currently in the map inventory.
+  const eps=mapState.eps||[];
+  for(const e of eps){ if(e&&e.host) return e.host; }
+  return '';
+}
 function mapDiscoveryCmds(){
   const proxy=state.proxyAddr||'127.0.0.1:8080';
-  const host=(mapState.domain&&String(mapState.domain).trim())||'https://app.example.com';
+  const host=mapDiscoveryHost();
+  if(!host) return {ok:false, reason:'Select a domain in the Map filter (or capture traffic first).'};
   const base=host.includes('://')?host:('https://'+host);
   return {
+    ok:true,
     ferox:`feroxbuster -u ${base} -p http://${proxy} --dont-extract-links -t 20`,
     ffuf:`ffuf -u ${base}/FUZZ -w wordlist.txt -x http://${proxy} -mc all -fc 404`,
   };
@@ -711,6 +722,11 @@ function mapDiscoveryCmds(){
 function refreshMapDiscoveryPanel(){
   const cmds=mapDiscoveryCmds();
   const f=$('#mapDscFerox'), u=$('#mapDscFfuf');
+  if(!cmds.ok){
+    if(f) f.textContent=cmds.reason;
+    if(u) u.textContent='';
+    return;
+  }
   if(f) f.textContent=cmds.ferox;
   if(u) u.textContent=cmds.ffuf;
 }
@@ -720,8 +736,13 @@ $('#mapDiscoveryHelp')&&($('#mapDiscoveryHelp').onclick=()=>{
   if(show){ p.hidden=false; p.style.display=''; refreshMapDiscoveryPanel(); $('#mapDiscoveryHelp').textContent='Discovery ▾'; }
   else { p.hidden=true; p.style.display='none'; $('#mapDiscoveryHelp').textContent='Discovery ▸'; }
 });
-$('#mapDscCopyFerox')&&($('#mapDscCopyFerox').onclick=()=>copyText(mapDiscoveryCmds().ferox,'ferox command copied'));
-$('#mapDscCopyFfuf')&&($('#mapDscCopyFfuf').onclick=()=>copyText(mapDiscoveryCmds().ffuf,'ffuf command copied'));
+function copyMapDiscovery(which){
+  const cmds=mapDiscoveryCmds();
+  if(!cmds.ok){ toast(cmds.reason); refreshMapDiscoveryPanel(); return; }
+  copyText(cmds[which], which==='ferox'?'ferox command copied':'ffuf command copied');
+}
+$('#mapDscCopyFerox')&&($('#mapDscCopyFerox').onclick=()=>copyMapDiscovery('ferox'));
+$('#mapDscCopyFfuf')&&($('#mapDscCopyFfuf').onclick=()=>copyMapDiscovery('ffuf'));
 $('#mapCollapseIdentical')&&($('#mapCollapseIdentical').onclick=()=>{
   mapState.collapseIdentical=!mapState.collapseIdentical;
   mapState.expandedClusters.clear();

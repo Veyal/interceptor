@@ -682,9 +682,26 @@ if($('#loginMacroTest'))$('#loginMacroTest').onclick=async()=>{
 export let retentionStats=null; // cached from last fetch
 export let retentionLoaded=false; // lazy: load on first show
 
+export async function loadRetentionPolicy(){
+  const hint=$('#retentionPolicyHint');
+  try{
+    const p=await api('/api/flows/retention');
+    const age=$('#retMaxAge'), flows=$('#retMaxFlows');
+    if(age) age.value=String(p.maxAgeHours||0);
+    if(flows) flows.value=String(p.maxFlows||0);
+    if(hint){
+      const parts=[];
+      if(p.maxAgeHours>0) parts.push('drop flows older than '+p.maxAgeHours+'h');
+      if(p.maxFlows>0) parts.push('keep newest '+p.maxFlows+' flows');
+      hint.textContent=parts.length?('Auto: '+parts.join(' · ')+' (every ~30m)'):'Auto policy off — set max age and/or max flows above.';
+    }
+  }catch(e){ if(hint) hint.textContent=e.message||''; }
+}
+
 export async function loadRetention(){
   const body=$('#retentionBody');
   if(body)body.innerHTML='<tr><td colspan="5" class="hint" style="padding:10px 8px">Loading…</td></tr>';
+  loadRetentionPolicy();
   try{
     const d=await api('/api/hosts/stats');
     retentionStats=d;
@@ -797,6 +814,23 @@ $('#retGc').onclick=async()=>{
     loadRetention();
   }catch(e){toast('gc: '+e.message);}
 };
+
+$('#retPolicySave')&&($('#retPolicySave').onclick=async()=>{
+  const maxAgeHours=Number(($('#retMaxAge')||{}).value||0);
+  const maxFlows=Number(($('#retMaxFlows')||{}).value||0);
+  try{
+    await api('/api/flows/retention',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({maxAgeHours,maxFlows})});
+    toast('auto retention saved');
+    loadRetentionPolicy();
+  }catch(e){toast(e.message);}
+});
+$('#retPolicyRun')&&($('#retPolicyRun').onclick=async()=>{
+  try{
+    const r=await api('/api/flows/retention/run',{method:'POST'});
+    toast('retention run · deleted '+(r.deleted||0)+' flow'+(r.deleted===1?'':'s'));
+    loadRetention();loadFlows();
+  }catch(e){toast(e.message);}
+});
 
 // select-all checkbox for retention table
 $('#retSelectAll')&&($('#retSelectAll').onclick=function(){

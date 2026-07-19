@@ -93,6 +93,8 @@ function restoreTab(){
     // It is now its own top-level tab — redirect old saved state to it.
     if(id==='scanner'&&localStorage.getItem('scanSub')==='findings'){id='findings';localStorage.setItem('tab','findings');localStorage.removeItem('scanSub');}
     if(id==='api'){id='settings';localStorage.setItem('tab','settings');}
+    // Legacy Discover tab was removed — guided discovery lives under Map.
+    if(id==='discover'){id='map';localStorage.setItem('tab','map');}
     if(!id||id==='proxy')return;
     const b=document.querySelector('.tab[data-tab="'+id+'"]');if(b)b.click();
     if(id==='settings'&&localStorage.getItem('setSec')==='api'){document.querySelector('#setNav button[data-sec="api"]')?.click();}
@@ -434,6 +436,10 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){resetGoto();return;}
   // Repeater Send works while the request editor is focused (caret in textarea).
   if(activePanel()==='repeater'&&(isModSpace(e)||isModShortcut(e,'Enter'))){e.preventDefault();repSend();return;}
+  // Intercept Forward/Drop must work while editing held raw (the normal path).
+  if(activePanel()==='intercept'&&state.heldSel&&(isPlainShortcut(e,'f')||isPlainShortcut(e,'d'))){
+    e.preventDefault();$(e.key.toLowerCase()==='d'?'#dropBtn':'#forwardBtn').click();return;
+  }
   if(typing)return;
   if(isHelpShortcut(e)){e.preventDefault();openModal($('#shortcutsModal'));return;} // ?: keyboard cheatsheet
   if(workflowShortcutBlocked())return;
@@ -452,10 +458,6 @@ document.addEventListener('keydown',e=>{
   }
   if(flowSendShortcutAllowed()&&(isModShortcut(e,'i')||isPlainShortcut(e,'i'))){
     if(sendSelectedFlow('intruder'))e.preventDefault();
-    return;
-  }
-  if(activePanel()==='intercept'&&(isPlainShortcut(e,'f')||isPlainShortcut(e,'d'))){
-    if(state.heldSel){e.preventDefault();$(e.key==='d'?'#dropBtn':'#forwardBtn').click();}
     return;
   }
   if(activePanel()==='proxy'&&isPlainShortcut(e,'/')){const s=$('#fSearch');if(s){e.preventDefault();s.focus();}return;} // /: focus search

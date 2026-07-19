@@ -23,8 +23,8 @@ export function renderIntercept(){
   if(danger){
     danger.style.display=interceptDanger?'block':'none';
     danger.textContent=total
-      ?`INTERCEPT ACTIVE — ${total} request/response item${total===1?' is':'s are'} held until you explicitly Forward or Drop.`
-      :'INTERCEPT ACTIVE — matching traffic will be held until you explicitly Forward or Drop.';
+      ?`INTERCEPT ACTIVE — ${total} request/response item${total===1?' is':'s are'} held until you Forward or Drop. Off after restart (session-only).`
+      :'INTERCEPT ACTIVE — matching traffic will be held until you Forward or Drop. Off after restart (session-only).';
   }
   const badge=$('#heldBadge');if(badge){badge.style.display=total?'inline-block':'none';badge.textContent=total;}
   const ht=$('#heldTotal');if(ht){ht.style.display=total?'inline-block':'none';ht.textContent=total;}

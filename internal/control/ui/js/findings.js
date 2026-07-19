@@ -119,7 +119,7 @@ function findingsEmptyHTML() {
       <button type="button" class="btn btn-primary" id="findEmptyNew">＋ New finding</button>
       <button type="button" class="btn accent" id="findEmptyAskAi" data-ai-ui>✨ Ask AI for findings</button>
     </div>
-    <p class="state-empty-hint state-empty-cmdk">Later: <b>Export report</b> · <a href="https://github.com/Veyal/interseptor/blob/main/docs/engagement-closeout.md" target="_blank" rel="noopener">engagement close-out checklist</a></p>
+    <p class="state-empty-hint state-empty-cmdk">Use <b>Export report</b> in the toolbar when ready · <a href="https://github.com/Veyal/interseptor/blob/main/docs/engagement-closeout.md" target="_blank" rel="noopener">engagement close-out checklist</a></p>
   </div>`;
 }
 

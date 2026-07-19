@@ -193,8 +193,11 @@ func TestUIFoundationShortcutContract(t *testing.T) {
 	requireUIRegex(t, app, `function isHelpShortcut\(e\)\{return e\.key==='\?'&&!e\.ctrlKey&&!e\.metaKey&&!e\.altKey;\}`)
 	// Repeater Send (Mod+Space / Mod+Enter) must run before the typing early-return.
 	requireUIRegex(t, app, `(?s)if\(activePanel\(\)==='repeater'&&\(isModSpace\(e\)\|\|isModShortcut\(e,'Enter'\)\)\).*?if\(typing\)return`)
+	// Intercept Forward/Drop must also work while editing held raw.
+	requireUIRegex(t, app, `(?s)if\(activePanel\(\)==='intercept'&&state\.heldSel&&\(isPlainShortcut\(e,'f'\)\|\|isPlainShortcut\(e,'d'\)\)\).*?if\(typing\)return`)
 	requireUIRegex(t, app, `(?s)if\(gotoPending&&\(typing\|\|hasAnyModifier\(e\)\)\)resetGoto\(\).*?if\(typing\)return`)
 	requireUIContains(t, index,
+		`https://github.com/Veyal/interseptor/releases`,
 		`<kbd>g</kbd><kbd>p</kbd>`,
 		`<kbd>r</kbd><kbd>i</kbd>`,
 		`<kbd>Ctrl/⌘</kbd><kbd>R</kbd>`,
@@ -202,7 +205,12 @@ func TestUIFoundationShortcutContract(t *testing.T) {
 		`<kbd>Ctrl/⌘</kbd><kbd>Space</kbd>`,
 		`title="Forward (F)"`,
 		`title="Drop (D)"`,
+		`id="retMaxAge"`,
+		`id="retPolicySave"`,
 	)
+	if strings.Contains(index, "github.com/Veyal/interceptor/releases") {
+		t.Error("version badge still points at old interceptor releases URL")
+	}
 	css := readUIAsset(t, "app.css")
 	requireUIContains(t, css,
 		".rep-edit:focus-visible,.notes-edit:focus-visible",
