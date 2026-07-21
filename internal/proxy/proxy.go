@@ -234,6 +234,9 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	var sni string
 	cfg := &tls.Config{
 		MinVersion: tls.VersionTLS12,
+		// Offer HTTP/2 on the forged leaf; clients that don't select it fall
+		// back to HTTP/1.1 and take the ReadRequest loop below (#19).
+		NextProtos: h2ALPN,
 		GetCertificate: func(chi *tls.ClientHelloInfo) (*tls.Certificate, error) {
 			name := chi.ServerName
 			if name == "" {
@@ -256,6 +259,14 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	defer tlsConn.Close()
 
 	host = connectUpstreamHost(host, sni)
+
+	// Client selected HTTP/2 on the MITM leg — serve it with an http2.Server
+	// that bridges each stream into the same forwarding pipeline (#19). When
+	// h2 wasn't negotiated, fall through to the HTTP/1.1 request loop.
+	if tlsConn.ConnectionState().NegotiatedProtocol == "h2" {
+		s.serveH2MITM(tlsConn, host, port)
+		return
+	}
 
 	br := bufio.NewReader(tlsConn)
 	for {
