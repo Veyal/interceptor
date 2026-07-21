@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/Veyal/interseptor/internal/checkscript"
+	"github.com/Veyal/interseptor/internal/plugin"
 	"github.com/Veyal/interseptor/internal/report"
 	"github.com/Veyal/interseptor/internal/scanner"
 	"github.com/Veyal/interseptor/internal/store"
@@ -115,6 +116,9 @@ func (h *scannerAPI) scannerRunWithLimit(w http.ResponseWriter, r *http.Request,
 	if err := h.st.ReconcileIssuesForScan(scannedFlowIDs, nil, all); err != nil {
 		httpInternalErr(w, err)
 		return
+	}
+	for _, is := range all {
+		plugin.EmitScanIssue(is.FlowID, is.Severity, is.Title) // extension hooks (best-effort)
 	}
 	h.broadcast(map[string]any{"type": "scanner.update"})
 	h.scannerIssues(w, r)

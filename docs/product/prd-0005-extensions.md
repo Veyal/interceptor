@@ -40,7 +40,9 @@ offline-first, sandboxed, and no-cgo.
 ## 5. Acceptance (issue #25)
 
 - [x] PRD (this doc)
-- [ ] Prototype one official extension
-- [ ] Docs for authors
+- [x] Prototype one official extension — `internal/plugin/annotator` (flow annotator, tested), opt-in via `INTERSEPTOR_EXT_ANNOTATE_HOSTS`.
+- [x] Docs for authors — [`docs/extensions.md`](../extensions.md) + [`examples/extensions/hello/`](../../examples/extensions/hello).
 
-Phase 1 stub lands in `internal/plugin` so later work has a package home.
+Phase 1 lands in `internal/plugin`: the `OnFlowCaptured` / `OnScanIssue` hook
+registry, the `annotator` example extension, and author docs. UI slots (Phase 2)
+and a WASM/Starlark host (Phase 3) remain open.

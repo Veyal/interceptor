@@ -23,6 +23,7 @@ import (
 
 	"github.com/Veyal/interseptor/internal/capture"
 	"github.com/Veyal/interseptor/internal/intercept"
+	"github.com/Veyal/interseptor/internal/plugin"
 	"github.com/Veyal/interseptor/internal/store"
 	"github.com/Veyal/interseptor/internal/strutil"
 	"github.com/Veyal/interseptor/internal/tlsca"
@@ -1111,6 +1112,7 @@ func (s *Server) record(flow *store.Flow) {
 		if s.events != nil {
 			s.events.FlowUpdated(flow)
 		}
+		plugin.EmitFlowCaptured(flow.ID) // extension hooks (best-effort, off the wire)
 		return
 	}
 	if !s.persistable(flow) {
@@ -1124,6 +1126,7 @@ func (s *Server) record(flow *store.Flow) {
 	if s.events != nil {
 		s.events.FlowCaptured(flow)
 	}
+	plugin.EmitFlowCaptured(flow.ID) // extension hooks (best-effort, off the wire)
 }
 
 // buildFlow constructs the request-side flow metadata from an inbound request.

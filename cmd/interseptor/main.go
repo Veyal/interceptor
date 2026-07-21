@@ -25,6 +25,7 @@ import (
 	"github.com/Veyal/interseptor/internal/control"
 	"github.com/Veyal/interseptor/internal/intercept"
 	"github.com/Veyal/interseptor/internal/mcp"
+	"github.com/Veyal/interseptor/internal/plugin/annotator"
 	"github.com/Veyal/interseptor/internal/proxy"
 	"github.com/Veyal/interseptor/internal/scope"
 	"github.com/Veyal/interseptor/internal/store"
@@ -246,6 +247,15 @@ func run() error {
 	}
 	prx := proxy.New(st, capture.New(st), ca, eng, hub)
 	prx.Scope = sc
+	// Official example extension (issue #25): opt-in via env, off by default.
+	// INTERSEPTOR_EXT_ANNOTATE_HOSTS is a comma list of host substrings; matching
+	// flows get tagged (INTERSEPTOR_EXT_ANNOTATE_TAG, default "annotated").
+	if hosts := strings.TrimSpace(os.Getenv("INTERSEPTOR_EXT_ANNOTATE_HOSTS")); hosts != "" {
+		annotator.Enable(st, annotator.Config{
+			HostContains: strings.Split(hosts, ","),
+			Tag:          os.Getenv("INTERSEPTOR_EXT_ANNOTATE_TAG"),
+		})
+	}
 	hub.Upstream = prx.SetUpstreamProxy
 	if v, ok, _ := st.GetSetting("upstream.proxy"); ok && v != "" {
 		_ = prx.SetUpstreamProxy(v)

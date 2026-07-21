@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **HTTP/2 MITM (client↔proxy leg).** The forged leaf now offers ALPN `h2`; when a client selects it, the MITM connection is served by an `http2.Server` that bridges every stream into the same intercept/forward/capture pipeline as HTTP/1.1 (`internal/proxy/http2.go`). h2-only APIs capture end-to-end; clients that stay on HTTP/1.1 are unaffected (automatic fallback). History records the client leg proto (`HTTP/2.0`). Closes #19. Docs: [`docs/http2.md`](docs/http2.md).
+- **Extension hook API + official example (#25).** `internal/plugin` gains `OnScanIssue` alongside `OnFlowCaptured`, both now emitted from the proxy/scanner. Ships the first official extension, `internal/plugin/annotator` (tags flows by host substring, opt-in via `INTERSEPTOR_EXT_ANNOTATE_HOSTS`), plus author docs [`docs/extensions.md`](docs/extensions.md) and a copy-paste starter in [`examples/extensions/hello/`](examples/extensions/hello). Closes #25.
+
 ### Changed
 - **Dev-build fallback version advanced to the published `1.6.0`.**
 
@@ -18,8 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Project vault (Tailscale-friendly backups).** New `interseptor vault` process stores full-project zip revisions under a configurable dir (default `~/.interseptor/vault`, `--keep` N). Bearer tokens (`iv_…`); bootstrap writes `vault.token`. Control plane proxies backup/list/import/merge via `/api/vault/*` and machine-wide `~/.interseptor/vault-client.json`. UI: Settings → API → Share → Project Vault. MCP: `vault_list` / `vault_backup` / `vault_import` / `vault_merge`. Docs: [`docs/vault.md`](docs/vault.md).
 - **Signed rule packs (ed25519).** `rules create --sign` writes `signature.json`; install verifies against the embedded `interseptor-1` public key and `~/.interseptor/trusted-pack-keys/*.pub`. Unsigned uploads refused unless `--allow-unsigned` / UI checkbox / `?allowUnsigned=1`. Catalog packs remain builtin-trusted. Docs: [`docs/rule-packs.md`](docs/rule-packs.md).
 - **Guided content discovery.** Map → **Discovery ▸** copy-paste feroxbuster/ffuf commands through the proxy; [`docs/content-discovery.md`](docs/content-discovery.md) (soft-404 / History policy). No built-in forced-browse engine.
-- **HTTP/2 MITM (client↔proxy leg).** The forged leaf now offers ALPN `h2`; when a client selects it, the MITM connection is served by an `http2.Server` that bridges every stream into the same intercept/forward/capture pipeline as HTTP/1.1 (`internal/proxy/http2.go`). h2-only APIs capture end-to-end; clients that stay on HTTP/1.1 are unaffected (automatic fallback). History records the client leg proto (`HTTP/2.0`). Closes #19. Docs: [`docs/http2.md`](docs/http2.md).
-- **Extension PRD + hook stub.** [`docs/product/prd-0005-extensions.md`](docs/product/prd-0005-extensions.md) and `internal/plugin` `OnFlowCaptured` registry (Phase 1).
 
 ### Changed
 - **Dev-build fallback version advanced to the published `1.5.4`.**
